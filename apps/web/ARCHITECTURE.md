@@ -24,7 +24,7 @@
 
 ## 计划中的页面模块
 
-`pages/` 将按业务域建立 `auth`、`dashboard`、`packs`、`inventory`、`market`、`listing`、`decks`、`tournaments` 与 `admin`。其中挂售确认是独立页面流程，必须读取服务端预览并二次确认；管理模块仅展示并提交具备审计的后端操作。
+`pages/` 将按业务域建立 `auth`、`dashboard`、`packs`、`inventory`、`market`、`orders`、`decks`、`tournaments` 与 `admin`。其中买单/卖单确认是独立页面流程，必须读取服务端预览并二次确认；管理模块仅展示并提交具备审计的后端操作。
 
 ## 当前迁移约定
 
