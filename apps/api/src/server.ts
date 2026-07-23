@@ -1,18 +1,12 @@
 import "dotenv/config";
 import cors from "@fastify/cors";
 import Fastify from "fastify";
-import { z } from "zod";
 import { calculateNpcQuote } from "@mtg-market/rules";
+import { loadApiConfig } from "./config/environment.js";
 import { openDatabase } from "./database.js";
 import { startTaskRunner } from "./task-runner.js";
 
-const environment = z
-  .object({
-    PORT: z.coerce.number().int().positive().default(3001),
-    SQLITE_PATH: z.string().default("./data/market-simulator.db"),
-    WEB_ORIGIN: z.string().default("http://localhost:3000")
-  })
-  .parse(process.env);
+const environment = loadApiConfig(process.env);
 
 const database = openDatabase(environment.SQLITE_PATH);
 const stopTaskRunner = startTaskRunner(database);

@@ -17,7 +17,25 @@ pnpm install
 pnpm dev
 ```
 
-复制各项目的 `.env.example` 为 `.env.local` 后再填写配置。`OPENAI_API_KEY` 仅在需要启用 AI 叙事时配置在 `apps/ai` 的服务端环境，绝不能发送给浏览器。
+首次运行前复制环境示例：
+
+```bash
+cp apps/api/.env.example apps/api/.env
+cp apps/web/.env.example apps/web/.env.local
+cp apps/ai/.env.example apps/ai/.env
+```
+
+`apps/api` 与 `apps/ai` 只在启动边界解析其服务器配置；`apps/web` 只允许 `NEXT_PUBLIC_*` 配置。`OPENAI_API_KEY` 仅在需要启用 AI 叙事时配置在 `apps/ai/.env`，绝不能发送给浏览器或写入 `apps/web`。
+
+## 环境与质量门禁
+
+开发环境使用示例中的固定端口：Web 为 `http://localhost:3000`，API 为 `http://localhost:3001`，SQLite 默认写入 `apps/api/data/`。可分别运行 `pnpm dev:web`、`pnpm dev:api` 和 `pnpm dev:ai`；根目录 `pnpm dev` 同时启动 Web 与 API。若端口已被占用，先停止占用进程；不要让 Web 自动换端口，否则它将不再匹配 API 的 `WEB_ORIGIN` CORS 白名单。
+
+测试环境设置 `APP_ENV=test`，并为 API 指定临时 `SQLITE_PATH`，不得复用开发数据库。执行 `pnpm test`、`pnpm check` 与 `pnpm format:check`。测试脚本将临时目录固定为 Linux 的 `/tmp`，避免宿主机路径泄漏到测试运行时。
+
+生产环境设置 `APP_ENV=production`、受限的 `WEB_ORIGIN` 与持久化的绝对 `SQLITE_PATH`；通过 `pnpm build` 生成产物，再分别执行 API 的 `pnpm --filter @mtg-market/api start` 和 AI 的 `pnpm --filter @mtg-market/ai start`。Web 使用 `pnpm --filter @mtg-market/web start`。真实密钥只由部署平台注入，不提交 `.env` 文件。
+
+最小启动验证：启动 API 后访问 `http://localhost:3001/health`，应返回 `{"status":"ok","storage":"sqlite-wal"}`；再启动 Web 并打开 `http://localhost:3000`，页面的“服务状态”应显示“API 正常（SQLite WAL）”。
 
 详细职责边界见[技术栈与模块职责边界.md](技术栈与模块职责边界.md)。
 

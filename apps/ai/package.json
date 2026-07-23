@@ -4,12 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "TMPDIR=/tmp tsx watch src/worker.ts",
     "build": "tsc -p tsconfig.json",
-    "check": "tsc --noEmit"
+    "start": "node dist/worker.js",
+    "check": "tsc --noEmit",
+    "test": "TMPDIR=/tmp vitest run --passWithNoTests"
   },
   "dependencies": {
     "@mtg-market/contracts": "workspace:*",
+    "dotenv": "^16.4.7",
     "zod": "^3.24.2"
   },
   "devDependencies": {

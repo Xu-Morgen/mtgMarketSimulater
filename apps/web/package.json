@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "TMPDIR=/tmp vitest run --passWithNoTests"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.66.0",

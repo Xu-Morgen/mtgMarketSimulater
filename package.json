@@ -8,9 +8,18 @@
     "dev:api": "pnpm --filter @mtg-market/api dev",
     "dev:ai": "pnpm --filter @mtg-market/ai dev",
     "build": "pnpm -r build",
-    "check": "pnpm -r check"
+    "check": "pnpm lint && pnpm -r check",
+    "lint": "eslint . --max-warnings=0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "pnpm -r test"
   },
   "devDependencies": {
-    "typescript": "^5.7.3"
+    "@eslint/js": "^9.22.0",
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.26.0",
+    "vitest": "^3.0.9"
   }
 }

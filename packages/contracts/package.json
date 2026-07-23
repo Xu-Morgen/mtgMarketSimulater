@@ -6,6 +6,7 @@
   "exports": "./src/index.ts",
   "scripts": {
     "check": "tsc --noEmit",
-    "build": "tsc --noEmit"
+    "build": "tsc --noEmit",
+    "test": "TMPDIR=/tmp vitest run --passWithNoTests"
   }
 }
