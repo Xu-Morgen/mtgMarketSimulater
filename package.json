@@ -1,0 +1,16 @@
+{
+  "name": "mtg-market-simulator",
+  "private": true,
+  "packageManager": "pnpm@8.5.1",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @mtg-market/api --filter @mtg-market/web dev",
+    "dev:web": "pnpm --filter @mtg-market/web dev",
+    "dev:api": "pnpm --filter @mtg-market/api dev",
+    "dev:ai": "pnpm --filter @mtg-market/ai dev",
+    "build": "pnpm -r build",
+    "check": "pnpm -r check"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}
