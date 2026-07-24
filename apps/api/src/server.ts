@@ -1,9 +1,12 @@
-import "dotenv/config";
+import { config as loadDotenv } from "dotenv";
+import { fileURLToPath } from "node:url";
 import { createApiApp } from "./app.js";
 import { loadApiConfig } from "./config/environment.js";
 import { openDatabase } from "./database.js";
 import { startTaskRunner } from "./task-runner.js";
 
+// `pnpm dev` 从 workspace 根目录运行；显式定位应用自身的 .env，避免依赖启动 cwd。
+loadDotenv({ path: fileURLToPath(new URL("../.env", import.meta.url)) });
 const environment = loadApiConfig(process.env);
 
 const database = openDatabase(environment.SQLITE_PATH);

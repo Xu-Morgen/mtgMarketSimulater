@@ -21,9 +21,13 @@ export const sessions = sqliteTable(
     id: text("id").primaryKey(),
     userId: text("user_id").notNull().references(() => users.id),
     refreshTokenHash: text("refresh_token_hash").notNull(),
+    /** 双提交 CSRF token 的摘要；原文只通过非 HttpOnly Cookie 交付浏览器。 */
+    csrfTokenHash: text("csrf_token_hash"),
     expiresAt: text("expires_at").notNull(),
     revokedAt: text("revoked_at"),
-    createdAt: text("created_at").notNull()
+    createdAt: text("created_at").notNull(),
+    /** 轮换链用于 refresh token 重放时撤销其后续派生会话。 */
+    rotatedFromSessionId: text("rotated_from_session_id")
   },
   (table) => [index("sessions_user_id_index").on(table.userId)]
 );

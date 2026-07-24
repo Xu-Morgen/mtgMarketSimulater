@@ -11,6 +11,7 @@ import { REQUEST_ID_HEADER, resolveRequestId } from "./shared/http/request-conte
 import { toJobDto } from "./modules/jobs/application/task-service.js";
 import { isRegisteredJobType } from "./modules/jobs/domain/job.js";
 import { SqliteJobRepository } from "./modules/jobs/infrastructure/sqlite-job-repository.js";
+import { registerAuthRoutes, requireRole } from "./modules/auth/api/auth-routes.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -73,7 +74,7 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
       )
       .run(
         randomUUID(),
-        null,
+        request.actor?.id ?? null,
         `HTTP ${request.method}`,
         "http_route",
         request.routeOptions.url,
@@ -98,6 +99,8 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
     return reply.code(500).send(failure(request.requestId, "INTERNAL_ERROR", "服务器内部错误"));
   });
 
+  await registerAuthRoutes(app, config, database);
+
   app.get("/health", async (request) => success(request.requestId, { status: "ok", database: databaseHealth(database) }));
 
   app.get("/ready", async (request, reply) => {
@@ -118,13 +121,13 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
 
   const jobs = new SqliteJobRepository(database);
 
-  app.get("/v1/admin/jobs", async (request) => {
+  app.get("/v1/admin/jobs", { preHandler: requireRole("admin") }, async (request) => {
     const query = jobListQuerySchema.parse(request.query);
     return success(request.requestId, { items: jobs.list(query.status, query.limit).map(toJobDto) });
   });
 
   // I06 接入 RBAC 后此路由由 admin 中间件保护；I05 先提供受控运行环境使用的管理协议。
-  app.post("/v1/admin/jobs", async (request, reply) => {
+  app.post("/v1/admin/jobs", { preHandler: requireRole("admin") }, async (request, reply) => {
     const key = request.headers["idempotency-key"];
     if (typeof key !== "string" || key.length < 8) return reply.code(400).send(failure(request.requestId, "IDEMPOTENCY_KEY_REQUIRED", "写请求必须携带 Idempotency-Key"));
     const body = jobEnqueueBodySchema.parse(request.body);
@@ -133,7 +136,7 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
     return reply.code(201).send(success(request.requestId, toJobDto(job)));
   });
 
-  app.post("/v1/admin/jobs/:id/retry", async (request, reply) => {
+  app.post("/v1/admin/jobs/:id/retry", { preHandler: requireRole("admin") }, async (request, reply) => {
     const key = request.headers["idempotency-key"];
     if (typeof key !== "string" || key.length < 8) return reply.code(400).send(failure(request.requestId, "IDEMPOTENCY_KEY_REQUIRED", "写请求必须携带 Idempotency-Key"));
     const params = z.object({ id: z.string().uuid() }).parse(request.params);

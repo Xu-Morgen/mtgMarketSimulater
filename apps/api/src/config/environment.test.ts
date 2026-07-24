@@ -3,23 +3,28 @@ import { loadApiConfig } from "./environment.js";
 
 describe("loadApiConfig", () => {
   it("uses safe local defaults", () => {
-    expect(loadApiConfig({})).toEqual({
+    expect(loadApiConfig({ AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters" })).toEqual({
       APP_ENV: "development",
       PORT: 3001,
       SQLITE_PATH: "./data/market-simulator.db",
       WEB_ORIGIN: "http://localhost:3000",
       CORS_ORIGINS: ["http://localhost:3000"],
-      APP_TIMEZONE: "Asia/Shanghai"
+      APP_TIMEZONE: "Asia/Shanghai",
+      AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters",
+      ACCESS_TOKEN_TTL_SECONDS: 900,
+      REFRESH_TOKEN_TTL_SECONDS: 604800
     });
   });
 
   it("rejects invalid runtime configuration before the server starts", () => {
-    expect(() => loadApiConfig({ PORT: "0" })).toThrow();
-    expect(() => loadApiConfig({ WEB_ORIGIN: "not-a-url" })).toThrow();
+    expect(() => loadApiConfig({ AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters", PORT: "0" })).toThrow();
+    expect(() => loadApiConfig({ AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters", WEB_ORIGIN: "not-a-url" })).toThrow();
+    expect(() => loadApiConfig({})).toThrow();
+    expect(() => loadApiConfig({ AUTH_JWT_SECRET: "replace-with-a-random-secret-at-least-32-characters" })).toThrow();
   });
 
   it("normalizes the explicit CORS allowlist", () => {
-    expect(loadApiConfig({ CORS_ORIGINS: "http://localhost:3000, https://admin.example.test, http://localhost:3000" }).CORS_ORIGINS).toEqual([
+    expect(loadApiConfig({ AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters", CORS_ORIGINS: "http://localhost:3000, https://admin.example.test, http://localhost:3000" }).CORS_ORIGINS).toEqual([
       "http://localhost:3000",
       "https://admin.example.test"
     ]);

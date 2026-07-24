@@ -18,6 +18,13 @@
 - 当前 OpenAPI 3.1 文档源为 `src/openapi.ts`，运行时可读取 `GET /openapi.json`；对应集成测试检查 OpenAPI 版本和已公开路由，新增公开路由必须同步更新此文档。
 - API Pino 日志会脱敏授权头、Cookie、API key、密码和 token。写路由审计仅保存可信调用者（认证完成前为空）、幂等键、路由实体、状态码和请求 ID，禁止保存原始请求体或凭据。
 
+## I06 认证与会话协议
+
+- `POST /v1/auth/register` 和 `POST /v1/auth/login` 接收 email、password（最少 12 位）及注册所需的 displayName，返回短期 Bearer access token 与最小用户信息；密码或账户不存在统一返回 `401 AUTHENTICATION_INVALID`，避免枚举账户。
+- `POST /v1/auth/refresh` 与 `POST /v1/auth/logout` 从 `mtg_refresh` HttpOnly Cookie 读取 refresh token，并强制校验同路径 `mtg_csrf` Cookie 对应的 `X-CSRF-Token`。成功刷新会立即撤销旧 token 并写入新会话；旧 token 重放返回 `401` 且撤销该轮换链。登出会撤销会话并清除两种 Cookie。
+- `GET /v1/auth/session` 和受保护端点须传 `Authorization: Bearer <access token>`。无效、过期或已撤销会话返回 `401 AUTHENTICATION_INVALID`；角色不足返回 `403 AUTHORIZATION_DENIED`。`/v1/admin/*` 全部要求 admin。
+- Cookie 固定 `Path=/v1/auth`、`HttpOnly`（仅 refresh）、`SameSite=Strict`；生产环境包含 `Secure`。认证端点按来源 IP 进行基础每分钟滑动窗口限制，超限返回 `429 RATE_LIMITED`。配置必须提供至少 32 字符的 `AUTH_JWT_SECRET`，不得提交真实值。
+
 ## I05 管理任务协议
 
 - `GET /v1/admin/jobs?status=&limit=` 返回任务状态与最近错误摘要；`POST /v1/admin/jobs` 以 `(type, uniqueKey)` 去重投递预注册任务；`POST /v1/admin/jobs/{id}/retry` 将 `failed`/`dead` 任务重新置为 pending。

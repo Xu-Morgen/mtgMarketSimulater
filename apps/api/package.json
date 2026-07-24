@@ -15,6 +15,7 @@
     "@mtg-market/contracts": "workspace:*",
     "@mtg-market/database": "workspace:*",
     "@mtg-market/rules": "workspace:*",
+    "argon2": "^0.45.1",
     "better-sqlite3": "^11.8.1",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",

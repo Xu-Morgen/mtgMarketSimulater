@@ -14,8 +14,16 @@ async function createTestApp() {
   const directory = mkdtempSync(join(tmpdir(), "mtg-api-"));
   directories.push(directory);
   const database = openSqliteDatabase(join(directory, "test.db"));
-  const app = await createApiApp(loadApiConfig({ APP_ENV: "test", SQLITE_PATH: join(directory, "test.db") }), database);
+  const app = await createApiApp(loadApiConfig({ APP_ENV: "test", SQLITE_PATH: join(directory, "test.db"), AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters" }), database);
   return { app, database };
+}
+
+async function adminAuthorization(app: Awaited<ReturnType<typeof createApiApp>>, database: ReturnType<typeof openSqliteDatabase>): Promise<string> {
+  const email = "admin@example.test";
+  await app.inject({ method: "POST", url: "/v1/auth/register", payload: { email, displayName: "管理员", password: "correct-horse-battery-staple" } });
+  database.prepare("UPDATE users SET role = 'admin' WHERE email = ?").run(email);
+  const login = await app.inject({ method: "POST", url: "/v1/auth/login", payload: { email, password: "correct-horse-battery-staple" } });
+  return `Bearer ${login.json().data.accessToken as string}`;
 }
 
 describe("API cross-cutting HTTP boundary", () => {
@@ -76,14 +84,15 @@ describe("API cross-cutting HTTP boundary", () => {
 
   it("provides task enqueue, query, unique-key de-duplication and manual retry", async () => {
     const { app, database } = await createTestApp();
+    const authorization = await adminAuthorization(app, database);
     const body = { type: "prices.sync", payload: { sourceVersion: "test" }, uniqueKey: "2026-07-24" };
-    const missingKey = await app.inject({ method: "POST", url: "/v1/admin/jobs", payload: body });
-    const created = await app.inject({ method: "POST", url: "/v1/admin/jobs", headers: { "idempotency-key": "idem-job-123" }, payload: body });
-    const duplicate = await app.inject({ method: "POST", url: "/v1/admin/jobs", headers: { "idempotency-key": "idem-job-456" }, payload: body });
+    const missingKey = await app.inject({ method: "POST", url: "/v1/admin/jobs", headers: { authorization }, payload: body });
+    const created = await app.inject({ method: "POST", url: "/v1/admin/jobs", headers: { authorization, "idempotency-key": "idem-job-123" }, payload: body });
+    const duplicate = await app.inject({ method: "POST", url: "/v1/admin/jobs", headers: { authorization, "idempotency-key": "idem-job-456" }, payload: body });
     const id = created.json().data.id as string;
     database.prepare("UPDATE jobs SET status = 'dead' WHERE id = ?").run(id);
-    const retried = await app.inject({ method: "POST", url: `/v1/admin/jobs/${id}/retry`, headers: { "idempotency-key": "idem-retry-123" } });
-    const listed = await app.inject({ method: "GET", url: "/v1/admin/jobs?status=pending" });
+    const retried = await app.inject({ method: "POST", url: `/v1/admin/jobs/${id}/retry`, headers: { authorization, "idempotency-key": "idem-retry-123" } });
+    const listed = await app.inject({ method: "GET", url: "/v1/admin/jobs?status=pending", headers: { authorization } });
 
     expect(missingKey.json()).toMatchObject({ ok: false, error: { code: "IDEMPOTENCY_KEY_REQUIRED" } });
     expect(created.statusCode).toBe(201);
