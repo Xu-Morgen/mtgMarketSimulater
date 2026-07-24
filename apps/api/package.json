@@ -13,6 +13,7 @@
   "dependencies": {
     "@fastify/cors": "^11.0.0",
     "@mtg-market/contracts": "workspace:*",
+    "@mtg-market/database": "workspace:*",
     "@mtg-market/rules": "workspace:*",
     "better-sqlite3": "^11.8.1",
     "dotenv": "^16.4.7",
