@@ -62,6 +62,18 @@ export const accounts = sqliteTable(
   (table) => [uniqueIndex("accounts_user_currency_unique").on(table.userId, table.currency)]
 );
 
+/** 每位用户唯一的服务端游戏存档；经济起点由关联规则版本与账本共同证明。 */
+export const gameArchives = sqliteTable(
+  "game_archives",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    initialFundingRuleVersion: text("initial_funding_rule_version").notNull(),
+    createdAt: text("created_at").notNull()
+  },
+  (table) => [uniqueIndex("game_archives_user_unique").on(table.userId), index("game_archives_user_id_index").on(table.userId)]
+);
+
 export const ledgerEntries = sqliteTable(
   "ledger_entries",
   {

@@ -25,6 +25,12 @@
 - `GET /v1/auth/session` 和受保护端点须传 `Authorization: Bearer <access token>`。无效、过期或已撤销会话返回 `401 AUTHENTICATION_INVALID`；角色不足返回 `403 AUTHORIZATION_DENIED`。`/v1/admin/*` 全部要求 admin。
 - Cookie 固定 `Path=/v1/auth`、`HttpOnly`（仅 refresh）、`SameSite=Strict`；生产环境包含 `Secure`。认证端点按来源 IP 进行基础每分钟滑动窗口限制，超限返回 `429 RATE_LIMITED`。配置必须提供至少 32 字符的 `AUTH_JWT_SECRET`，不得提交真实值。
 
+## I07B 存档与账本协议
+
+- `POST /v1/archive` 要求有效 Bearer 会话、空对象请求体与格式正确的 `Idempotency-Key`。首次调用在单一短事务创建唯一存档、`GAME_CREDIT` 账户和 `initial_funding` credit 流水，返回 `201`；同一键重放返回首次完整响应（`200`），同键不同请求指纹返回 `409 IDEMPOTENCY_CONFLICT`，处理中返回 `409 IDEMPOTENCY_IN_PROGRESS`。
+- `GET /v1/archive` 返回存档摘要、总额/可用额/冻结额及 `netWorth: null` 占位；`GET /v1/account` 返回余额；`GET /v1/ledger?cursor=&limit=` 仅返回当前用户的不可变账本流水。未建档时前两者返回 `404 RESOURCE_NOT_FOUND`，空账本列表保持 `200`。
+- 金额始终为 `GAME_CREDIT` 的整数最小单位。账户不提供直接修改路由；未来买单、保证金等资金操作必须调用 users application 的冻结、释放或扣除原语，并将业务实体与 `fund_holds` 关联。
+
 ## I05 管理任务协议
 
 - `GET /v1/admin/jobs?status=&limit=` 返回任务状态与最近错误摘要；`POST /v1/admin/jobs` 以 `(type, uniqueKey)` 去重投递预注册任务；`POST /v1/admin/jobs/{id}/retry` 将 `failed`/`dead` 任务重新置为 pending。

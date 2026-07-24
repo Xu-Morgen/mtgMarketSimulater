@@ -14,8 +14,10 @@ describe("database foundation", () => {
     paths.push(directory);
     const database = openSqliteDatabase(join(directory, "test.db"));
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
-    expect(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get()).toEqual({ count: 5 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get()).toEqual({ count: 6 });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'accounts'").get()).toEqual({ name: "accounts" });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'game_archives'").get()).toEqual({ name: "game_archives" });
+    expect(database.prepare("SELECT version FROM rule_versions WHERE rule_set = 'initial-funds'").get()).toEqual({ version: "v1" });
     expect(database.prepare("SELECT email, display_name, role, password_hash FROM users WHERE email = 'admin@local.test'").get()).toMatchObject({ email: "admin@local.test", display_name: "admin", role: "admin", password_hash: expect.stringMatching(/^\$argon2id\$/) });
     database.close();
   });

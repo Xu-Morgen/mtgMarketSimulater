@@ -136,6 +136,16 @@ export interface AccountBalanceDto {
   updatedAt: string;
 }
 
+export interface GameArchiveSummaryDto {
+  id: string;
+  userId: string;
+  initialFundingRuleVersion: string;
+  createdAt: string;
+  balance: AccountBalanceDto;
+  /** I07 的占位字段；后续库存与价格快照完成后才由服务端填充实际净资产。 */
+  netWorth: Money | null;
+}
+
 export interface QuoteDto {
   skuId: string;
   quoteVersion: string;

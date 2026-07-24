@@ -12,6 +12,7 @@ import { toJobDto } from "./modules/jobs/application/task-service.js";
 import { isRegisteredJobType } from "./modules/jobs/domain/job.js";
 import { SqliteJobRepository } from "./modules/jobs/infrastructure/sqlite-job-repository.js";
 import { registerAuthRoutes, requireRole } from "./modules/auth/api/auth-routes.js";
+import { registerUserRoutes } from "./modules/users/api/user-routes.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -100,6 +101,7 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
   });
 
   await registerAuthRoutes(app, config, database);
+  await registerUserRoutes(app, database);
 
   app.get("/health", async (request) => success(request.requestId, { status: "ok", database: databaseHealth(database) }));
 
