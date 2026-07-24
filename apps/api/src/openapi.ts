@@ -2,7 +2,7 @@
  * I04 的最小 OpenAPI 文档源。端点实现新增或变更时必须在此同步；测试会校验文档的
  * 基本结构及公开路由集合，防止 HTTP 协议只存在于实现中。
  */
-export const publicApiPaths = ["/health", "/ready", "/openapi.json", "/v1/market/quote-preview", "/v1/auth/register", "/v1/auth/login", "/v1/auth/refresh", "/v1/auth/logout", "/v1/auth/session", "/v1/archive", "/v1/account", "/v1/ledger", "/v1/admin/jobs", "/v1/admin/jobs/{id}/retry"] as const;
+export const publicApiPaths = ["/health", "/ready", "/openapi.json", "/v1/market/quote-preview", "/v1/auth/register", "/v1/auth/login", "/v1/auth/refresh", "/v1/auth/logout", "/v1/auth/session", "/v1/archive", "/v1/account", "/v1/ledger", "/v1/catalog/cards", "/v1/catalog/cards/{skuId}", "/v1/admin/jobs", "/v1/admin/jobs/{id}/retry"] as const;
 
 export const openApiDocument = {
   openapi: "3.1.0",
@@ -25,6 +25,8 @@ export const openApiDocument = {
     },
     "/v1/account": { get: { summary: "查询账户总额、可用额与冻结额", responses: { "200": { description: "余额" }, "404": { description: "尚未创建账户" } } } },
     "/v1/ledger": { get: { summary: "分页查询当前用户不可变账本流水", responses: { "200": { description: "账本分页" } } } },
+    "/v1/catalog/cards": { get: { summary: "按印刷 SKU 分页查询本地卡牌目录", responses: { "200": { description: "目录分页" }, "401": { description: "认证无效或过期" } } } },
+    "/v1/catalog/cards/{skuId}": { get: { summary: "查询单个印刷 SKU 的目录详情", responses: { "200": { description: "SKU 详情" }, "404": { description: "SKU 不存在" } } } },
     "/v1/admin/jobs": {
       get: { summary: "管理任务查询", responses: { "200": { description: "任务列表" } } },
       post: { summary: "投递管理任务", responses: { "201": { description: "任务已投递或去重返回" }, "400": { description: "缺少幂等键或参数无效" } } }

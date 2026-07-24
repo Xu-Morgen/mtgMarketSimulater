@@ -194,3 +194,30 @@ export const ruleVersions = sqliteTable(
   },
   (table) => [uniqueIndex("rule_versions_set_version_unique").on(table.ruleSet, table.version)]
 );
+
+/** I08B 目录：印刷与工艺共同决定可交易资产，价格快照不在此层保存。 */
+export const cardSets = sqliteTable(
+  "card_sets",
+  { id: text("id").primaryKey(), code: text("code").notNull(), name: text("name").notNull(), releasedAt: text("released_at"), source: text("source").notNull(), sourceReference: text("source_reference"), createdAt: text("created_at").notNull() },
+  (table) => [uniqueIndex("card_sets_code_unique").on(table.code)]
+);
+
+export const cardPrintings = sqliteTable(
+  "card_printings",
+  {
+    id: text("id").primaryKey(), setId: text("set_id").notNull().references(() => cardSets.id), name: text("name").notNull(), collectorNumber: text("collector_number").notNull(), scryfallId: text("scryfall_id"), oracleText: text("oracle_text"), rarity: text("rarity").notNull(), legalitiesJson: text("legalities_json").notNull(), artist: text("artist"), source: text("source").notNull(), sourceReference: text("source_reference"), isManualException: integer("is_manual_exception", { mode: "boolean" }).notNull().default(false), createdAt: text("created_at").notNull(), updatedAt: text("updated_at").notNull()
+  },
+  (table) => [uniqueIndex("card_printings_set_collector_unique").on(table.setId, table.collectorNumber), index("card_printings_name_index").on(table.name)]
+);
+
+export const cardSkus = sqliteTable(
+  "card_skus",
+  { id: text("id").primaryKey(), printingId: text("printing_id").notNull().references(() => cardPrintings.id), finish: text("finish").notNull(), tradable: integer("tradable", { mode: "boolean" }).notNull().default(false), source: text("source").notNull(), sourceReference: text("source_reference"), isManualException: integer("is_manual_exception", { mode: "boolean" }).notNull().default(false), createdAt: text("created_at").notNull(), updatedAt: text("updated_at").notNull() },
+  (table) => [uniqueIndex("card_skus_printing_finish_unique").on(table.printingId, table.finish), index("card_skus_printing_index").on(table.printingId)]
+);
+
+export const cardImageCache = sqliteTable(
+  "card_image_cache",
+  { id: text("id").primaryKey(), printingId: text("printing_id").notNull().references(() => cardPrintings.id), sourceUrl: text("source_url"), cachePath: text("cache_path"), status: text("status").notNull(), checksum: text("checksum"), cachedAt: text("cached_at"), failureReason: text("failure_reason"), updatedAt: text("updated_at").notNull() },
+  (table) => [uniqueIndex("card_image_cache_printing_unique").on(table.printingId)]
+);

@@ -11,6 +11,8 @@ export type CurrencyCode = "EUR" | "GAME_CREDIT";
 export type PriceSource = "mtgjson-cardmarket" | "manual-test";
 export type Role = "player" | "admin";
 export type CardFinish = "nonfoil" | "foil" | "etched";
+/** 目录资料的来源；人工例外不得伪装成外部同步资料或价格。 */
+export type CatalogSource = "scryfall" | "manual-test";
 export type InventoryLockReason = "order" | "tournament";
 export type OrderSide = "buy" | "sell";
 export type OrderStatus =
@@ -115,6 +117,29 @@ export interface CardSku {
   finish: CardFinish;
   imagePath: string | null;
   tradable: boolean;
+}
+
+/** 以印刷版本加工艺为唯一资产粒度的只读目录条目。 */
+export interface CatalogSkuDto extends CardSku {
+  printingId: string;
+  setName: string;
+  rarity: string;
+  legalities: Record<string, string>;
+  source: CatalogSource;
+  sourceReference: string | null;
+  isManualException: boolean;
+  image: {
+    path: string | null;
+    sourceUrl: string | null;
+    status: "missing" | "cached" | "failed";
+    cachedAt: string | null;
+  };
+}
+
+export interface CatalogSkuDetailDto extends CatalogSkuDto {
+  oracleText: string | null;
+  artist: string | null;
+  releasedAt: string | null;
 }
 
 export interface InventoryDto {

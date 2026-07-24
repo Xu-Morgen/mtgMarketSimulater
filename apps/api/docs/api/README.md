@@ -31,6 +31,13 @@
 - `GET /v1/archive` 返回存档摘要、总额/可用额/冻结额及 `netWorth: null` 占位；`GET /v1/account` 返回余额；`GET /v1/ledger?cursor=&limit=` 仅返回当前用户的不可变账本流水。未建档时前两者返回 `404 RESOURCE_NOT_FOUND`，空账本列表保持 `200`。
 - 金额始终为 `GAME_CREDIT` 的整数最小单位。账户不提供直接修改路由；未来买单、保证金等资金操作必须调用 users application 的冻结、释放或扣除原语，并将业务实体与 `fund_holds` 关联。
 
+## I08B 卡牌目录协议
+
+- `GET /v1/catalog/cards` 要求有效 Bearer 会话（玩家和管理员均可读取），支持 `query`、`setCode`、`rarity`、`finish`、`cursor`、`limit` 筛选和服务端分页。目录返回的每一项均为一个印刷 SKU，绝不按卡名聚合。
+- `GET /v1/catalog/cards/{skuId}` 返回该 SKU 的印刷资料、合法性、来源及图像缓存元数据；不存在时返回 `404 RESOURCE_NOT_FOUND`。筛选参数非法时返回 `400 VALIDATION_FAILED`，未认证时返回 `401 AUTHENTICATION_INVALID`。
+- `source` 为 `scryfall` 或 `manual-test`；后者必须同时带 `isManualException: true`，用于测试卡或明确运营例外，绝不能表示 Cardmarket 外部参考价。`finish` 固定为 `nonfoil`、`foil` 或 `etched`，并与 `printingId` 共同唯一。
+- 目录 API 仅读取本地 SQLite 与本地图片缓存元数据，不会从浏览器或 API 请求 Scryfall。I09 才能通过受控后台任务写入外部同步资料。
+
 ## I05 管理任务协议
 
 - `GET /v1/admin/jobs?status=&limit=` 返回任务状态与最近错误摘要；`POST /v1/admin/jobs` 以 `(type, uniqueKey)` 去重投递预注册任务；`POST /v1/admin/jobs/{id}/retry` 将 `failed`/`dead` 任务重新置为 pending。
