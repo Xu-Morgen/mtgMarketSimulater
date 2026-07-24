@@ -103,7 +103,7 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
 
   await registerAuthRoutes(app, config, database);
   await registerUserRoutes(app, database);
-  await registerCatalogRoutes(app, database);
+  await registerCatalogRoutes(app, config, database);
 
   app.get("/health", async (request) => success(request.requestId, { status: "ok", database: databaseHealth(database) }));
 

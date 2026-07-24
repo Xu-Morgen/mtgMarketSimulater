@@ -14,7 +14,8 @@ describe("database foundation", () => {
     paths.push(directory);
     const database = openSqliteDatabase(join(directory, "test.db"));
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
-    expect(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get()).toEqual({ count: 7 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get()).toEqual({ count: 8 });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'catalog_sync_runs'").get()).toEqual({ name: "catalog_sync_runs" });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'accounts'").get()).toEqual({ name: "accounts" });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'game_archives'").get()).toEqual({ name: "game_archives" });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'card_skus'").get()).toEqual({ name: "card_skus" });

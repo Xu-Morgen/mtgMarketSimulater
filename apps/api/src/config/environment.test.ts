@@ -12,7 +12,10 @@ describe("loadApiConfig", () => {
       APP_TIMEZONE: "Asia/Shanghai",
       AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters",
       ACCESS_TOKEN_TTL_SECONDS: 900,
-      REFRESH_TOKEN_TTL_SECONDS: 604800
+      REFRESH_TOKEN_TTL_SECONDS: 604800,
+      CATALOG_DATA_DIR: "./data/catalog",
+      SCRYFALL_BULK_ENDPOINT: "https://api.scryfall.com/bulk-data/default-cards",
+      CATALOG_ENABLED_SET_CODES: []
     });
   });
 
@@ -28,5 +31,9 @@ describe("loadApiConfig", () => {
       "http://localhost:3000",
       "https://admin.example.test"
     ]);
+  });
+
+  it("normalizes enabled Scryfall series without defaulting to a full catalog import", () => {
+    expect(loadApiConfig({ AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters", CATALOG_ENABLED_SET_CODES: "one, ONE, bro" }).CATALOG_ENABLED_SET_CODES).toEqual(["ONE", "BRO"]);
   });
 });

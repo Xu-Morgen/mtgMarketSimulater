@@ -1,6 +1,8 @@
 import type Database from "better-sqlite3";
 import { TaskRegistry, TaskWorker } from "./modules/jobs/application/task-service.js";
 import { SqliteJobRepository } from "./modules/jobs/infrastructure/sqlite-job-repository.js";
+import type { ApiConfig } from "./config/environment.js";
+import { createCatalogSyncService } from "./modules/catalog/api/catalog-routes.js";
 
 export interface TaskRunner {
   stop(): Promise<void>;
@@ -27,4 +29,11 @@ export function startTaskRunner(database: Database.Database, intervalMs = 1_000,
       await inFlight;
     }
   };
+}
+
+/** 业务处理器在应用层注册；jobs 模块只负责领取、重试与运行历史。 */
+export function createTaskRegistry(config: ApiConfig, database: Database.Database): TaskRegistry {
+  const registry = new TaskRegistry(); const catalog = createCatalogSyncService(config, database);
+  registry.register("catalog.sync", async (payload) => catalog.synchronize((payload ?? {}) as { cacheImageScryfallIds?: string[]; expectedChecksumSha256?: string }));
+  return registry;
 }

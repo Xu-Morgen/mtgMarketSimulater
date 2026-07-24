@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { basename } from "node:path";
 import type { CatalogSkuDetailDto, CatalogSkuDto, Page } from "@mtg-market/contracts";
 
 type CatalogRow = {
@@ -11,14 +12,17 @@ type CatalogRow = {
 
 export type CatalogFilters = { query?: string | undefined; setCode?: string | undefined; rarity?: string | undefined; finish?: "nonfoil" | "foil" | "etched" | undefined; cursor?: string | undefined; limit: number };
 
+function publicImagePath(cachePath: string | null): string | null {
+  return cachePath ? `/v1/catalog/images/${basename(cachePath)}` : null;
+}
 function image(row: CatalogRow): CatalogSkuDto["image"] {
-  return { path: row.image_path, sourceUrl: row.image_source_url, status: row.image_status ?? "missing", cachedAt: row.image_cached_at };
+  return { path: publicImagePath(row.image_path), sourceUrl: row.image_source_url, status: row.image_status ?? "missing", cachedAt: row.image_cached_at };
 }
 function item(row: CatalogRow): CatalogSkuDto {
   return {
     id: row.sku_id, printingId: row.printing_id, scryfallId: row.scryfall_id ?? `manual:${row.printing_id}`, name: row.name,
     setCode: row.set_code, setName: row.set_name, collectorNumber: row.collector_number, finish: row.finish,
-    rarity: row.rarity, legalities: JSON.parse(row.legalities_json) as Record<string, string>, imagePath: row.image_path,
+    rarity: row.rarity, legalities: JSON.parse(row.legalities_json) as Record<string, string>, imagePath: publicImagePath(row.image_path),
     tradable: row.tradable === 1, source: row.sku_source, sourceReference: row.sku_source_reference,
     isManualException: row.sku_manual_exception === 1, image: image(row)
   };

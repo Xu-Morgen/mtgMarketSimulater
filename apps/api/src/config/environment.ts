@@ -10,11 +10,16 @@ const environmentSchema = z.object({
   AUTH_JWT_SECRET: z.string().min(32).refine((value) => value !== "replace-with-a-random-secret-at-least-32-characters", "AUTH_JWT_SECRET 必须替换示例值"),
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
   REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().min(3_600).max(2_592_000).default(604_800)
+  ,CATALOG_DATA_DIR: z.string().trim().min(1).default("./data/catalog")
+  ,SCRYFALL_BULK_ENDPOINT: z.string().url().default("https://api.scryfall.com/bulk-data/default-cards")
+  ,CATALOG_ENABLED_SET_CODES: z.string().trim().optional()
 });
 
-export type ApiConfig = Omit<z.infer<typeof environmentSchema>, "CORS_ORIGINS"> & {
+export type ApiConfig = Omit<z.infer<typeof environmentSchema>, "CORS_ORIGINS" | "CATALOG_ENABLED_SET_CODES"> & {
   /** 明确白名单；未列出的浏览器 Origin 不会得到 CORS 响应头。 */
   CORS_ORIGINS: string[];
+  /** 空数组表示不导入任何系列，避免意外把完整 Bulk Data 写入小型部署。 */
+  CATALOG_ENABLED_SET_CODES: string[];
 };
 
 /**
@@ -27,5 +32,6 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv): ApiConfig {
   const origins = configuredOrigins?.length ? configuredOrigins : [parsed.WEB_ORIGIN];
   const normalizedOrigins = origins.map((origin) => z.string().url().parse(origin));
 
-  return { ...parsed, CORS_ORIGINS: [...new Set(normalizedOrigins)] };
+  const enabledSets = parsed.CATALOG_ENABLED_SET_CODES?.split(",").map((code) => code.trim().toUpperCase()).filter(Boolean) ?? [];
+  return { ...parsed, CORS_ORIGINS: [...new Set(normalizedOrigins)], CATALOG_ENABLED_SET_CODES: [...new Set(enabledSets)] };
 }

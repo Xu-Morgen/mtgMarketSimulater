@@ -32,6 +32,12 @@ async function authorization(app: Awaited<ReturnType<typeof createApiApp>>) {
   const response = await app.inject({ method: "POST", url: "/v1/auth/register", payload: { email: "catalog@example.test", displayName: "目录玩家", password: "correct-horse-battery-staple" } });
   return `Bearer ${response.json().data.accessToken as string}`;
 }
+async function adminAuthorization(app: Awaited<ReturnType<typeof createApiApp>>, database: ReturnType<typeof openSqliteDatabase>) {
+  await app.inject({ method: "POST", url: "/v1/auth/register", payload: { email: "catalog-admin@example.test", displayName: "目录管理员", password: "correct-horse-battery-staple" } });
+  database.prepare("UPDATE users SET role = 'admin' WHERE email = ?").run("catalog-admin@example.test");
+  const login = await app.inject({ method: "POST", url: "/v1/auth/login", payload: { email: "catalog-admin@example.test", password: "correct-horse-battery-staple" } });
+  return `Bearer ${login.json().data.accessToken as string}`;
+}
 
 describe("I08B 卡牌目录与 SKU API", () => {
   it("按 SKU 保留同名不同印刷与工艺，并支持服务端分页和筛选", async () => {
@@ -50,7 +56,7 @@ describe("I08B 卡牌目录与 SKU API", () => {
     const { app, database } = await createTestApp(); seedCatalog(database); const token = await authorization(app);
     const cached = await app.inject({ method: "GET", url: "/v1/catalog/cards/30000000-0000-4000-8000-000000000001", headers: { authorization: token } });
     const manual = await app.inject({ method: "GET", url: "/v1/catalog/cards/30000000-0000-4000-8000-000000000003", headers: { authorization: token } });
-    expect(cached.json()).toMatchObject({ ok: true, data: { sku: { legalities: { standard: "not_legal" }, image: { path: "catalog/one-10.jpg", status: "cached" } } } });
+    expect(cached.json()).toMatchObject({ ok: true, data: { sku: { legalities: { standard: "not_legal" }, image: { path: "/v1/catalog/images/one-10.jpg", status: "cached" } } } });
     expect(manual.json()).toMatchObject({ ok: true, data: { sku: { source: "manual-test", isManualException: true, tradable: false, image: { status: "missing" } } } });
     await app.close(); database.close();
   });
@@ -63,6 +69,18 @@ describe("I08B 卡牌目录与 SKU API", () => {
     expect(anonymous.json()).toMatchObject({ ok: false, error: { code: "AUTHENTICATION_INVALID" } });
     expect(invalid.json()).toMatchObject({ ok: false, error: { code: "VALIDATION_FAILED" } });
     expect(missing.json()).toMatchObject({ ok: false, error: { code: "RESOURCE_NOT_FOUND" } });
+    await app.close(); database.close();
+  });
+
+  it("只允许管理员查询和幂等投递目录同步任务", async () => {
+    const { app, database } = await createTestApp(); const player = await authorization(app); const admin = await adminAuthorization(app, database);
+    const denied = await app.inject({ method: "GET", url: "/v1/admin/catalog/sync", headers: { authorization: player } });
+    const missingKey = await app.inject({ method: "POST", url: "/v1/admin/catalog/sync", headers: { authorization: admin }, payload: {} });
+    const first = await app.inject({ method: "POST", url: "/v1/admin/catalog/sync", headers: { authorization: admin, "idempotency-key": "catalog-sync-key-123" }, payload: {} });
+    const replay = await app.inject({ method: "POST", url: "/v1/admin/catalog/sync", headers: { authorization: admin, "idempotency-key": "catalog-sync-key-123" }, payload: {} });
+    expect(denied.json()).toMatchObject({ ok: false, error: { code: "AUTHORIZATION_DENIED" } });
+    expect(missingKey.json()).toMatchObject({ ok: false, error: { code: "IDEMPOTENCY_KEY_REQUIRED" } });
+    expect(first.json()).toMatchObject({ ok: true, data: { type: "catalog.sync", status: "pending" } }); expect(replay.json().data.id).toBe(first.json().data.id);
     await app.close(); database.close();
   });
 });

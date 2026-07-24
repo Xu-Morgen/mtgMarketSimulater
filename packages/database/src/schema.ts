@@ -221,3 +221,12 @@ export const cardImageCache = sqliteTable(
   { id: text("id").primaryKey(), printingId: text("printing_id").notNull().references(() => cardPrintings.id), sourceUrl: text("source_url"), cachePath: text("cache_path"), status: text("status").notNull(), checksum: text("checksum"), cachedAt: text("cached_at"), failureReason: text("failure_reason"), updatedAt: text("updated_at").notNull() },
   (table) => [uniqueIndex("card_image_cache_printing_unique").on(table.printingId)]
 );
+
+/** I09B：同步运行记录只追加；state 指向最近一次完整、可用的目录版本。 */
+export const catalogSyncRuns = sqliteTable(
+  "catalog_sync_runs",
+  { id: text("id").primaryKey(), source: text("source").notNull(), sourceVersion: text("source_version").notNull(), sourceUri: text("source_uri").notNull(), checksumSha256: text("checksum_sha256").notNull(), enabledSetsJson: text("enabled_sets_json").notNull(), status: text("status").notNull(), importedPrintings: integer("imported_printings").notNull(), importedSkus: integer("imported_skus").notNull(), cachedImages: integer("cached_images").notNull(), diffJson: text("diff_json").notNull(), failureReason: text("failure_reason"), startedAt: text("started_at").notNull(), completedAt: text("completed_at") },
+  (table) => [index("catalog_sync_runs_status_started_index").on(table.status, table.startedAt)]
+);
+
+export const catalogSyncState = sqliteTable("catalog_sync_state", { singleton: integer("singleton").primaryKey(), latestSuccessfulRunId: text("latest_successful_run_id").references(() => catalogSyncRuns.id), updatedAt: text("updated_at").notNull() });

@@ -14,6 +14,13 @@
 - `GET /v1/admin/jobs` 查询任务，`POST /v1/admin/jobs` 投递去重任务，`POST /v1/admin/jobs/{id}/retry` 仅重试 `failed` 或 `dead`。两个写接口要求 `Idempotency-Key`；I06B 上线前该管理接口只应在受控的内网运维环境使用，随后必须接入 admin RBAC。
 - 排障先查看任务的 `last_error` 与 `job_runs` 按 attempt 的运行历史。不要直接修改 `jobs` 状态；确认外部依赖恢复后使用手动重试。租约频繁过期应先检查处理器超时和进程终止原因。
 
+## I09B Scryfall 目录同步
+
+- 首次导入前必须显式设置 `CATALOG_ENABLED_SET_CODES`（英文逗号分隔、系列代码大写）和持久化的 `CATALOG_DATA_DIR`；空系列配置会令任务失败而不会导入完整 Bulk Data。`SCRYFALL_BULK_ENDPOINT` 默认指向 Scryfall `default-cards` 元数据端点，只允许由 API 进程后台任务访问。
+- 管理员通过 `POST /v1/admin/catalog/sync` 携带 `Idempotency-Key` 投递任务，再以 `GET /v1/admin/catalog/sync` 或通用任务 API 观察状态。排障必须查看 `catalog_sync_runs` 的版本、SHA-256、差异和失败摘要以及 `job_runs`；不得手工删除目录行、图片或修改任务状态。
+- 同步会先下载并校验整个 Bulk 文件，再在短事务中替换 Scryfall 来源目录。任何 checksum、JSON 截断、Schema、重复印刷、图片或 SQLite 错误均保留最近成功目录和 `catalog_sync_state` 指针。修复外部问题后使用新的幂等键重新投递；不要将外部 URL 交给浏览器重试。
+- 卡图只在任务 payload 明确列出的 Scryfall ID 上下载，并写入 `CATALOG_DATA_DIR/images`。持久化卷必须包含该目录；读取仅通过受保护的本地 `/v1/catalog/images/:imageName` 路径，禁止使用目录路径或 Scryfall 图片 URL 作公开静态根。
+
 ## I30B 管理活动与玩家补偿（计划）
 
 以下是 I30B 实现时必须细化为可执行手册的边界；当前尚未实现，不授权通过数据库手工操作替代后台能力。
