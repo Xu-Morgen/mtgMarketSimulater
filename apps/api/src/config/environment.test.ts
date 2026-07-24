@@ -8,6 +8,7 @@ describe("loadApiConfig", () => {
       PORT: 3001,
       SQLITE_PATH: "./data/market-simulator.db",
       WEB_ORIGIN: "http://localhost:3000",
+      CORS_ORIGINS: ["http://localhost:3000"],
       APP_TIMEZONE: "Asia/Shanghai"
     });
   });
@@ -15,5 +16,12 @@ describe("loadApiConfig", () => {
   it("rejects invalid runtime configuration before the server starts", () => {
     expect(() => loadApiConfig({ PORT: "0" })).toThrow();
     expect(() => loadApiConfig({ WEB_ORIGIN: "not-a-url" })).toThrow();
+  });
+
+  it("normalizes the explicit CORS allowlist", () => {
+    expect(loadApiConfig({ CORS_ORIGINS: "http://localhost:3000, https://admin.example.test, http://localhost:3000" }).CORS_ORIGINS).toEqual([
+      "http://localhost:3000",
+      "https://admin.example.test"
+    ]);
   });
 });

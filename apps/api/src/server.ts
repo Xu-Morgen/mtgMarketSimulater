@@ -1,7 +1,5 @@
 import "dotenv/config";
-import cors from "@fastify/cors";
-import Fastify from "fastify";
-import { calculateNpcQuote } from "@mtg-market/rules";
+import { createApiApp } from "./app.js";
 import { loadApiConfig } from "./config/environment.js";
 import { openDatabase } from "./database.js";
 import { startTaskRunner } from "./task-runner.js";
@@ -10,15 +8,7 @@ const environment = loadApiConfig(process.env);
 
 const database = openDatabase(environment.SQLITE_PATH);
 const stopTaskRunner = startTaskRunner(database);
-const app = Fastify({ logger: true });
-
-await app.register(cors, { origin: environment.WEB_ORIGIN, credentials: true });
-
-app.get("/health", async () => ({ status: "ok", storage: "sqlite-wal" }));
-
-app.get("/v1/market/quote-preview", async () =>
-  calculateNpcQuote({ referencePrice: 10, marketFactor: 1, buySpread: 0.1, sellSpread: 0.1 })
-);
+const app = await createApiApp(environment, database);
 
 const close = async () => {
   stopTaskRunner();
