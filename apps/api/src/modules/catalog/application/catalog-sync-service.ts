@@ -29,7 +29,7 @@ export class CatalogSyncService {
     let sourceVersion = "unavailable"; let sourceUri = "unavailable"; let checksum = "unavailable";
     try {
       if (this.enabledSetCodes.length === 0) throw new Error("未配置 CATALOG_ENABLED_SET_CODES，拒绝导入全部 Scryfall Bulk Data");
-      const source = await this.client.download(); sourceVersion = source.version; sourceUri = source.downloadUri; checksum = source.checksumSha256;
+      const source = await this.client.download(this.enabledSetCodes); sourceVersion = source.version; sourceUri = source.downloadUri; checksum = source.checksumSha256;
       if (payload.expectedChecksumSha256 && payload.expectedChecksumSha256 !== checksum) throw new Error("Scryfall Bulk 文件 checksum 不匹配");
       const cards = source.cards.filter((raw) => { const card = requireCard(raw); return this.enabledSetCodes.includes(card.set.toUpperCase()); }).map(requireCard);
       if (cards.length === 0) throw new Error("启用系列在 Scryfall Bulk Data 中没有匹配印刷");

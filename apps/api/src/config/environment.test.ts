@@ -15,6 +15,7 @@ describe("loadApiConfig", () => {
       REFRESH_TOKEN_TTL_SECONDS: 604800,
       CATALOG_DATA_DIR: "./data/catalog",
       SCRYFALL_BULK_ENDPOINT: "https://api.scryfall.com/bulk-data/default-cards",
+      SCRYFALL_USER_AGENT: "MTG-Market-Simulator/0.1 (local deployment)",
       CATALOG_ENABLED_SET_CODES: []
     });
   });

@@ -13,7 +13,7 @@ afterEach(() => directories.splice(0).forEach((directory) => rmSync(directory, {
 const card = { id: "20000000-0000-4000-8000-000000000001", set: "one", set_name: "Phyrexia: All Will Be One", released_at: "2023-02-10", name: "Fixture Card", collector_number: "1", rarity: "rare", legalities: { modern: "legal" }, finishes: ["nonfoil", "foil"], image_uris: { normal: "https://images.example.test/card.jpg" } };
 function source(cards: unknown[]) {
   const encoded = Buffer.from(JSON.stringify(cards)); const checksum = createHash("sha256").update(encoded).digest("hex");
-  const client = new ScryfallBulkClient("https://api.example.test/bulk", async (url) => {
+  const client = new ScryfallBulkClient("https://api.example.test/bulk", "MTG-Market-Simulator/test", async (url) => {
     if (String(url).includes("bulk")) return new Response(JSON.stringify({ updated_at: "2026-07-24T00:00:00.000Z", download_uri: "https://download.example.test/default-cards.json" }), { status: 200 });
     return new Response(encoded, { status: 200 });
   });
@@ -22,7 +22,7 @@ function source(cards: unknown[]) {
 function service(cards: unknown[], imageFetcher: typeof fetch = async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 })) {
   const directory = mkdtempSync(join(tmpdir(), "mtg-catalog-sync-")); directories.push(directory);
   const database = openSqliteDatabase(join(directory, "test.db")); const fixture = source(cards);
-  return { database, checksum: fixture.checksum, sync: new CatalogSyncService(database, fixture.client, ["ONE"], new CatalogImageCache(join(directory, "catalog"), imageFetcher)) };
+  return { database, checksum: fixture.checksum, sync: new CatalogSyncService(database, fixture.client, ["ONE"], new CatalogImageCache(join(directory, "catalog"), "MTG-Market-Simulator/test", imageFetcher)) };
 }
 
 describe("I09B Scryfall Bulk 同步", () => {
@@ -57,8 +57,8 @@ describe("I09B Scryfall Bulk 同步", () => {
 
   it("将截断 Bulk JSON 归类为同步失败，而非替换现有目录", async () => {
     const directory = mkdtempSync(join(tmpdir(), "mtg-catalog-sync-")); directories.push(directory); const database = openSqliteDatabase(join(directory, "test.db"));
-    const client = new ScryfallBulkClient("https://api.example.test/bulk", async (url) => String(url).includes("bulk") ? new Response(JSON.stringify({ updated_at: "2026-07-24T00:00:00.000Z", download_uri: "https://download.example.test/cards" })) : new Response("[{\"id\":"));
-    const sync = new CatalogSyncService(database, client, ["ONE"], new CatalogImageCache(join(directory, "catalog")));
+    const client = new ScryfallBulkClient("https://api.example.test/bulk", "MTG-Market-Simulator/test", async (url) => String(url).includes("bulk") ? new Response(JSON.stringify({ updated_at: "2026-07-24T00:00:00.000Z", download_uri: "https://download.example.test/cards" })) : new Response("[{\"id\":"));
+    const sync = new CatalogSyncService(database, client, ["ONE"], new CatalogImageCache(join(directory, "catalog"), "MTG-Market-Simulator/test"));
     await expect(sync.synchronize()).rejects.toThrow("损坏或截断"); expect(database.prepare("SELECT status FROM catalog_sync_runs").get()).toEqual({ status: "failed" }); database.close();
   });
 });

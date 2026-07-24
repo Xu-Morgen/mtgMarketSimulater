@@ -12,6 +12,7 @@ const environmentSchema = z.object({
   REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().min(3_600).max(2_592_000).default(604_800)
   ,CATALOG_DATA_DIR: z.string().trim().min(1).default("./data/catalog")
   ,SCRYFALL_BULK_ENDPOINT: z.string().url().default("https://api.scryfall.com/bulk-data/default-cards")
+  ,SCRYFALL_USER_AGENT: z.string().trim().min(1).max(256).default("MTG-Market-Simulator/0.1 (local deployment)")
   ,CATALOG_ENABLED_SET_CODES: z.string().trim().optional()
 });
 

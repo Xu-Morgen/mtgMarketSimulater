@@ -160,6 +160,7 @@ export const jobs = sqliteTable(
     maxAttempts: integer("max_attempts").notNull(),
     uniqueKey: text("unique_key").notNull(),
     lockedUntil: text("locked_until"),
+    activeRunAttempt: integer("active_run_attempt"),
     lastError: text("last_error"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull()

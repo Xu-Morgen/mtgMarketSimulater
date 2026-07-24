@@ -78,9 +78,11 @@ describe("I08B 卡牌目录与 SKU API", () => {
     const missingKey = await app.inject({ method: "POST", url: "/v1/admin/catalog/sync", headers: { authorization: admin }, payload: {} });
     const first = await app.inject({ method: "POST", url: "/v1/admin/catalog/sync", headers: { authorization: admin, "idempotency-key": "catalog-sync-key-123" }, payload: {} });
     const replay = await app.inject({ method: "POST", url: "/v1/admin/catalog/sync", headers: { authorization: admin, "idempotency-key": "catalog-sync-key-123" }, payload: {} });
+    const status = await app.inject({ method: "GET", url: "/v1/admin/catalog/sync", headers: { authorization: admin } });
     expect(denied.json()).toMatchObject({ ok: false, error: { code: "AUTHORIZATION_DENIED" } });
     expect(missingKey.json()).toMatchObject({ ok: false, error: { code: "IDEMPOTENCY_KEY_REQUIRED" } });
     expect(first.json()).toMatchObject({ ok: true, data: { type: "catalog.sync", status: "pending" } }); expect(replay.json().data.id).toBe(first.json().data.id);
+    expect(status.json()).toMatchObject({ ok: true, data: { latestSuccessful: null, current: null, currentJob: { id: first.json().data.id, type: "catalog.sync", status: "pending" } } });
     await app.close(); database.close();
   });
 });

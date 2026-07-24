@@ -48,6 +48,9 @@ describe("持久化任务 worker", () => {
     await worker.runOne();
     expect(repository.get(job.id)?.status).toBe("dead");
     expect(repository.manualRetry(job.id, clockNow.toISOString())?.status).toBe("pending");
+    await worker.runOne();
+    expect(repository.get(job.id)?.status).toBe("failed");
+    expect(database.prepare("SELECT attempt FROM job_runs WHERE job_id = ? ORDER BY attempt").all(job.id)).toEqual([{ attempt: 1 }, { attempt: 2 }, { attempt: 3 }, { attempt: 4 }]);
     database.close();
   });
 

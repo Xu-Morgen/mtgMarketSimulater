@@ -23,6 +23,8 @@ export interface PersistedJob {
   maxAttempts: number;
   uniqueKey: string;
   lockedUntil: string | null;
+  /** job_runs 中当前执行记录的全局单调序号；手动重试不会复用历史 attempt。 */
+  activeRunAttempt: number | null;
   lastError: string | null;
   createdAt: string;
   updatedAt: string;

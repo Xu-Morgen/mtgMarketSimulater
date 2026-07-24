@@ -12,6 +12,7 @@ import { SqliteCatalogRepository } from "../infrastructure/sqlite-catalog-reposi
 import { CatalogImageCache, ScryfallBulkClient } from "../../../platform/external/scryfall/scryfall-bulk-client.js";
 import { SqliteJobRepository } from "../../jobs/infrastructure/sqlite-job-repository.js";
 import { toJobDto } from "../../jobs/application/task-service.js";
+import type { CatalogSyncRunDto, CatalogSyncStatusDto } from "@mtg-market/contracts";
 
 const listQuerySchema = z.object({
   query: z.string().trim().min(1).max(120).optional(), setCode: z.string().trim().min(1).max(20).transform((value) => value.toUpperCase()).optional(),
@@ -22,9 +23,16 @@ const skuParamsSchema = z.object({ skuId: z.string().uuid() }).strict();
 const imageParamsSchema = z.object({ imageName: z.string().regex(/^[0-9a-f-]{36}\.(jpg|jpeg|png|webp)$/i) }).strict();
 const syncBodySchema = z.object({ cacheImageScryfallIds: z.array(z.string().uuid()).max(100).default([]), expectedChecksumSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional() }).strict();
 
+function toSyncRunDto(run: NonNullable<ReturnType<CatalogSyncService["status"]>["current"]>): CatalogSyncRunDto {
+  let enabledSetCodes: string[] = []; let diff: CatalogSyncRunDto["diff"] = {};
+  try { enabledSetCodes = JSON.parse(run.enabled_sets_json) as string[]; } catch { /* 损坏历史仍可安全展示其余状态。 */ }
+  try { diff = JSON.parse(run.diff_json) as CatalogSyncRunDto["diff"]; } catch { /* 同上。 */ }
+  return { id: run.id, sourceVersion: run.source_version, checksumSha256: run.checksum_sha256, enabledSetCodes, status: run.status, importedPrintings: run.imported_printings, importedSkus: run.imported_skus, cachedImages: run.cached_images, diff, failureReason: run.failure_reason, startedAt: run.started_at, completedAt: run.completed_at };
+}
+
 /** 浏览器只能读取本地目录；I09 前没有任何外部 Provider 访问路径。 */
 export function createCatalogSyncService(config: ApiConfig, database: Database.Database): CatalogSyncService {
-  return new CatalogSyncService(database, new ScryfallBulkClient(config.SCRYFALL_BULK_ENDPOINT), config.CATALOG_ENABLED_SET_CODES, new CatalogImageCache(config.CATALOG_DATA_DIR));
+  return new CatalogSyncService(database, new ScryfallBulkClient(config.SCRYFALL_BULK_ENDPOINT, config.SCRYFALL_USER_AGENT), config.CATALOG_ENABLED_SET_CODES, new CatalogImageCache(config.CATALOG_DATA_DIR, config.SCRYFALL_USER_AGENT));
 }
 
 export async function registerCatalogRoutes(app: FastifyInstance, config: ApiConfig, database: Database.Database): Promise<void> {
@@ -46,7 +54,12 @@ export async function registerCatalogRoutes(app: FastifyInstance, config: ApiCon
     } catch { return reply.code(404).send(failure(request.requestId, "RESOURCE_NOT_FOUND", "图片不存在")); }
   });
 
-  app.get("/v1/admin/catalog/sync", { preHandler: requireRole("admin") }, async (request) => success(request.requestId, sync.status()));
+  app.get("/v1/admin/catalog/sync", { preHandler: requireRole("admin") }, async (request) => {
+    const status = sync.status();
+    const currentJob = new SqliteJobRepository(database).list(undefined, 100).find((job) => job.type === "catalog.sync") ?? null;
+    const result: CatalogSyncStatusDto = { latestSuccessful: status.latestSuccessful ? toSyncRunDto({ ...status.latestSuccessful, status: "succeeded" }) : null, current: status.current ? toSyncRunDto(status.current) : null, currentJob: currentJob ? toJobDto(currentJob) : null };
+    return success(request.requestId, result);
+  });
   app.post("/v1/admin/catalog/sync", { preHandler: requireRole("admin") }, async (request, reply) => {
     const key = request.headers["idempotency-key"];
     if (typeof key !== "string" || key.length < 8) return reply.code(400).send(failure(request.requestId, "IDEMPOTENCY_KEY_REQUIRED", "写请求必须携带 Idempotency-Key"));

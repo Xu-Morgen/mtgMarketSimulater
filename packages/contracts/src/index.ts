@@ -142,6 +142,29 @@ export interface CatalogSkuDetailDto extends CatalogSkuDto {
   releasedAt: string | null;
 }
 
+/** 管理端目录同步的脱敏运行记录；不向浏览器暴露外部下载地址。 */
+export interface CatalogSyncRunDto {
+  id: string;
+  sourceVersion: string;
+  checksumSha256: string;
+  enabledSetCodes: string[];
+  status: "running" | "succeeded" | "failed";
+  importedPrintings: number;
+  importedSkus: number;
+  cachedImages: number;
+  diff: { printings?: number; skus?: number; added?: number; removed?: number };
+  failureReason: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface CatalogSyncStatusDto {
+  latestSuccessful: CatalogSyncRunDto | null;
+  current: CatalogSyncRunDto | null;
+  /** 最近投递的同步任务，供刷新后继续追踪状态。 */
+  currentJob: JobDto | null;
+}
+
 export interface InventoryDto {
   skuId: string;
   quantity: number;

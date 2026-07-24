@@ -88,4 +88,17 @@ test.describe("管理员登录", () => {
     await expect(page).toHaveURL(/\/admin$/);
     await expect(page.getByRole("navigation", { name: "管理导航" })).toBeVisible();
   });
+
+  test("管理员登录时忽略 next，始终进入管理后台首页", async ({ page }) => {
+    await page.route("**/v1/auth/login", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, data: { accessToken: "admin-next-route-fixture", user: { id: "50000000-0000-4000-8000-000000000001", displayName: "重定向管理员", role: "admin", createdAt: "2026-07-24T00:00:00.000Z" } }, meta: { requestId: "admin-next-route" } })
+    }));
+    await page.goto("/login?next=%2Fadmin%2Fcatalog-sync");
+    await page.getByLabel("邮箱").fill(process.env.E2E_ADMIN_EMAIL!);
+    await page.getByRole("textbox", { name: "密码" }).fill(process.env.E2E_ADMIN_PASSWORD!);
+    await page.getByRole("button", { name: "登录" }).click();
+    await expect(page).toHaveURL(/\/admin$/);
+    await expect(page.getByRole("navigation", { name: "管理导航" })).toBeVisible();
+  });
 });

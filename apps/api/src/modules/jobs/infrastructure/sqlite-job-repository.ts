@@ -6,7 +6,7 @@ import { type PersistedJob, isRegisteredJobType } from "../domain/job.js";
 
 type JobRow = {
   id: string; type: string; payload_json: string; status: string; run_after: string; attempts: number; max_attempts: number;
-  unique_key: string; locked_until: string | null; last_error: string | null; created_at: string; updated_at: string;
+  unique_key: string; locked_until: string | null; active_run_attempt: number | null; last_error: string | null; created_at: string; updated_at: string;
 };
 
 function asJob(row: JobRow): PersistedJob {
@@ -14,7 +14,7 @@ function asJob(row: JobRow): PersistedJob {
   return {
     id: row.id, type: row.type, payloadJson: row.payload_json, status: row.status as JobStatus,
     runAfter: row.run_after, attempts: row.attempts, maxAttempts: row.max_attempts,
-    uniqueKey: row.unique_key, lockedUntil: row.locked_until, lastError: row.last_error,
+    uniqueKey: row.unique_key, lockedUntil: row.locked_until, activeRunAttempt: row.active_run_attempt, lastError: row.last_error,
     createdAt: row.created_at, updatedAt: row.updated_at
   };
 }
@@ -44,12 +44,16 @@ export class SqliteJobRepository {
 
   recoverExpired(now: string): number {
     return withinTransaction(this.database, () => {
+      this.database.prepare(
+        `UPDATE job_runs SET status = 'failed', finished_at = ?, error_summary = COALESCE(error_summary, '任务租约在进程中断后过期')
+         WHERE status = 'running' AND job_id IN (SELECT id FROM jobs WHERE status = 'running' AND locked_until <= ?)`
+      ).run(now, now);
       const dead = this.database.prepare(
-        `UPDATE jobs SET status = 'dead', locked_until = NULL, last_error = COALESCE(last_error, '任务租约在进程中断后过期'), updated_at = ?
+        `UPDATE jobs SET status = 'dead', locked_until = NULL, active_run_attempt = NULL, last_error = COALESCE(last_error, '任务租约在进程中断后过期'), updated_at = ?
          WHERE ((status = 'running' AND locked_until <= ?) OR status = 'failed') AND attempts >= max_attempts`
       ).run(now, now).changes;
       this.database.prepare(
-        `UPDATE jobs SET status = 'pending', locked_until = NULL, run_after = ?, last_error = COALESCE(last_error, '任务租约在进程中断后过期'), updated_at = ?
+        `UPDATE jobs SET status = 'pending', locked_until = NULL, active_run_attempt = NULL, run_after = ?, last_error = COALESCE(last_error, '任务租约在进程中断后过期'), updated_at = ?
          WHERE status = 'running' AND locked_until <= ? AND attempts < max_attempts`
       ).run(now, now, now);
       return dead;
@@ -64,38 +68,39 @@ export class SqliteJobRepository {
          ORDER BY run_after ASC, created_at ASC LIMIT 1`
       ).get(now) as JobRow | undefined;
       if (!candidate) return null;
+      const runAttempt = (this.database.prepare("SELECT COALESCE(MAX(attempt), 0) AS attempt FROM job_runs WHERE job_id = ?").get(candidate.id) as { attempt: number }).attempt + 1;
       const changed = this.database.prepare(
-        `UPDATE jobs SET status = 'running', attempts = attempts + 1, locked_until = ?, updated_at = ?
+        `UPDATE jobs SET status = 'running', attempts = attempts + 1, locked_until = ?, active_run_attempt = ?, updated_at = ?
          WHERE id = ? AND status IN ('pending', 'failed') AND run_after <= ? AND attempts < max_attempts`
-      ).run(lockedUntil, now, candidate.id, now);
+      ).run(lockedUntil, runAttempt, now, candidate.id, now);
       if (changed.changes !== 1) return null;
       const job = this.get(candidate.id)!;
       this.database.prepare(
         "INSERT INTO job_runs (id, job_id, attempt, status, started_at) VALUES (?, ?, ?, 'running', ?)"
-      ).run(randomUUID(), job.id, job.attempts, now);
+      ).run(randomUUID(), job.id, runAttempt, now);
       return job;
     });
   }
 
   succeed(job: PersistedJob, now: string): void {
     withinTransaction(this.database, () => {
-      this.database.prepare("UPDATE jobs SET status = 'succeeded', locked_until = NULL, updated_at = ? WHERE id = ? AND status = 'running'").run(now, job.id);
-      this.database.prepare("UPDATE job_runs SET status = 'succeeded', finished_at = ? WHERE job_id = ? AND attempt = ? AND status = 'running'").run(now, job.id, job.attempts);
+      this.database.prepare("UPDATE jobs SET status = 'succeeded', locked_until = NULL, active_run_attempt = NULL, updated_at = ? WHERE id = ? AND status = 'running'").run(now, job.id);
+      this.database.prepare("UPDATE job_runs SET status = 'succeeded', finished_at = ? WHERE job_id = ? AND attempt = ? AND status = 'running'").run(now, job.id, job.activeRunAttempt);
     });
   }
 
   fail(job: PersistedJob, summary: string, runAfter: string, now: string): JobStatus {
     const status: JobStatus = job.attempts >= job.maxAttempts ? "dead" : "failed";
     withinTransaction(this.database, () => {
-      this.database.prepare("UPDATE jobs SET status = ?, locked_until = NULL, run_after = ?, last_error = ?, updated_at = ? WHERE id = ? AND status = 'running'").run(status, runAfter, summary, now, job.id);
-      this.database.prepare("UPDATE job_runs SET status = ?, finished_at = ?, error_summary = ? WHERE job_id = ? AND attempt = ? AND status = 'running'").run(status, now, summary, job.id, job.attempts);
+      this.database.prepare("UPDATE jobs SET status = ?, locked_until = NULL, active_run_attempt = NULL, run_after = ?, last_error = ?, updated_at = ? WHERE id = ? AND status = 'running'").run(status, runAfter, summary, now, job.id);
+      this.database.prepare("UPDATE job_runs SET status = ?, finished_at = ?, error_summary = ? WHERE job_id = ? AND attempt = ? AND status = 'running'").run(status, now, summary, job.id, job.activeRunAttempt);
     });
     return status;
   }
 
   manualRetry(id: string, now: string): PersistedJob | null {
     const changed = this.database.prepare(
-      "UPDATE jobs SET status = 'pending', attempts = 0, run_after = ?, locked_until = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status IN ('failed', 'dead')"
+      "UPDATE jobs SET status = 'pending', attempts = 0, run_after = ?, locked_until = NULL, active_run_attempt = NULL, last_error = NULL, updated_at = ? WHERE id = ? AND status IN ('failed', 'dead')"
     ).run(now, now, id);
     return changed.changes === 1 ? this.get(id) : null;
   }
