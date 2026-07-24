@@ -5,6 +5,7 @@ import { openSqliteDatabase } from "@mtg-market/database";
 const databasePath = process.env.E2E_DATABASE_PATH;
 const email = process.env.E2E_ADMIN_EMAIL;
 const password = process.env.E2E_ADMIN_PASSWORD;
+const displayName = process.env.E2E_ADMIN_DISPLAY_NAME ?? "E2E 管理员";
 
 if (!databasePath || !email || !password) {
   throw new Error("E2E_DATABASE_PATH、E2E_ADMIN_EMAIL 和 E2E_ADMIN_PASSWORD 均为必填项");
@@ -18,5 +19,5 @@ database.prepare(`
   INSERT INTO users (id, email, display_name, password_hash, role, created_at, updated_at)
   VALUES (?, ?, ?, ?, 'admin', ?, ?)
   ON CONFLICT(email) DO UPDATE SET display_name = excluded.display_name, password_hash = excluded.password_hash, role = 'admin', updated_at = excluded.updated_at
-`).run(randomUUID(), email.toLowerCase(), "E2E 管理员", passwordHash, now, now);
+`).run(randomUUID(), email.toLowerCase(), displayName, passwordHash, now, now);
 database.close();
