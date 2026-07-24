@@ -7,6 +7,6 @@
   "scripts": {
     "check": "tsc --noEmit",
     "build": "tsc --noEmit",
-    "test": "TMPDIR=/tmp vitest run --passWithNoTests"
+    "test": "TMPDIR=/tmp vitest run"
   }
 }
