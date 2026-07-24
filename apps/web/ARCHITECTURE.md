@@ -7,7 +7,7 @@
 | 目录 | 职责 | 依赖方向 |
 | --- | --- | --- |
 | `pages/` | 面向业务场景的页面编排与路由入口可复用的页面模块。 | 可依赖 `components`、`stores`、`api`、`constants`、`utils`。 |
-| `components/` | 可复用的展示组件、表单组件、业务组件与图表/动画封装。 | 可依赖 `stores`、`constants`、`utils`；服务端数据由页面注入，或由明确的查询组件读取。 |
+| `components/` | 可复用的展示组件、React Hook Form + Zod 表单组件、业务组件与图表/动画封装。 | 可依赖 `stores`、`constants`、`utils`；服务端数据由页面注入，或由明确的查询组件读取。 |
 | `stores/` | Zustand 的瞬时 UI 状态，例如筛选、界面偏好、开包动画和未提交的卡组草稿。 | 只依赖 `constants`、`utils`；不得存放服务器真相。 |
 | `api/` | API 客户端、请求封装、TanStack Query 的 query/mutation 配置及共享 contracts 类型的适配。 | 可依赖 `constants`、`utils` 与共享 `contracts` 包。 |
 | `providers/` | React 全局 Provider 的集中装配，例如 TanStack Query、会话恢复与全局通知。 | 只依赖框架、`api`、`stores`、`constants`、`utils`；由 `app/` 根布局接入。 |
@@ -21,10 +21,21 @@
 - 所有 DTO 从共享 `contracts` 包导入；前端不得重定义与后端可能漂移的请求或响应类型。
 - 所有变更操作由 `api/` 中的 mutation 发起，携带 idempotency key；成功后以服务端响应更新或失效相关查询缓存。
 - 页面与组件只展示服务端返回的费用、保证金、奖励、赛果、开包结果和价格来源/更新时间，不推导或改写这些值。
+- React Hook Form + Zod 仅提供字段级即时反馈；表单提交必须展示服务端返回的权限、版本冲突、参数上限和业务错误，不能把客户端校验当成安全边界。
 
 ## 计划中的页面模块
 
-`pages/` 将按业务域建立 `auth`、`dashboard`、`packs`、`inventory`、`market`、`orders`、`decks`、`tournaments` 与 `admin`。其中买单/卖单确认是独立页面流程，必须读取服务端预览并二次确认；管理模块仅展示并提交具备审计的后端操作。
+`pages/` 将按业务域建立 `auth`、`dashboard`、`catalog`、`packs`、`inventory`、`market`、`orders`、`decks`、`tournaments` 与 `admin`。其中买单/卖单确认是独立页面流程，必须读取服务端预览并二次确认。
+
+`app/` 使用公开、玩家和管理员路由组组合这些页面模块。`admin` 至少拆分为首页、活动、玩家、内容/参数、任务/Agent 和日志页面；管理员布局负责导航与无权限/会话过期体验，但所有 `/v1/admin/*` 请求仍由 API 复核 `admin` 角色。
+
+管理活动采用“草稿 → 服务端预览 → 二次确认 → 发布/定时发布 → 暂停/结束”的显式流程；玩家管理只提交冻结、解冻、会话撤销和补偿修正命令，不提供余额/库存最终值的自由编辑。审计与运行日志只读、服务端分页和脱敏，筛选条件保存在 URL 而不是 Zustand。
+
+## 验收资产
+
+- Playwright 主流程放在 `tests/` 的端到端测试目录，覆盖角色导航、重复点击、页面加载/空/错状态和关键玩家/管理流程。
+- 每个用户可见迭代在 `tests/manual/<迭代ID>.md` 保存人工验收记录；记录构建/提交标识、浏览器、测试数据、步骤结果和截图/录屏路径。
+- 单元、组件或 API 测试通过不能替代页面人工验收；对应页面、Playwright 和人工记录齐备后才满足前端完成定义。
 
 ## 当前迁移约定
 
