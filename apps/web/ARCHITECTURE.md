@@ -51,6 +51,12 @@
 - 存档、账本等用户私有查询的 TanStack Query key 必须包含 `userId`；登录、注册和退出会清空查询缓存，禁止跨会话展示玩家或管理端服务器数据。
 - `pages/dashboard/player-dashboard-page.tsx` 只格式化 API 返回的整数金额，展示存档摘要、总额/可用额/冻结额、净资产占位和服务端游标分页账本；未建档、加载、失败重试、空账本、创建中与窄屏表格状态均在页面覆盖。
 
+## I08F 卡牌目录与详情页面（2026-07-24）
+
+- `api/catalog-api.ts` 集中定义目录列表与详情的只读 TanStack Query；请求只面向本地 `/v1/catalog/*`，查询键按登录用户和完整 URL 筛选条件隔离。
+- `pages/catalog/catalog-page.tsx` 将名称、系列、稀有度、工艺和游标保存在 URL，使用服务端分页结果展示每个独立 SKU；详情页保留印刷、工艺、来源、合法性及本地图片缓存状态，缺图时文字降级而不访问外部 URL。
+- 玩家导航新增 `/catalog`。Playwright 夹具在隔离 SQLite 中提供同名不同印刷和工艺 SKU；I08F 用例覆盖目录分页、筛选恢复、无结果、接口失败与窄屏。
+
 ## 不单独建层的内容
 
 - DTO、事件与 API 契约由共享 `packages/contracts` 提供，因此前端不建立会产生重复定义的 `types/` 层。

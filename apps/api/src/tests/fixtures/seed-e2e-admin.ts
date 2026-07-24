@@ -20,4 +20,15 @@ database.prepare(`
   VALUES (?, ?, ?, ?, 'admin', ?, ?)
   ON CONFLICT(email) DO UPDATE SET display_name = excluded.display_name, password_hash = excluded.password_hash, role = 'admin', updated_at = excluded.updated_at
 `).run(randomUUID(), email.toLowerCase(), displayName, passwordHash, now, now);
+
+/** I08F 浏览器夹具：三个独立 SKU，覆盖同名不同印刷、工艺与无图片降级。 */
+database.prepare("INSERT OR IGNORE INTO card_sets (id, code, name, released_at, source, source_reference, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run("10000000-0000-4000-8000-000000000081", "ONE", "Phyrexia: All Will Be One", "2023-02-10", "scryfall", "one", now);
+const printing = database.prepare("INSERT OR IGNORE INTO card_printings (id, set_id, name, collector_number, scryfall_id, oracle_text, rarity, legalities_json, artist, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+printing.run("20000000-0000-4000-8000-000000000081", "10000000-0000-4000-8000-000000000081", "Elesh Norn, Mother of Machines", "10", "e2e-one-10", "Vigilance", "mythic", '{"standard":"not_legal"}', "A. Artist", "scryfall", "e2e-one-10", 0, now, now);
+printing.run("20000000-0000-4000-8000-000000000082", "10000000-0000-4000-8000-000000000081", "Elesh Norn, Mother of Machines", "11", "e2e-one-11", null, "rare", '{"standard":"legal"}', null, "scryfall", "e2e-one-11", 0, now, now);
+const sku = database.prepare("INSERT OR IGNORE INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+sku.run("30000000-0000-4000-8000-000000000081", "20000000-0000-4000-8000-000000000081", "nonfoil", 1, "scryfall", "e2e-one-10", 0, now, now);
+sku.run("30000000-0000-4000-8000-000000000082", "20000000-0000-4000-8000-000000000081", "foil", 1, "scryfall", "e2e-one-10", 0, now, now);
+sku.run("30000000-0000-4000-8000-000000000083", "20000000-0000-4000-8000-000000000082", "etched", 1, "scryfall", "e2e-one-11", 0, now, now);
+database.prepare("INSERT OR IGNORE INTO card_image_cache (id, printing_id, source_url, cache_path, status, checksum, cached_at, failure_reason, updated_at) VALUES (?, ?, ?, ?, 'cached', ?, ?, NULL, ?)").run("40000000-0000-4000-8000-000000000081", "20000000-0000-4000-8000-000000000081", "https://fixture.invalid/one-10.jpg", "catalog/e2e-one-10.jpg", "e2e", now, now);
 database.close();
