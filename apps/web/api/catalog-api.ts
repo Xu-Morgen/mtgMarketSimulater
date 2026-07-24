@@ -11,11 +11,12 @@ export type CatalogFilters = {
   rarity?: string | undefined;
   finish?: CardFinish | undefined;
   cursor?: string | undefined;
+  limit?: number | undefined;
 };
 
 function queryString(filters: CatalogFilters): string {
-  const parameters = new URLSearchParams({ limit: "2" });
-  for (const [key, value] of Object.entries(filters)) if (value) parameters.set(key, value);
+  const parameters = new URLSearchParams({ limit: String(filters.limit ?? 20) });
+  for (const [key, value] of Object.entries(filters)) if (value) parameters.set(key, String(value));
   return parameters.toString();
 }
 
@@ -35,11 +36,11 @@ export function useCatalogQuery(filters: CatalogFilters) {
   });
 }
 
-export function useCatalogDetailQuery(skuId: string) {
+export function useCatalogDetailQuery(skuId: string | null) {
   const { accessToken, user } = useSession();
   return useQuery({
     queryKey: ["catalog", "detail", user?.id ?? "anonymous", skuId],
-    queryFn: () => catalogApi.detail(accessToken!, skuId),
+    queryFn: () => catalogApi.detail(accessToken!, skuId!),
     enabled: Boolean(accessToken && user && skuId),
     retry: false
   });

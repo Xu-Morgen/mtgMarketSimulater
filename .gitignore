@@ -9,3 +9,5 @@ data/*.db-shm
 data/*.db-wal
 data/images/
 data/backups/
+apps/api/data/catalog/images/*
+apps/web/test-results/*

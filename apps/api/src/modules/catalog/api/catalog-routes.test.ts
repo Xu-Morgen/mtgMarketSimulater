@@ -45,7 +45,7 @@ describe("I08B 卡牌目录与 SKU API", () => {
     const first = await app.inject({ method: "GET", url: "/v1/catalog/cards?query=Elesh&limit=2", headers: { authorization: token } });
     const second = await app.inject({ method: "GET", url: "/v1/catalog/cards?query=Elesh&limit=2&cursor=2", headers: { authorization: token } });
     const filtered = await app.inject({ method: "GET", url: "/v1/catalog/cards?setCode=one&finish=foil", headers: { authorization: token } });
-    expect(first.statusCode).toBe(200); expect(first.json().data.items).toHaveLength(2); expect(first.json().data.page).toEqual({ hasMore: true, nextCursor: "2" });
+    expect(first.statusCode).toBe(200); expect(first.json().data.items).toHaveLength(2); expect(first.json().data.page).toEqual({ total: 3, hasMore: true, nextCursor: "2" });
     expect(second.json().data.items).toHaveLength(1);
     expect(filtered.json().data.items).toEqual([expect.objectContaining({ id: "30000000-0000-4000-8000-000000000002", finish: "foil", source: "scryfall", isManualException: false })]);
     expect(new Set([...first.json().data.items, ...second.json().data.items].map((entry: { id: string }) => entry.id)).size).toBe(3);
@@ -72,17 +72,19 @@ describe("I08B 卡牌目录与 SKU API", () => {
     await app.close(); database.close();
   });
 
-  it("只允许管理员查询和幂等投递目录同步任务", async () => {
+  it("只允许管理员查询并幂等投递目录同步和图片缓存任务", async () => {
     const { app, database } = await createTestApp(); const player = await authorization(app); const admin = await adminAuthorization(app, database);
     const denied = await app.inject({ method: "GET", url: "/v1/admin/catalog/sync", headers: { authorization: player } });
     const missingKey = await app.inject({ method: "POST", url: "/v1/admin/catalog/sync", headers: { authorization: admin }, payload: {} });
     const first = await app.inject({ method: "POST", url: "/v1/admin/catalog/sync", headers: { authorization: admin, "idempotency-key": "catalog-sync-key-123" }, payload: {} });
     const replay = await app.inject({ method: "POST", url: "/v1/admin/catalog/sync", headers: { authorization: admin, "idempotency-key": "catalog-sync-key-123" }, payload: {} });
+    const image = await app.inject({ method: "POST", url: "/v1/admin/catalog/image-cache", headers: { authorization: admin, "idempotency-key": "catalog-image-key-123" }, payload: { scope: "set", setCode: "one" } });
     const status = await app.inject({ method: "GET", url: "/v1/admin/catalog/sync", headers: { authorization: admin } });
     expect(denied.json()).toMatchObject({ ok: false, error: { code: "AUTHORIZATION_DENIED" } });
     expect(missingKey.json()).toMatchObject({ ok: false, error: { code: "IDEMPOTENCY_KEY_REQUIRED" } });
     expect(first.json()).toMatchObject({ ok: true, data: { type: "catalog.sync", status: "pending" } }); expect(replay.json().data.id).toBe(first.json().data.id);
-    expect(status.json()).toMatchObject({ ok: true, data: { latestSuccessful: null, current: null, currentJob: { id: first.json().data.id, type: "catalog.sync", status: "pending" } } });
+    expect(image.json()).toMatchObject({ ok: true, data: { type: "catalog.image-cache", status: "pending" } });
+    expect(status.json()).toMatchObject({ ok: true, data: { latestSuccessful: null, current: null, currentJob: { id: first.json().data.id, type: "catalog.sync", status: "pending" }, currentImageCacheJob: { id: image.json().data.id, type: "catalog.image-cache", status: "pending" } } });
     await app.close(); database.close();
   });
 });

@@ -57,6 +57,8 @@ export interface PageRequest {
 export interface PageInfo {
   nextCursor: string | null;
   hasMore: boolean;
+  /** 可选总数；目录等支持随机页跳转的查询会提供精确值。 */
+  total?: number;
 }
 
 export interface Page<T> {
@@ -163,6 +165,8 @@ export interface CatalogSyncStatusDto {
   current: CatalogSyncRunDto | null;
   /** 最近投递的同步任务，供刷新后继续追踪状态。 */
   currentJob: JobDto | null;
+  /** 最近投递的卡图缓存任务；目录同步与卡图下载互不重建对方的数据。 */
+  currentImageCacheJob: JobDto | null;
 }
 
 export interface InventoryDto {

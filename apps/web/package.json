@@ -14,6 +14,7 @@
     "@hookform/resolvers": "^3.10.0",
     "@mtg-market/contracts": "workspace:^",
     "@tanstack/react-query": "^5.66.0",
+    "antd": "^6.5.2",
     "next": "^15.1.7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { withinTransaction } from "@mtg-market/database";
-import { type CatalogImageCache, type ScryfallBulkCard, type ScryfallBulkClient, scryfallPrintingId } from "../../../platform/external/scryfall/scryfall-bulk-client.js";
+import { type ScryfallBulkCard, type ScryfallBulkClient, scryfallPrintingId } from "../../../platform/external/scryfall/scryfall-bulk-client.js";
 
-type SyncPayload = { cacheImageScryfallIds?: string[]; expectedChecksumSha256?: string };
+type SyncPayload = { expectedChecksumSha256?: string };
 type SyncRow = { id: string; source_version: string; checksum_sha256: string; enabled_sets_json: string; status: "running" | "succeeded" | "failed"; imported_printings: number; imported_skus: number; cached_images: number; diff_json: string; failure_reason: string | null; started_at: string; completed_at: string | null };
 
 export type CatalogSyncStatus = { latestSuccessful: Omit<SyncRow, "status"> | null; current: SyncRow | null };
@@ -12,10 +12,11 @@ function requireCard(card: ScryfallBulkCard): Required<Pick<ScryfallBulkCard, "i
   if (!card || typeof card.id !== "string" || typeof card.set !== "string" || typeof card.set_name !== "string" || typeof card.name !== "string" || typeof card.collector_number !== "string") throw new Error("Scryfall 卡牌 Schema 缺少必要字段");
   return card as Required<Pick<ScryfallBulkCard, "id" | "set" | "set_name" | "name" | "collector_number">> & ScryfallBulkCard;
 }
+function normalImageUrl(card: ScryfallBulkCard): string | null { return card.image_uris?.normal ?? card.card_faces?.find((face) => face.image_uris?.normal)?.image_uris?.normal ?? null; }
 
 /** 同步先完整下载/解析，再在一个短事务替换 Scryfall 来源行；异常永远不会清空上个成功目录。 */
 export class CatalogSyncService {
-  constructor(private readonly database: Database.Database, private readonly client: ScryfallBulkClient, private readonly enabledSetCodes: readonly string[], private readonly imageCache: CatalogImageCache) {}
+  constructor(private readonly database: Database.Database, private readonly client: ScryfallBulkClient, private readonly enabledSetCodes: readonly string[]) {}
 
   status(): CatalogSyncStatus {
     const current = this.database.prepare("SELECT * FROM catalog_sync_runs ORDER BY started_at DESC, rowid DESC LIMIT 1").get() as SyncRow | undefined;
@@ -34,13 +35,8 @@ export class CatalogSyncService {
       const cards = source.cards.filter((raw) => { const card = requireCard(raw); return this.enabledSetCodes.includes(card.set.toUpperCase()); }).map(requireCard);
       if (cards.length === 0) throw new Error("启用系列在 Scryfall Bulk Data 中没有匹配印刷");
       const seen = new Set<string>(); for (const card of cards) { scryfallPrintingId(card.id); if (seen.has(card.id)) throw new Error(`Scryfall Bulk Data 含重复印刷：${card.id}`); seen.add(card.id); }
-      const requestedImages = new Set(payload.cacheImageScryfallIds ?? []);
-      const imageResults = new Map<string, { path: string; checksum: string; sourceUrl: string }>();
-      for (const card of cards) if (requestedImages.has(card.id) && card.image_uris?.normal) {
-        const cached = await this.imageCache.cache(card.id, card.image_uris.normal); imageResults.set(card.id, { ...cached, sourceUrl: card.image_uris.normal });
-      }
-      const diff = withinTransaction(this.database, () => this.replaceCatalog(runId, sourceVersion, sourceUri, checksum, cards, imageResults, startedAt));
-      this.database.prepare("UPDATE catalog_sync_runs SET status = 'succeeded', imported_printings = ?, imported_skus = ?, cached_images = ?, diff_json = ?, completed_at = ? WHERE id = ?").run(diff.printings, diff.skus, imageResults.size, JSON.stringify(diff), new Date().toISOString(), runId);
+      const diff = withinTransaction(this.database, () => this.replaceCatalog(runId, sourceVersion, sourceUri, checksum, cards, startedAt));
+      this.database.prepare("UPDATE catalog_sync_runs SET status = 'succeeded', imported_printings = ?, imported_skus = ?, cached_images = 0, diff_json = ?, completed_at = ? WHERE id = ?").run(diff.printings, diff.skus, JSON.stringify(diff), new Date().toISOString(), runId);
       this.database.prepare("INSERT INTO catalog_sync_state (singleton, latest_successful_run_id, updated_at) VALUES (1, ?, ?) ON CONFLICT(singleton) DO UPDATE SET latest_successful_run_id = excluded.latest_successful_run_id, updated_at = excluded.updated_at").run(runId, new Date().toISOString());
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -49,7 +45,7 @@ export class CatalogSyncService {
     }
   }
 
-  private replaceCatalog(runId: string, version: string, uri: string, checksum: string, cards: ScryfallBulkCard[], images: Map<string, { path: string; checksum: string; sourceUrl: string }>, startedAt: string): { printings: number; skus: number; added: number; removed: number } {
+  private replaceCatalog(runId: string, version: string, uri: string, checksum: string, cards: ScryfallBulkCard[], startedAt: string): { printings: number; skus: number; added: number; removed: number } {
     const before = (this.database.prepare("SELECT COUNT(*) AS count FROM card_printings WHERE source = 'scryfall'").get() as { count: number }).count;
     this.database.prepare("INSERT INTO catalog_sync_runs (id, source, source_version, source_uri, checksum_sha256, enabled_sets_json, status, diff_json, started_at) VALUES (?, 'scryfall-bulk', ?, ?, ?, ?, 'running', '{}', ?)").run(runId, version, uri, checksum, JSON.stringify(this.enabledSetCodes), startedAt);
     this.database.prepare("DELETE FROM card_image_cache WHERE printing_id IN (SELECT id FROM card_printings WHERE source = 'scryfall')").run();
@@ -65,7 +61,7 @@ export class CatalogSyncService {
       const finishes = (card.finishes ?? []).filter((finish): finish is "nonfoil" | "foil" | "etched" => finish === "nonfoil" || finish === "foil" || finish === "etched");
       if (finishes.length === 0) throw new Error(`Scryfall 卡牌 Schema 缺少可支持工艺：${card.id}`);
       for (const finish of finishes) { insertSku.run(randomUUID(), printingId, finish, card.id, startedAt, startedAt); skus += 1; }
-      const image = images.get(card.id); insertImage.run(randomUUID(), printingId, image?.sourceUrl ?? card.image_uris?.normal ?? null, image?.path ?? null, image ? "cached" : "missing", image?.checksum ?? null, image ? startedAt : null, null, startedAt);
+      insertImage.run(randomUUID(), printingId, normalImageUrl(card), null, "missing", null, null, null, startedAt);
     }
     return { printings: cards.length, skus, added: cards.length, removed: before };
   }

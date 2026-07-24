@@ -6,4 +6,7 @@
 .details dd { margin: 4px 0 0; overflow-wrap: anywhere; }
 .failure { background: #fdecee; border-left: 4px solid #9b2226; margin: 18px 0 0; padding: 12px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; }
-@media (max-width: 700px) { .details { grid-template-columns: 1fr; } }
+.cacheActions { align-items: end; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto; margin-top: 18px; }
+.cacheActions label { display: grid; gap: 5px; }
+.cacheActions input { min-width: 0; }
+@media (max-width: 700px) { .details, .cacheActions { grid-template-columns: 1fr; } }

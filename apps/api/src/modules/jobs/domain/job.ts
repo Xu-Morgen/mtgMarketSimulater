@@ -2,6 +2,7 @@ import type { JobStatus } from "@mtg-market/contracts";
 
 export const registeredJobTypes = [
   "catalog.sync",
+  "catalog.image-cache",
   "prices.sync",
   "daily.rollover",
   "market.reprice",

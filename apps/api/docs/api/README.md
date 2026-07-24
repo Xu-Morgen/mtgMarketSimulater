@@ -45,7 +45,7 @@
 
 ## I09B/F Scryfall 目录同步协议
 
-- `GET /v1/admin/catalog/sync` 仅管理员可读取，返回 `CatalogSyncStatusDto`：脱敏的 `latestSuccessful`、`current` 运行记录和最近投递的 `currentJob`。运行记录使用 camelCase，包含版本、SHA-256、启用系列、差异、完成时间与失败摘要；不得包含外部下载地址或 Provider 原始响应。`POST /v1/admin/catalog/sync` 仅管理员可投递 `catalog.sync`；请求必须携带至少 8 位 `Idempotency-Key`，同一键返回同一个任务。
-- 同步任务可携带受限的 `cacheImageScryfallIds`（最多 100 个）以按需缓存卡图；可选 `expectedChecksumSha256` 用于受控导入时复核下载内容。启用系列只来自服务端 `CATALOG_ENABLED_SET_CODES`，空配置会安全拒绝导入，避免误写入完整 Bulk Data。
+- `GET /v1/admin/catalog/sync` 仅管理员可读取，返回 `CatalogSyncStatusDto`：脱敏的 `latestSuccessful`、`current` 运行记录以及最近投递的 `currentJob`（目录同步）和 `currentImageCacheJob`（卡图缓存）。运行记录使用 camelCase，包含版本、SHA-256、启用系列、差异、完成时间与失败摘要；不得包含外部下载地址或 Provider 原始响应。`POST /v1/admin/catalog/sync` 仅管理员可投递 `catalog.sync`；请求必须携带至少 8 位 `Idempotency-Key`，同一键返回同一个任务。
+- `POST /v1/admin/catalog/image-cache` 仅管理员可投递独立 `catalog.image-cache`：`{ scope: "single", skuId }` 缓存一张已同步的 Scryfall 印刷卡图，`{ scope: "set", setCode }` 补齐整个本地系列的缺图/失败图。任务只读取本地目录中的受控图片地址，绝不重新下载 Bulk 或替换目录；请求同样要求 `Idempotency-Key`。
 - API 进程使用仅服务端配置的 `SCRYFALL_USER_AGENT` 请求 Bulk 元数据、Bulk 文件与卡图；该字段不得作为浏览器参数或响应字段暴露。未使用自定义标识时，Scryfall 可返回 `400 generic_user_agent`。
 - `GET /v1/catalog/images/{imageName}` 只读取 `CATALOG_DATA_DIR/images` 中服务端生成的 UUID 文件名，要求有效会话，禁止任意路径与 Scryfall URL。目录页面和所有浏览器 API 均不会请求 Scryfall。

@@ -3,6 +3,8 @@ import { TaskRegistry, TaskWorker } from "./modules/jobs/application/task-servic
 import { SqliteJobRepository } from "./modules/jobs/infrastructure/sqlite-job-repository.js";
 import type { ApiConfig } from "./config/environment.js";
 import { createCatalogSyncService } from "./modules/catalog/api/catalog-routes.js";
+import { CatalogImageCacheService, type CatalogImageCacheRequest } from "./modules/catalog/application/catalog-image-cache-service.js";
+import { CatalogImageCache } from "./platform/external/scryfall/scryfall-bulk-client.js";
 
 export interface TaskRunner {
   stop(): Promise<void>;
@@ -34,6 +36,8 @@ export function startTaskRunner(database: Database.Database, intervalMs = 1_000,
 /** 业务处理器在应用层注册；jobs 模块只负责领取、重试与运行历史。 */
 export function createTaskRegistry(config: ApiConfig, database: Database.Database): TaskRegistry {
   const registry = new TaskRegistry(); const catalog = createCatalogSyncService(config, database);
-  registry.register("catalog.sync", async (payload) => catalog.synchronize((payload ?? {}) as { cacheImageScryfallIds?: string[]; expectedChecksumSha256?: string }));
+  const images = new CatalogImageCacheService(database, new CatalogImageCache(config.CATALOG_DATA_DIR, config.SCRYFALL_USER_AGENT));
+  registry.register("catalog.sync", async (payload) => catalog.synchronize((payload ?? {}) as { expectedChecksumSha256?: string }));
+  registry.register("catalog.image-cache", async (payload) => images.cache(payload as CatalogImageCacheRequest));
   return registry;
 }

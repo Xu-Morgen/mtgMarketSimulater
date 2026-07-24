@@ -19,7 +19,8 @@ export function toJobDto(job: PersistedJob): JobDto {
 }
 
 export class TaskWorker {
-  constructor(private readonly repository: SqliteJobRepository, private readonly registry: TaskRegistry, private readonly now: () => Date = () => new Date(), private readonly leaseMs = 30_000) {}
+  /** Bulk 导入和系列卡图下载均可能超过短轮询周期；租约须覆盖受控外部 I/O 的正常时长。 */
+  constructor(private readonly repository: SqliteJobRepository, private readonly registry: TaskRegistry, private readonly now: () => Date = () => new Date(), private readonly leaseMs = 10 * 60_000) {}
 
   recover(): void { this.repository.recoverExpired(this.now().toISOString()); }
 

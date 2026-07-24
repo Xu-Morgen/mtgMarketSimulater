@@ -1,0 +1,5 @@
+.tableWrap { margin-top: 22px; }
+.image { display: block; height: auto; max-height: 520px; max-width: 100%; object-fit: contain; width: 100%; }
+.imagePlaceholder { align-items: center; background: #e8e7db; border: 1px dashed #9b9a8e; color: #596153; display: flex; justify-content: center; min-height: 240px; padding: 20px; text-align: center; }
+.modalSection { margin-top: 18px; }
+.pagination { display: flex; justify-content: flex-end; margin-top: 18px; }

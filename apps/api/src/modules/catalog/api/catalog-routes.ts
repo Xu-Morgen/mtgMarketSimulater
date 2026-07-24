@@ -7,9 +7,10 @@ import type { ApiConfig } from "../../../config/environment.js";
 import { failure, success } from "../../../shared/http/api-response.js";
 import { requireRole } from "../../auth/api/auth-routes.js";
 import { CatalogService } from "../application/catalog-service.js";
+import type { CatalogImageCacheRequest } from "../application/catalog-image-cache-service.js";
 import { CatalogSyncService } from "../application/catalog-sync-service.js";
 import { SqliteCatalogRepository } from "../infrastructure/sqlite-catalog-repository.js";
-import { CatalogImageCache, ScryfallBulkClient } from "../../../platform/external/scryfall/scryfall-bulk-client.js";
+import { ScryfallBulkClient } from "../../../platform/external/scryfall/scryfall-bulk-client.js";
 import { SqliteJobRepository } from "../../jobs/infrastructure/sqlite-job-repository.js";
 import { toJobDto } from "../../jobs/application/task-service.js";
 import type { CatalogSyncRunDto, CatalogSyncStatusDto } from "@mtg-market/contracts";
@@ -21,7 +22,11 @@ const listQuerySchema = z.object({
 }).strict();
 const skuParamsSchema = z.object({ skuId: z.string().uuid() }).strict();
 const imageParamsSchema = z.object({ imageName: z.string().regex(/^[0-9a-f-]{36}\.(jpg|jpeg|png|webp)$/i) }).strict();
-const syncBodySchema = z.object({ cacheImageScryfallIds: z.array(z.string().uuid()).max(100).default([]), expectedChecksumSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional() }).strict();
+const syncBodySchema = z.object({ expectedChecksumSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional() }).strict();
+const imageCacheBodySchema = z.discriminatedUnion("scope", [
+  z.object({ scope: z.literal("single"), skuId: z.string().uuid() }).strict(),
+  z.object({ scope: z.literal("set"), setCode: z.string().trim().min(1).max(20).transform((value) => value.toUpperCase()) }).strict()
+]);
 
 function toSyncRunDto(run: NonNullable<ReturnType<CatalogSyncService["status"]>["current"]>): CatalogSyncRunDto {
   let enabledSetCodes: string[] = []; let diff: CatalogSyncRunDto["diff"] = {};
@@ -32,7 +37,7 @@ function toSyncRunDto(run: NonNullable<ReturnType<CatalogSyncService["status"]>[
 
 /** 浏览器只能读取本地目录；I09 前没有任何外部 Provider 访问路径。 */
 export function createCatalogSyncService(config: ApiConfig, database: Database.Database): CatalogSyncService {
-  return new CatalogSyncService(database, new ScryfallBulkClient(config.SCRYFALL_BULK_ENDPOINT, config.SCRYFALL_USER_AGENT), config.CATALOG_ENABLED_SET_CODES, new CatalogImageCache(config.CATALOG_DATA_DIR, config.SCRYFALL_USER_AGENT));
+  return new CatalogSyncService(database, new ScryfallBulkClient(config.SCRYFALL_BULK_ENDPOINT, config.SCRYFALL_USER_AGENT), config.CATALOG_ENABLED_SET_CODES);
 }
 
 export async function registerCatalogRoutes(app: FastifyInstance, config: ApiConfig, database: Database.Database): Promise<void> {
@@ -56,8 +61,10 @@ export async function registerCatalogRoutes(app: FastifyInstance, config: ApiCon
 
   app.get("/v1/admin/catalog/sync", { preHandler: requireRole("admin") }, async (request) => {
     const status = sync.status();
-    const currentJob = new SqliteJobRepository(database).list(undefined, 100).find((job) => job.type === "catalog.sync") ?? null;
-    const result: CatalogSyncStatusDto = { latestSuccessful: status.latestSuccessful ? toSyncRunDto({ ...status.latestSuccessful, status: "succeeded" }) : null, current: status.current ? toSyncRunDto(status.current) : null, currentJob: currentJob ? toJobDto(currentJob) : null };
+    const jobs = new SqliteJobRepository(database).list(undefined, 100);
+    const currentJob = jobs.find((job) => job.type === "catalog.sync") ?? null;
+    const currentImageCacheJob = jobs.find((job) => job.type === "catalog.image-cache") ?? null;
+    const result: CatalogSyncStatusDto = { latestSuccessful: status.latestSuccessful ? toSyncRunDto({ ...status.latestSuccessful, status: "succeeded" }) : null, current: status.current ? toSyncRunDto(status.current) : null, currentJob: currentJob ? toJobDto(currentJob) : null, currentImageCacheJob: currentImageCacheJob ? toJobDto(currentImageCacheJob) : null };
     return success(request.requestId, result);
   });
   app.post("/v1/admin/catalog/sync", { preHandler: requireRole("admin") }, async (request, reply) => {
@@ -65,6 +72,13 @@ export async function registerCatalogRoutes(app: FastifyInstance, config: ApiCon
     if (typeof key !== "string" || key.length < 8) return reply.code(400).send(failure(request.requestId, "IDEMPOTENCY_KEY_REQUIRED", "写请求必须携带 Idempotency-Key"));
     const payload = syncBodySchema.parse(request.body ?? {});
     const job = new SqliteJobRepository(database).enqueue({ type: "catalog.sync", payload, uniqueKey: `catalog.sync:${key}`, runAfter: new Date().toISOString(), maxAttempts: 3 }, new Date().toISOString());
+    return reply.code(201).send(success(request.requestId, toJobDto(job)));
+  });
+  app.post("/v1/admin/catalog/image-cache", { preHandler: requireRole("admin") }, async (request, reply) => {
+    const key = request.headers["idempotency-key"];
+    if (typeof key !== "string" || key.length < 8) return reply.code(400).send(failure(request.requestId, "IDEMPOTENCY_KEY_REQUIRED", "写请求必须携带 Idempotency-Key"));
+    const payload = imageCacheBodySchema.parse(request.body ?? {}) as CatalogImageCacheRequest;
+    const job = new SqliteJobRepository(database).enqueue({ type: "catalog.image-cache", payload, uniqueKey: `catalog.image-cache:${key}`, runAfter: new Date().toISOString(), maxAttempts: 3 }, new Date().toISOString());
     return reply.code(201).send(success(request.requestId, toJobDto(job)));
   });
 }

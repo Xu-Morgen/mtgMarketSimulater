@@ -42,9 +42,10 @@ export class SqliteCatalogRepository {
     const offset = filters.cursor ? Number.parseInt(filters.cursor, 10) : 0;
     if (!Number.isSafeInteger(offset) || offset < 0) throw new RangeError("目录分页游标无效");
     const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const total = (this.database.prepare(`SELECT COUNT(*) AS count FROM card_skus sku JOIN card_printings p ON p.id = sku.printing_id JOIN card_sets s ON s.id = p.set_id ${clause}`).get(...values) as { count: number }).count;
     const rows = this.database.prepare(`${this.selectSql()} ${clause} ORDER BY p.name COLLATE NOCASE, s.code, p.collector_number, sku.finish LIMIT ? OFFSET ?`).all(...values, filters.limit + 1, offset) as CatalogRow[];
     const hasMore = rows.length > filters.limit;
-    return { items: rows.slice(0, filters.limit).map(item), page: { hasMore, nextCursor: hasMore ? String(offset + filters.limit) : null } };
+    return { items: rows.slice(0, filters.limit).map(item), page: { total, hasMore, nextCursor: hasMore ? String(offset + filters.limit) : null } };
   }
 
   findBySkuId(skuId: string): CatalogSkuDetailDto | null {
