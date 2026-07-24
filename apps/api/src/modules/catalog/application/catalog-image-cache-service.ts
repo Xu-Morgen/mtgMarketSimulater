@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { CatalogImageCache } from "../../../platform/external/scryfall/scryfall-bulk-client.js";
+import type { CatalogImageCache } from "../../../platform/external/scryfall/scryfall-bulk-client.js";
 
 export type CatalogImageCacheRequest =
   | { scope: "single"; skuId: string }

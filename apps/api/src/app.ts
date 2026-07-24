@@ -14,6 +14,7 @@ import { SqliteJobRepository } from "./modules/jobs/infrastructure/sqlite-job-re
 import { registerAuthRoutes, requireRole } from "./modules/auth/api/auth-routes.js";
 import { registerUserRoutes } from "./modules/users/api/user-routes.js";
 import { registerCatalogRoutes } from "./modules/catalog/api/catalog-routes.js";
+import { registerInventoryRoutes } from "./modules/inventory/api/inventory-routes.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -104,6 +105,7 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
   await registerAuthRoutes(app, config, database);
   await registerUserRoutes(app, database);
   await registerCatalogRoutes(app, config, database);
+  await registerInventoryRoutes(app, database);
 
   app.get("/health", async (request) => success(request.requestId, { status: "ok", database: databaseHealth(database) }));
 

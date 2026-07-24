@@ -49,3 +49,9 @@
 - `POST /v1/admin/catalog/image-cache` 仅管理员可投递独立 `catalog.image-cache`：`{ scope: "single", skuId }` 缓存一张已同步的 Scryfall 印刷卡图，`{ scope: "set", setCode }` 补齐整个本地系列的缺图/失败图。任务只读取本地目录中的受控图片地址，绝不重新下载 Bulk 或替换目录；请求同样要求 `Idempotency-Key`。
 - API 进程使用仅服务端配置的 `SCRYFALL_USER_AGENT` 请求 Bulk 元数据、Bulk 文件与卡图；该字段不得作为浏览器参数或响应字段暴露。未使用自定义标识时，Scryfall 可返回 `400 generic_user_agent`。
 - `GET /v1/catalog/images/{imageName}` 只读取 `CATALOG_DATA_DIR/images` 中服务端生成的 UUID 文件名，要求有效会话，禁止任意路径与 Scryfall URL。目录页面和所有浏览器 API 均不会请求 Scryfall。
+
+## I10B 库存查询协议
+
+- `GET /v1/inventory` 要求有效 Bearer 会话，仅返回当前玩家的库存总览。支持 `query`、`setCode`、`finish`、`locked=any|locked|available`、`sort=updatedAt|name|quantity|availableQuantity`、`direction`、`cursor`、`limit`，所有筛选、排序和分页均在服务端执行。
+- `GET /v1/inventory/{skuId}` 返回当前玩家该 SKU 的持有量、可用量、订单/比赛锁定量、移动平均成本、市值快照和本地展示卡牌资料；未持有返回 `404 RESOURCE_NOT_FOUND`。`marketValue: null` 时响应带 `marketValueUnavailableReason`，客户端不得自行估算市值。
+- `GET /v1/inventory/{skuId}/reconciliation` 返回服务端校验的数量恒等式和不可变 `inventory_entries` 分页流水，供排障与未来管理查询反查。上述路由均不提供改库存或解锁功能；锁定、释放、扣减仅能由开包、订单和比赛的服务端命令完成。

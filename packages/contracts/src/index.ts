@@ -180,6 +180,38 @@ export interface InventoryDto {
   updatedAt: string;
 }
 
+/** 玩家按 SKU 持有的库存真相；卡牌资料只用于展示，数量与成本均来自服务端库存账。 */
+export interface InventoryHoldingDto extends InventoryDto {
+  sku: Pick<CatalogSkuDto, "id" | "name" | "setCode" | "setName" | "collectorNumber" | "finish" | "imagePath" | "tradable">;
+  /** 没有有效价格快照时为 null，原因由服务端明确给出。 */
+  marketValueUnavailableReason: "no_snapshot" | "stale_snapshot" | null;
+}
+
+export interface InventoryEntryDto {
+  id: string;
+  userId: string;
+  skuId: string;
+  reason: string;
+  quantityDelta: number;
+  availableQuantityDelta: number;
+  orderLockedQuantityDelta: number;
+  tournamentLockedQuantityDelta: number;
+  quantityAfter: number;
+  averageCostAfter: Money;
+  correlationId: string;
+  occurredAt: string;
+}
+
+export interface InventoryReconciliationDto {
+  skuId: string;
+  quantity: number;
+  availableQuantity: number;
+  orderLockedQuantity: number;
+  tournamentLockedQuantity: number;
+  reconciled: boolean;
+  entries: Page<InventoryEntryDto>;
+}
+
 export interface AccountBalanceDto {
   /** total = available + frozen，三个值均以整数最小单位表达。 */
   total: Money;

@@ -231,3 +231,30 @@ export const catalogSyncRuns = sqliteTable(
 );
 
 export const catalogSyncState = sqliteTable("catalog_sync_state", { singleton: integer("singleton").primaryKey(), latestSuccessfulRunId: text("latest_successful_run_id").references(() => catalogSyncRuns.id), updatedAt: text("updated_at").notNull() });
+
+/** I10B：库存数量、成本与市值快照；锁定明细与不可变流水见 inventoryHolds / inventoryEntries。 */
+export const inventoryHoldings = sqliteTable(
+  "inventory_holdings",
+  {
+    id: text("id").primaryKey(), userId: text("user_id").notNull().references(() => users.id), skuId: text("sku_id").notNull().references(() => cardSkus.id),
+    quantity: integer("quantity").notNull(), availableQuantity: integer("available_quantity").notNull(), orderLockedQuantity: integer("order_locked_quantity").notNull(), tournamentLockedQuantity: integer("tournament_locked_quantity").notNull(),
+    averageCostAmount: integer("average_cost_amount").notNull(), marketValueAmount: integer("market_value_amount"), marketValueCapturedAt: text("market_value_captured_at"), updatedAt: text("updated_at").notNull()
+  },
+  (table) => [uniqueIndex("inventory_holdings_user_sku_unique").on(table.userId, table.skuId), index("inventory_holdings_user_updated_index").on(table.userId, table.updatedAt)]
+);
+
+export const inventoryHolds = sqliteTable(
+  "inventory_holds",
+  {
+    id: text("id").primaryKey(), holdingId: text("holding_id").notNull().references(() => inventoryHoldings.id), reason: text("reason").notNull(), quantity: integer("quantity").notNull(), entityType: text("entity_type").notNull(), entityId: text("entity_id").notNull(), status: text("status").notNull(), createdAt: text("created_at").notNull(), releasedAt: text("released_at")
+  },
+  (table) => [index("inventory_holds_holding_status_index").on(table.holdingId, table.status), uniqueIndex("inventory_holds_entity_unique").on(table.holdingId, table.reason, table.entityType, table.entityId)]
+);
+
+export const inventoryEntries = sqliteTable(
+  "inventory_entries",
+  {
+    id: text("id").primaryKey(), holdingId: text("holding_id").notNull().references(() => inventoryHoldings.id), reason: text("reason").notNull(), quantityDelta: integer("quantity_delta").notNull(), availableQuantityDelta: integer("available_quantity_delta").notNull(), orderLockedQuantityDelta: integer("order_locked_quantity_delta").notNull(), tournamentLockedQuantityDelta: integer("tournament_locked_quantity_delta").notNull(), quantityAfter: integer("quantity_after").notNull(), averageCostAfter: integer("average_cost_after").notNull(), correlationId: text("correlation_id").notNull(), occurredAt: text("occurred_at").notNull()
+  },
+  (table) => [index("inventory_entries_holding_occurred_index").on(table.holdingId, table.occurredAt)]
+);

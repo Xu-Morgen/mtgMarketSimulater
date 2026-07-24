@@ -14,11 +14,13 @@ describe("database foundation", () => {
     paths.push(directory);
     const database = openSqliteDatabase(join(directory, "test.db"));
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
-    expect(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get()).toEqual({ count: 9 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get()).toEqual({ count: 10 });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'catalog_sync_runs'").get()).toEqual({ name: "catalog_sync_runs" });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'accounts'").get()).toEqual({ name: "accounts" });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'game_archives'").get()).toEqual({ name: "game_archives" });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'card_skus'").get()).toEqual({ name: "card_skus" });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'inventory_holdings'").get()).toEqual({ name: "inventory_holdings" });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'inventory_entries'").get()).toEqual({ name: "inventory_entries" });
     expect(database.prepare("SELECT version FROM rule_versions WHERE rule_set = 'initial-funds'").get()).toEqual({ version: "v1" });
     expect(database.prepare("SELECT email, display_name, role, password_hash FROM users WHERE email = 'admin@local.test'").get()).toMatchObject({ email: "admin@local.test", display_name: "admin", role: "admin", password_hash: expect.stringMatching(/^\$argon2id\$/) });
     database.close();
