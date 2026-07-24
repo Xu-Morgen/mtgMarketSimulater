@@ -23,7 +23,7 @@
 - `POST /v1/auth/register` 和 `POST /v1/auth/login` 接收 email、password（最少 12 位）及注册所需的 displayName，返回短期 Bearer access token 与最小用户信息；密码或账户不存在统一返回 `401 AUTHENTICATION_INVALID`，避免枚举账户。
 - `POST /v1/auth/refresh` 与 `POST /v1/auth/logout` 从 `mtg_refresh` HttpOnly Cookie 读取 refresh token，并强制校验同路径 `mtg_csrf` Cookie 对应的 `X-CSRF-Token`。成功刷新会立即撤销旧 token 并写入新会话；旧 token 重放返回 `401` 且撤销该轮换链。登出会撤销会话并清除两种 Cookie。
 - `GET /v1/auth/session` 和受保护端点须传 `Authorization: Bearer <access token>`。无效、过期或已撤销会话返回 `401 AUTHENTICATION_INVALID`；角色不足返回 `403 AUTHORIZATION_DENIED`。`/v1/admin/*` 全部要求 admin。
-- Cookie 固定 `Path=/v1/auth`、`HttpOnly`（仅 refresh）、`SameSite=Strict`；生产环境包含 `Secure`。认证端点按来源 IP 进行基础每分钟滑动窗口限制，超限返回 `429 RATE_LIMITED`。配置必须提供至少 32 字符的 `AUTH_JWT_SECRET`，不得提交真实值。
+- Cookie 固定 `Path=/v1/auth`、`HttpOnly`（仅 refresh）、`SameSite=Strict`；生产环境包含 `Secure`。认证端点按来源 IP 进行基础每分钟 100 次滑动窗口限制，超限返回 `429 RATE_LIMITED`。配置必须提供至少 32 字符的 `AUTH_JWT_SECRET`，不得提交真实值。
 
 ## I07B 存档与账本协议
 

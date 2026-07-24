@@ -45,6 +45,12 @@
 - `components/ui.tsx` 提供 Skeleton、错误重试、空态、确认框、分页/筛选和会话过期提示；通用样式由 Tailwind CSS 编译并保留窄屏不阻断的布局。
 - Playwright 配置与 I06F 认证用例位于 `tests/e2e/`；真实人工执行记录固定写入 `tests/manual/I06F.md`。
 
+## I07F 存档与账本页面（2026-07-24）
+
+- `api/archive-api.ts` 集中定义存档、账本的 contracts 查询与创建 mutation；创建意图在完成前复用同一 `Idempotency-Key`，成功后以服务端存档响应更新查询缓存并失效账本缓存。
+- 存档、账本等用户私有查询的 TanStack Query key 必须包含 `userId`；登录、注册和退出会清空查询缓存，禁止跨会话展示玩家或管理端服务器数据。
+- `pages/dashboard/player-dashboard-page.tsx` 只格式化 API 返回的整数金额，展示存档摘要、总额/可用额/冻结额、净资产占位和服务端游标分页账本；未建档、加载、失败重试、空账本、创建中与窄屏表格状态均在页面覆盖。
+
 ## 不单独建层的内容
 
 - DTO、事件与 API 契约由共享 `packages/contracts` 提供，因此前端不建立会产生重复定义的 `types/` 层。

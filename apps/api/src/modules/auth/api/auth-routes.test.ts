@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openSqliteDatabase } from "@mtg-market/database";
 import { createApiApp } from "../../../app.js";
 import { loadApiConfig } from "../../../config/environment.js";
+import { AUTH_REQUESTS_PER_MINUTE, AuthenticationRateLimiter } from "./auth-routes.js";
 
 const directories: string[] = [];
 afterEach(() => directories.splice(0).forEach((directory) => rmSync(directory, { recursive: true, force: true })));
@@ -65,13 +66,17 @@ describe("I06 authentication, session and role boundary", () => {
     const accessToken = registered.json().data.accessToken as string;
     const denied = await app.inject({ method: "GET", url: "/v1/admin/jobs", headers: { authorization: `Bearer ${accessToken}` } });
     const crossOrigin = await app.inject({ method: "POST", url: "/v1/auth/login", headers: { origin: "https://attacker.example.test" }, payload: { email: "none@example.test", password: registration.password } });
-    const attempts = await Promise.all(Array.from({ length: 10 }, () => app.inject({ method: "POST", url: "/v1/auth/login", payload: { email: "none@example.test", password: registration.password } })));
-    const limited = await app.inject({ method: "POST", url: "/v1/auth/login", payload: { email: "none@example.test", password: registration.password } });
 
     expect(denied.statusCode).toBe(403);
     expect(crossOrigin.headers["access-control-allow-origin"]).toBeUndefined();
-    expect(attempts.some((response) => response.statusCode === 429)).toBe(true);
-    expect(limited.statusCode).toBe(429);
     await app.close(); database.close();
+  });
+
+  it("allows 100 authentication requests per IP per minute and rejects the 101st", () => {
+    const limiter = new AuthenticationRateLimiter();
+    const now = Date.now();
+    expect(Array.from({ length: AUTH_REQUESTS_PER_MINUTE }, () => limiter.check("127.0.0.1", now))).toEqual(Array(AUTH_REQUESTS_PER_MINUTE).fill(true));
+    expect(limiter.check("127.0.0.1", now)).toBe(false);
+    expect(limiter.check("127.0.0.1", now + 60_001)).toBe(true);
   });
 });

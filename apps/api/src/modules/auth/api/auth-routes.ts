@@ -25,9 +25,10 @@ function sendSession(reply: FastifyReply, request: FastifyRequest, config: ApiCo
 function unauthorized(request: FastifyRequest, reply: FastifyReply) { return reply.code(401).send(failure(request.requestId, "AUTHENTICATION_INVALID", "认证凭据无效或已过期")); }
 
 /** 小型单机部署的本地滑动窗口限制；不作为跨进程风控替代。 */
-class AuthenticationRateLimiter {
+export const AUTH_REQUESTS_PER_MINUTE = 100;
+export class AuthenticationRateLimiter {
   private readonly attempts = new Map<string, number[]>();
-  check(ip: string, now = Date.now()): boolean { const values = (this.attempts.get(ip) ?? []).filter((at) => at > now - 60_000); values.push(now); this.attempts.set(ip, values); return values.length <= 10; }
+  check(ip: string, now = Date.now()): boolean { const values = (this.attempts.get(ip) ?? []).filter((at) => at > now - 60_000); values.push(now); this.attempts.set(ip, values); return values.length <= AUTH_REQUESTS_PER_MINUTE; }
 }
 
 export async function registerAuthRoutes(app: FastifyInstance, config: ApiConfig, database: Database.Database): Promise<void> {
