@@ -4,6 +4,10 @@
 
 页面可以调用 `api/` 提供的查询和 mutation，并组合 `components/`、读取 `stores/` 中的临时 UI 状态。页面不得实现 HTTP 细节、重复定义 DTO、计算余额/报价/费用/奖励/赛果，或直接修改服务器真相。
 
+## I10F 库存
+
+`inventory/inventory-page.tsx` 通过 `api/inventory-api.ts` 读取 I10B 的服务端分页持仓快照。筛选、排序和分页写入 URL；持有量、可用量、订单/比赛锁定、平均成本、市值和无价原因均原样展示服务端字段。页面没有修改库存、成本、市值或解锁资产的操作。
+
 Next.js 的 `app/` 路由文件只负责路由协议和框架边界，应从本层引入对应的页面模块。建议的后续目录为 `auth/`、`dashboard/`、`catalog/`、`packs/`、`inventory/`、`market/`、`orders/`、`decks/`、`tournaments/`、`admin/`。
 
 `admin/` 至少包含后台首页、活动、玩家、内容/参数、任务/Agent 和日志页面。管理页面只提交服务端预览和显式管理命令；不能直接编辑最终余额/库存、修改外部快照或删除日志。前端路由判断只改善体验，Fastify `/v1/admin/*` 的角色检查才是授权边界。
