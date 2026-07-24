@@ -74,6 +74,26 @@ describe("API cross-cutting HTTP boundary", () => {
     database.close();
   });
 
+  it("provides task enqueue, query, unique-key de-duplication and manual retry", async () => {
+    const { app, database } = await createTestApp();
+    const body = { type: "prices.sync", payload: { sourceVersion: "test" }, uniqueKey: "2026-07-24" };
+    const missingKey = await app.inject({ method: "POST", url: "/v1/admin/jobs", payload: body });
+    const created = await app.inject({ method: "POST", url: "/v1/admin/jobs", headers: { "idempotency-key": "idem-job-123" }, payload: body });
+    const duplicate = await app.inject({ method: "POST", url: "/v1/admin/jobs", headers: { "idempotency-key": "idem-job-456" }, payload: body });
+    const id = created.json().data.id as string;
+    database.prepare("UPDATE jobs SET status = 'dead' WHERE id = ?").run(id);
+    const retried = await app.inject({ method: "POST", url: `/v1/admin/jobs/${id}/retry`, headers: { "idempotency-key": "idem-retry-123" } });
+    const listed = await app.inject({ method: "GET", url: "/v1/admin/jobs?status=pending" });
+
+    expect(missingKey.json()).toMatchObject({ ok: false, error: { code: "IDEMPOTENCY_KEY_REQUIRED" } });
+    expect(created.statusCode).toBe(201);
+    expect(duplicate.json().data.id).toBe(id);
+    expect(retried.json()).toMatchObject({ ok: true, data: { id, status: "pending", attempt: 0 } });
+    expect(listed.json().data.items).toEqual([expect.objectContaining({ id, type: "prices.sync" })]);
+    await app.close();
+    database.close();
+  });
+
   it("keeps the checked OpenAPI document aligned with public routes", () => {
     expect(openApiDocument.openapi).toBe("3.1.0");
     expect(Object.keys(openApiDocument.paths).sort()).toEqual([...publicApiPaths].sort());

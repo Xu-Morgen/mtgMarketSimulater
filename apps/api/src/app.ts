@@ -8,6 +8,9 @@ import type { ApiConfig } from "./config/environment.js";
 import { openApiDocument } from "./openapi.js";
 import { failure, success } from "./shared/http/api-response.js";
 import { REQUEST_ID_HEADER, resolveRequestId } from "./shared/http/request-context.js";
+import { toJobDto } from "./modules/jobs/application/task-service.js";
+import { isRegisteredJobType } from "./modules/jobs/domain/job.js";
+import { SqliteJobRepository } from "./modules/jobs/infrastructure/sqlite-job-repository.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -21,6 +24,9 @@ const quotePreviewQuerySchema = z.object({
   buySpread: z.coerce.number().min(0).max(1).default(0.1),
   sellSpread: z.coerce.number().min(0).max(1).default(0.1)
 }).strict();
+
+const jobListQuerySchema = z.object({ status: z.enum(["pending", "running", "succeeded", "failed", "dead"]).optional(), limit: z.coerce.number().int().min(1).max(100).default(20) }).strict();
+const jobEnqueueBodySchema = z.object({ type: z.string().refine(isRegisteredJobType, "未知任务类型"), payload: z.unknown().default({}), uniqueKey: z.string().trim().min(1).max(200), runAfter: z.string().datetime().optional(), maxAttempts: z.number().int().min(1).max(20).default(3) }).strict();
 
 function jobHealthSummary(database: Database.Database) {
   const rows = database
@@ -108,6 +114,32 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
   app.get("/v1/market/quote-preview", async (request) => {
     const query = quotePreviewQuerySchema.parse(request.query);
     return success(request.requestId, calculateNpcQuote(query));
+  });
+
+  const jobs = new SqliteJobRepository(database);
+
+  app.get("/v1/admin/jobs", async (request) => {
+    const query = jobListQuerySchema.parse(request.query);
+    return success(request.requestId, { items: jobs.list(query.status, query.limit).map(toJobDto) });
+  });
+
+  // I06 接入 RBAC 后此路由由 admin 中间件保护；I05 先提供受控运行环境使用的管理协议。
+  app.post("/v1/admin/jobs", async (request, reply) => {
+    const key = request.headers["idempotency-key"];
+    if (typeof key !== "string" || key.length < 8) return reply.code(400).send(failure(request.requestId, "IDEMPOTENCY_KEY_REQUIRED", "写请求必须携带 Idempotency-Key"));
+    const body = jobEnqueueBodySchema.parse(request.body);
+    const now = new Date().toISOString();
+    const job = jobs.enqueue({ ...body, payload: body.payload ?? {}, runAfter: body.runAfter ?? now }, now);
+    return reply.code(201).send(success(request.requestId, toJobDto(job)));
+  });
+
+  app.post("/v1/admin/jobs/:id/retry", async (request, reply) => {
+    const key = request.headers["idempotency-key"];
+    if (typeof key !== "string" || key.length < 8) return reply.code(400).send(failure(request.requestId, "IDEMPOTENCY_KEY_REQUIRED", "写请求必须携带 Idempotency-Key"));
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const job = jobs.manualRetry(params.id, new Date().toISOString());
+    if (!job) return reply.code(409).send(failure(request.requestId, "RESOURCE_CONFLICT", "任务不存在或当前状态不可手动重试"));
+    return success(request.requestId, toJobDto(job));
   });
 
   return app;

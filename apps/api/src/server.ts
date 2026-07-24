@@ -7,13 +7,13 @@ import { startTaskRunner } from "./task-runner.js";
 const environment = loadApiConfig(process.env);
 
 const database = openDatabase(environment.SQLITE_PATH);
-const stopTaskRunner = startTaskRunner(database);
+const taskRunner = startTaskRunner(database);
 const app = await createApiApp(environment, database);
 
 const close = async () => {
-  stopTaskRunner();
-  database.close();
+  await taskRunner.stop();
   await app.close();
+  database.close();
 };
 
 process.once("SIGINT", close);

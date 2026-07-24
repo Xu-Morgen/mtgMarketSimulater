@@ -151,6 +151,21 @@ export const jobs = sqliteTable(
   (table) => [uniqueIndex("jobs_type_unique_key_unique").on(table.type, table.uniqueKey)]
 );
 
+/** 每次领取均留下不可变运行记录；重试会创建新的 attempt，而不会覆盖历史错误。 */
+export const jobRuns = sqliteTable(
+  "job_runs",
+  {
+    id: text("id").primaryKey(),
+    jobId: text("job_id").notNull().references(() => jobs.id),
+    attempt: integer("attempt").notNull(),
+    status: text("status").notNull(),
+    startedAt: text("started_at").notNull(),
+    finishedAt: text("finished_at"),
+    errorSummary: text("error_summary")
+  },
+  (table) => [uniqueIndex("job_runs_job_attempt_unique").on(table.jobId, table.attempt), index("job_runs_job_started_index").on(table.jobId, table.startedAt)]
+);
+
 export const ruleVersions = sqliteTable(
   "rule_versions",
   {

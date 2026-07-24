@@ -17,3 +17,8 @@
 - 浏览器 CORS 来源只可由 `CORS_ORIGINS` 配置；未配置时只允许 `WEB_ORIGIN`。带 Cookie 的跨域请求必须命中白名单。
 - 当前 OpenAPI 3.1 文档源为 `src/openapi.ts`，运行时可读取 `GET /openapi.json`；对应集成测试检查 OpenAPI 版本和已公开路由，新增公开路由必须同步更新此文档。
 - API Pino 日志会脱敏授权头、Cookie、API key、密码和 token。写路由审计仅保存可信调用者（认证完成前为空）、幂等键、路由实体、状态码和请求 ID，禁止保存原始请求体或凭据。
+
+## I05 管理任务协议
+
+- `GET /v1/admin/jobs?status=&limit=` 返回任务状态与最近错误摘要；`POST /v1/admin/jobs` 以 `(type, uniqueKey)` 去重投递预注册任务；`POST /v1/admin/jobs/{id}/retry` 将 `failed`/`dead` 任务重新置为 pending。
+- 两个写端点都要求至少 8 位 `Idempotency-Key`，缺失时返回 `400 IDEMPOTENCY_KEY_REQUIRED`。I06 完成前这些接口尚未具备用户级授权，只限受控运维网络调用；认证上线时必须收紧为 admin。
