@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./styles.css";
+import { AppProviders } from "../providers/app-providers";
 
 export const metadata: Metadata = {
   title: "卡牌市场模拟器",
@@ -9,7 +10,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body><AppProviders>{children}</AppProviders></body>
     </html>
   );
 }

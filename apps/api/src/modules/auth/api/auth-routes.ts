@@ -14,9 +14,10 @@ declare module "fastify" { interface FastifyRequest { actor: AuthenticatedUser |
 
 function parseCookies(header: string | undefined): Record<string, string> { return Object.fromEntries((header ?? "").split(";").map((part) => part.trim().split(/=(.*)/s)).filter(([key, value]) => Boolean(key && value)).map(([key, value]) => [key!, decodeURIComponent(value!)])); }
 function serializeCookie(name: string, value: string, config: ApiConfig, httpOnly: boolean): string {
-  return [`${name}=${encodeURIComponent(value)}`, "Path=/v1/auth", `Max-Age=${config.REFRESH_TOKEN_TTL_SECONDS}`, "SameSite=Strict", ...(httpOnly ? ["HttpOnly"] : []), ...(config.APP_ENV === "production" ? ["Secure"] : [])].join("; ");
+  // CSRF 值必须可由 Web 应用在任意页面读取并回传 Header；refresh token 保持最小路径与 HttpOnly。
+  return [`${name}=${encodeURIComponent(value)}`, `Path=${httpOnly ? "/v1/auth" : "/"}`, `Max-Age=${config.REFRESH_TOKEN_TTL_SECONDS}`, "SameSite=Strict", ...(httpOnly ? ["HttpOnly"] : []), ...(config.APP_ENV === "production" ? ["Secure"] : [])].join("; ");
 }
-function expiredCookie(name: string): string { return `${name}=; Path=/v1/auth; Max-Age=0; SameSite=Strict`; }
+function expiredCookie(name: string): string { return `${name}=; Path=${name === csrfCookie ? "/" : "/v1/auth"}; Max-Age=0; SameSite=Strict`; }
 function sendSession(reply: FastifyReply, request: FastifyRequest, config: ApiConfig, credentials: SessionCredentials, code = 200) {
   reply.header("Set-Cookie", [serializeCookie(refreshCookie, credentials.refreshToken, config, true), serializeCookie(csrfCookie, credentials.csrfToken, config, false)]);
   return reply.code(code).send(success(request.requestId, { accessToken: credentials.accessToken, user: credentials.user }));

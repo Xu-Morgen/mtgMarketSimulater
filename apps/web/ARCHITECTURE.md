@@ -37,9 +37,13 @@
 - 每个用户可见迭代在 `tests/manual/<迭代ID>.md` 保存人工验收记录；记录构建/提交标识、浏览器、测试数据、步骤结果和截图/录屏路径。
 - 单元、组件或 API 测试通过不能替代页面人工验收；对应页面、Playwright 和人工记录齐备后才满足前端完成定义。
 
-## 当前迁移约定
+## I06F 已落地基线（2026-07-24）
 
-现有 `app/page.tsx` 与 `components/health-status.tsx` 暂不移动或改写。本次只创建架构骨架和职责文档；后续实现页面时，再由路由入口逐步组合 `pages/` 模块。
+- 根布局通过 `providers/app-providers.tsx` 装配 TanStack Query、会话恢复和全局通知。access token 只存浏览器内存，refresh token 保持 HttpOnly Cookie；会话恢复经 CSRF Cookie 调用 `/v1/auth/refresh`，不将令牌持久化到 localStorage。
+- `api/client.ts` 是统一 contracts 包络和错误适配入口；认证 mutation 生成 `Idempotency-Key`，表单只提交意图并展示服务端错误。
+- 公开路由为 `/`、`/login`、`/register`；`(player)` 路由组提供 `/dashboard`；`/admin` 使用独立管理布局。`SessionGate` 仅改善路由体验，管理 API 的 RBAC 仍完全由 Fastify 执行。
+- `components/ui.tsx` 提供 Skeleton、错误重试、空态、确认框、分页/筛选和会话过期提示；通用样式由 Tailwind CSS 编译并保留窄屏不阻断的布局。
+- Playwright 配置与 I06F 认证用例位于 `tests/e2e/`；真实人工执行记录固定写入 `tests/manual/I06F.md`。
 
 ## 不单独建层的内容
 
