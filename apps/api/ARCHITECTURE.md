@@ -68,6 +68,12 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 - 订单和比赛只能通过持久化 `inventory_holds` 的 active 状态锁定库存；释放和扣减（capture）都以条件更新改变同一 hold，禁止超额解锁、重复扣减或同一 SKU 在订单和比赛间重复占用。`inventory_entries` 只追加，记录每次变更的四种数量差额、变更后数量、成本和关联标识。
 - `InventoryService.withLedgerTransaction` 是跨模块经济编排接口：开包、订单或比赛必须在其 callback 中同时写库存、资金账本、事实事件与审计。callback 任何失败会回滚整笔 SQLite 短事务。玩家只可读取 `/v1/inventory`、单卡持仓和对账；没有直接修改或解锁 HTTP 路由。
 
+## 补充包规则（I11B）
+
+- `modules/packs` 持有补充包商品、活动规则版本、卡位与候选池。`booster_pack_rules.definition_json` 是不可变完整规则快照；`booster_packs.active_rule_version` 仅选择其当前公示版本。MVP 数据模型与规则输入均不包含保底、计数器或跨包状态。
+- `@mtg-market/rules` 的 `openPack` 和 `packSlotProbabilities` 只接受版本、整数权重、候选池、卡位和随机种子，返回可重放产出或服务端计算的合计 10,000 bp 稀有度概率。浏览器与 AI 不调用规则来指定或推导产出。
+- `PackService.generateAuditedResult` 使用 Node CSPRNG 创建 32-byte 种子，在短事务中将种子、SHA-256、规则版本关联及结果摘要追加到 `pack_rule_replays`；该表没有 HTTP 读取路由，种子也不在 `PackDto` 中出现。I12B 将把该入口并入扣款、库存、事实事件和幂等响应的共同事务。
+
 ## 管理后台模块边界（计划 I30B）
 
 - `modules/admin` 只编排管理用例与聚合只读查询，不得跨模块直接读写表。用户冻结/解冻和补偿修正调用 users/inventory 等所属模块的 application 命令；活动发布调用 market/application，并通过任务 application 投递版本唯一的 `market.reprice`。

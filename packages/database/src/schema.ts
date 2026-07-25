@@ -258,3 +258,26 @@ export const inventoryEntries = sqliteTable(
   },
   (table) => [index("inventory_entries_holding_occurred_index").on(table.holdingId, table.occurredAt)]
 );
+
+/** I11B：补充包商品及其不可变规则快照；保底状态明确不在 MVP 数据模型中。 */
+export const boosterPacks = sqliteTable(
+  "booster_packs",
+  {
+    id: text("id").primaryKey(), code: text("code").notNull(), name: text("name").notNull(), description: text("description"),
+    priceAmount: integer("price_amount").notNull(), enabled: integer("enabled", { mode: "boolean" }).notNull(), disabledReason: text("disabled_reason"),
+    activeRuleVersion: text("active_rule_version").notNull(), createdAt: text("created_at").notNull(), updatedAt: text("updated_at").notNull()
+  },
+  (table) => [uniqueIndex("booster_packs_code_unique").on(table.code)]
+);
+
+export const boosterPackRules = sqliteTable(
+  "booster_pack_rules",
+  { id: text("id").primaryKey(), packId: text("pack_id").notNull().references(() => boosterPacks.id), version: text("version").notNull(), definitionJson: text("definition_json").notNull(), createdAt: text("created_at").notNull(), retiredAt: text("retired_at") },
+  (table) => [uniqueIndex("booster_pack_rules_pack_version_unique").on(table.packId, table.version), index("booster_pack_rules_pack_index").on(table.packId, table.createdAt)]
+);
+
+export const packRuleReplays = sqliteTable(
+  "pack_rule_replays",
+  { id: text("id").primaryKey(), packId: text("pack_id").notNull().references(() => boosterPacks.id), packRuleId: text("pack_rule_id").notNull().references(() => boosterPackRules.id), randomSeed: text("random_seed").notNull(), randomSeedHash: text("random_seed_hash").notNull(), resultSummaryJson: text("result_summary_json").notNull(), createdAt: text("created_at").notNull() },
+  (table) => [index("pack_rule_replays_pack_created_index").on(table.packId, table.createdAt)]
+);

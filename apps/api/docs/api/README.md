@@ -55,3 +55,9 @@
 - `GET /v1/inventory` 要求有效 Bearer 会话，仅返回当前玩家的库存总览。支持 `query`、`setCode`、`finish`、`locked=any|locked|available`、`sort=updatedAt|name|quantity|availableQuantity`、`direction`、`cursor`、`limit`，所有筛选、排序和分页均在服务端执行。
 - `GET /v1/inventory/{skuId}` 返回当前玩家该 SKU 的持有量、可用量、订单/比赛锁定量、移动平均成本、市值快照和本地展示卡牌资料；未持有返回 `404 RESOURCE_NOT_FOUND`。`marketValue: null` 时响应带 `marketValueUnavailableReason`，客户端不得自行估算市值。
 - `GET /v1/inventory/{skuId}/reconciliation` 返回服务端校验的数量恒等式和不可变 `inventory_entries` 分页流水，供排障与未来管理查询反查。上述路由均不提供改库存或解锁功能；锁定、释放、扣减仅能由开包、订单和比赛的服务端命令完成。
+
+## I11B 补充包概率公示协议
+
+- `GET /v1/packs` 与 `GET /v1/packs/{packId}` 要求有效 Bearer 会话，返回 `PackDto` 列表或单个配置。每项包含整数最小货币单位价格、启用状态/停用原因、规则版本和卡位稀有度概率；每个卡位的 `probabilityBasisPoints` 总和固定为 10,000，数值由服务端版本化规则计算。
+- 响应不包含候选 SKU 池、随机种子、随机结果或保底进度；MVP 没有保底状态。未知补充包返回 `404 RESOURCE_NOT_FOUND`，非法 UUID 返回 `400 VALIDATION_FAILED`，未认证返回 `401 AUTHENTICATION_INVALID`。
+- 本期没有玩家开包写端点。I12B 的购买命令将要求 `Idempotency-Key`，并将 CSPRNG 开包、扣款、库存、事实事件和审计置于同一短事务。

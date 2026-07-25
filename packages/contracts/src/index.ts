@@ -169,6 +169,32 @@ export interface CatalogSyncStatusDto {
   currentImageCacheJob: JobDto | null;
 }
 
+/** 补充包概率仅由服务端按已发布规则版本计算；basis points 总和固定为 10_000。 */
+export interface PackRarityProbabilityDto {
+  rarity: string;
+  probabilityBasisPoints: number;
+}
+
+export interface PackSlotDto {
+  id: string;
+  draws: number;
+  rarityProbabilities: PackRarityProbabilityDto[];
+}
+
+/** 玩家可读的补充包配置；不含候选 SKU 明细、随机种子或任何保底状态。 */
+export interface PackDto {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  price: Money;
+  enabled: boolean;
+  disabledReason: string | null;
+  ruleVersion: string;
+  slots: PackSlotDto[];
+  updatedAt: string;
+}
+
 export interface InventoryDto {
   skuId: string;
   quantity: number;
