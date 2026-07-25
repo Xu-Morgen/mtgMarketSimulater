@@ -57,6 +57,12 @@
 - `pages/catalog/catalog-page.tsx` 将名称、系列、稀有度、工艺和游标保存在 URL，使用服务端分页结果展示每个独立 SKU；详情页保留印刷、工艺、来源、合法性及本地图片缓存状态，缺图时文字降级而不访问外部 URL。
 - 玩家导航新增 `/catalog`。Playwright 夹具在隔离 SQLite 中提供同名不同印刷和工艺 SKU；I08F 用例覆盖目录分页、筛选恢复、无结果、接口失败与窄屏。
 
+## I11F 补充包概率公示页面（2026-07-26）
+
+- `api/packs-api.ts` 只查询本地 Fastify 的 `GET /v1/packs` 和 `GET /v1/packs/{packId}`；TanStack Query key 按登录用户与补充包 ID 隔离，页面不保存候选池、随机种子、结果或保底进度。
+- `/packs` 公示服务端返回的补充包价格、规则版本、启用状态和禁用原因；`/packs/{packId}` 进一步按服务端 `probabilityBasisPoints` 显示每个卡位的稀有度概率。该 bp→百分比转换仅为展示格式化，前端不抽样或实现抽取规则。
+- I11F Playwright 在桌面与 390 × 844 窄屏覆盖概率加载、空列表、禁用包、规则版本刷新、失败重试和无购买/开包入口；人工记录固定在 `tests/manual/I11F.md`。
+
 ## 不单独建层的内容
 
 - DTO、事件与 API 契约由共享 `packages/contracts` 提供，因此前端不建立会产生重复定义的 `types/` 层。

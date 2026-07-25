@@ -8,6 +8,10 @@
 
 `inventory/inventory-page.tsx` 通过 `api/inventory-api.ts` 读取 I10B 的服务端分页持仓快照。筛选、排序和分页写入 URL；持有量、可用量、订单/比赛锁定、平均成本、市值和无价原因均原样展示服务端字段。页面没有修改库存、成本、市值或解锁资产的操作。
 
+## I11F 补充包概率
+
+`packs/packs-page.tsx` 通过 `api/packs-api.ts` 读取 I11B 已发布的补充包配置，并在 `/packs` 与 `/packs/<packId>` 分别展示列表和卡位概率详情。页面只格式化服务端返回的价格、规则版本、启用/禁用状态和 basis points；不暴露候选池、种子、保底状态，不抽卡，也不提供购买入口。
+
 Next.js 的 `app/` 路由文件只负责路由协议和框架边界，应从本层引入对应的页面模块。建议的后续目录为 `auth/`、`dashboard/`、`catalog/`、`packs/`、`inventory/`、`market/`、`orders/`、`decks/`、`tournaments/`、`admin/`。
 
 `admin/` 至少包含后台首页、活动、玩家、内容/参数、任务/Agent 和日志页面。管理页面只提交服务端预览和显式管理命令；不能直接编辑最终余额/库存、修改外部快照或删除日志。前端路由判断只改善体验，Fastify `/v1/admin/*` 的角色检查才是授权边界。

@@ -1,0 +1,60 @@
+.cards {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 30px;
+}
+.card {
+  background: #fff;
+  border: 1px solid #d8d6c5;
+  border-radius: 12px;
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+.card h2 {
+  margin: 0;
+}
+.card p {
+  line-height: 1.6;
+  margin: 0;
+}
+.metadata {
+  color: #596153;
+  font-size: 0.9rem;
+}
+.disabled {
+  background: #fff3cd;
+  border: 1px solid #d6b968;
+  border-radius: 8px;
+  color: #5e4809;
+  padding: 10px 12px;
+}
+.enabled {
+  background: #e3f0d7;
+  border: 1px solid #8db36f;
+  border-radius: 8px;
+  color: #254d22;
+  padding: 10px 12px;
+}
+.detail {
+  max-width: 800px;
+}
+.detailHeader {
+  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: space-between;
+}
+.slotList {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+@media (max-width: 700px) {
+  .cards {
+    grid-template-columns: 1fr;
+  }
+}
