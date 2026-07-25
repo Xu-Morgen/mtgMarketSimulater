@@ -60,4 +60,11 @@
 
 - `GET /v1/packs` 与 `GET /v1/packs/{packId}` 要求有效 Bearer 会话，返回 `PackDto` 列表或单个配置。每项包含整数最小货币单位价格、启用状态/停用原因、规则版本和卡位稀有度概率；每个卡位的 `probabilityBasisPoints` 总和固定为 10,000，数值由服务端版本化规则计算。
 - 响应不包含候选 SKU 池、随机种子、随机结果或保底进度；MVP 没有保底状态。未知补充包返回 `404 RESOURCE_NOT_FOUND`，非法 UUID 返回 `400 VALIDATION_FAILED`，未认证返回 `401 AUTHENTICATION_INVALID`。
-- 本期没有玩家开包写端点。I12B 的购买命令将要求 `Idempotency-Key`，并将 CSPRNG 开包、扣款、库存、事实事件和审计置于同一短事务。
+- 概率公示与商店结算分离；开包写命令见 I12B，客户端不得以公示概率自行抽样或推导产出。
+
+## I12B 商店购买与服务端开包协议
+
+- `GET /v1/store/packs` 仅返回当前启用、可结算的补充包；`GET /v1/store/packs/{packId}/purchase-preview` 返回服务端价格、当前 `ruleVersion`、余额是否足够与不可购买原因。未知包返回 `404 RESOURCE_NOT_FOUND`，下架包预览返回 `409 RESOURCE_CONFLICT`。
+- `POST /v1/packs/{packId}/open` 要求有效 Bearer 会话、格式正确的 `Idempotency-Key` 和 `{ ruleVersion }`。规则版本变化返回 `409 VERSION_STALE`；下架包、未建档、余额不足或包含失效 SKU 的规则包不会扣款，分别使用 `RESOURCE_CONFLICT`、`INSUFFICIENT_BALANCE` 或 `RULE_VIOLATION`。同键同体成功重放返回已持久化的开包结果（HTTP `200`），不同请求体返回 `409 IDEMPOTENCY_CONFLICT`。
+- 成功结算（`201`）在一个 SQLite 短事务中追加 `pack_rule_replays`、`pack_openings`、`pack_purchase` debit 账本、`pack_opened` 库存流水、`pack.opened` 事实事件/outbox 及审计记录；任一失败会回滚全部写入。`GET /v1/pack-openings?cursor=&limit=` 仅分页返回当前玩家的结果。
+- `PackOpeningDto` 仅包含 SKU、分摊成本和已结算时间；不返回候选池或随机种子。I17B 前每项和盈亏摘要均以 `priceStatus: "unavailable_until_i17"`、参考价/游戏内价/盈亏为 `null` 明确表示价格尚不可用，不提前生成报价。

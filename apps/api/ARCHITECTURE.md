@@ -72,7 +72,13 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 
 - `modules/packs` 持有补充包商品、活动规则版本、卡位与候选池。`booster_pack_rules.definition_json` 是不可变完整规则快照；`booster_packs.active_rule_version` 仅选择其当前公示版本。MVP 数据模型与规则输入均不包含保底、计数器或跨包状态。
 - `@mtg-market/rules` 的 `openPack` 和 `packSlotProbabilities` 只接受版本、整数权重、候选池、卡位和随机种子，返回可重放产出或服务端计算的合计 10,000 bp 稀有度概率。浏览器与 AI 不调用规则来指定或推导产出。
-- `PackService.generateAuditedResult` 使用 Node CSPRNG 创建 32-byte 种子，在短事务中将种子、SHA-256、规则版本关联及结果摘要追加到 `pack_rule_replays`；该表没有 HTTP 读取路由，种子也不在 `PackDto` 中出现。I12B 将把该入口并入扣款、库存、事实事件和幂等响应的共同事务。
+- `PackService.generateAuditedResult` 使用 Node CSPRNG 创建 32-byte 种子，在短事务中将种子、SHA-256、规则版本关联及结果摘要追加到 `pack_rule_replays`；该表没有 HTTP 读取路由，种子也不在 `PackDto` 中出现。
+
+## 商店结算与开包记录（I12B）
+
+- `PackService.openForPurchase` 是唯一的玩家开包命令。它通过 inventory application 的 `withLedgerTransaction` 在一笔短 SQLite 事务内调用 users application 的扣款命令、随机审计、库存入账、`pack_openings`、`pack.opened` 事实事件/outbox、业务审计与幂等响应；任何库存、账本或事件错误都会回滚整笔操作。
+- `pack_openings` 只追加玩家、补充包、规则版本、随机重放关联、消费额及脱敏结果摘要。`pack_rule_replays` 原始种子仍没有 HTTP 路由；玩家历史只通过 `/v1/pack-openings` 获得已结算 SKU 和成本。
+- 商店只允许活动包、当前规则版本和完整 SKU 引用进入交易。I17B 前结果的参考价、游戏内价和盈亏均为明确的不可用状态，`pack.opened` 只追加保存供后续市场模块消费，绝不在本期提前计算报价。
 
 ## 管理后台模块边界（计划 I30B）
 

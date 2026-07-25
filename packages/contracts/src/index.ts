@@ -5,7 +5,7 @@
  * 这里的事件只描述已经提交的业务事实，绝不能被当作结算命令消费。
  */
 
-export const CONTRACTS_VERSION = "2026-07-24" as const;
+export const CONTRACTS_VERSION = "2026-07-26" as const;
 
 export type CurrencyCode = "EUR" | "GAME_CREDIT";
 export type PriceSource = "mtgjson-cardmarket" | "manual-test";
@@ -195,6 +195,48 @@ export interface PackDto {
   updatedAt: string;
 }
 
+/** 购买前由服务端生成的补充包预览；客户端须回传 ruleVersion 以避免按过期配置结算。 */
+export interface PackPurchasePreviewDto {
+  pack: PackDto;
+  ruleVersion: string;
+  cost: Money;
+  canPurchase: boolean;
+  unavailableReason: "insufficient_balance" | "archive_required" | null;
+}
+
+/** I17B 前没有可用的外部参考价或游戏内报价，开包结果必须明确标注该状态。 */
+export type PackOpeningPriceStatus = "unavailable_until_i17" | "available";
+
+export interface PackOpeningCardDto {
+  skuId: string;
+  quantity: number;
+  /** 此 SKU 在本次开包中分摊到的总成本，所有结果项之和等于 spent。 */
+  cost: Money;
+  referencePrice: Money | null;
+  gamePrice: Money | null;
+  priceStatus: PackOpeningPriceStatus;
+}
+
+export interface PackOpeningProfitLossDto {
+  spent: Money;
+  referenceValue: Money | null;
+  gameValue: Money | null;
+  referenceProfitLoss: Money | null;
+  gameProfitLoss: Money | null;
+  priceStatus: PackOpeningPriceStatus;
+}
+
+/** 玩家可读取的已结算开包结果；随机种子及候选池永不出现在此 DTO。 */
+export interface PackOpeningDto {
+  id: string;
+  packId: string;
+  packRuleVersion: string;
+  spent: Money;
+  received: PackOpeningCardDto[];
+  profitLoss: PackOpeningProfitLossDto;
+  openedAt: string;
+}
+
 export interface InventoryDto {
   skuId: string;
   quantity: number;
@@ -208,7 +250,10 @@ export interface InventoryDto {
 
 /** 玩家按 SKU 持有的库存真相；卡牌资料只用于展示，数量与成本均来自服务端库存账。 */
 export interface InventoryHoldingDto extends InventoryDto {
-  sku: Pick<CatalogSkuDto, "id" | "name" | "setCode" | "setName" | "collectorNumber" | "finish" | "imagePath" | "tradable">;
+  sku: Pick<
+    CatalogSkuDto,
+    "id" | "name" | "setCode" | "setName" | "collectorNumber" | "finish" | "imagePath" | "tradable"
+  >;
   /** 没有有效价格快照时为 null，原因由服务端明确给出。 */
   marketValueUnavailableReason: "no_snapshot" | "stale_snapshot" | null;
 }
