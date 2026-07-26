@@ -69,6 +69,12 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 - 订单和比赛只能通过持久化 `inventory_holds` 的 active 状态锁定库存；释放和扣减（capture）都以条件更新改变同一 hold，禁止超额解锁、重复扣减或同一 SKU 在订单和比赛间重复占用。`inventory_entries` 只追加，记录每次变更的四种数量差额、变更后数量、成本和关联标识。
 - `InventoryService.withLedgerTransaction` 是跨模块经济编排接口：开包、订单或比赛必须在其 callback 中同时写库存、资金账本、事实事件与审计。callback 任何失败会回滚整笔 SQLite 短事务。玩家只可读取 `/v1/inventory`、单卡持仓和对账；没有直接修改或解锁 HTTP 路由。
 
+## MTGJSON 价格快照（I13B）
+
+- `platform/external/mtgjson` 是唯一下载 `AllPricesToday` 与 `AllPrintings` 的适配器。它校验各文件同 URL 的 `.sha256` 侧车文件，只接受 Cardmarket `EUR` retail 的 latest-date `normal`/`foil`/`etched` 数值，记录两份下载的 SHA-256；Provider 原文、下载 URI 与 User-Agent 不通过 HTTP 输出。
+- `modules/pricing/application/PriceSyncService` 以 AllPrintings 的 Scryfall ID、MTGJSON UUID 和工艺精确对应本地 SKU，并在一笔 SQLite 短事务中追加 `price_sync_runs`、`price_sku_mappings`、每 SKU 的 `price_snapshot_entries` 和物化 `card_skus.tradable`。无价、零价、币种不符、缺映射或歧义映射均追加明确不可用原因并暂停新增交易；成功运行才移动 `price_sync_state` 指针，失败不会替换旧快照。
+- `prices.sync` 在 task runner 注册到 pricing application；`/v1/admin/prices/sync` 仅管理员读写，写入以幂等键去重投递任务。I14B 前它不生成游戏内报价，也不改写库存估值或经济流水。
+
 ## 补充包规则（I11B）
 
 - `modules/packs` 持有补充包商品、活动规则版本、卡位与候选池。`booster_pack_rules.definition_json` 是不可变完整规则快照；`booster_packs.active_rule_version` 仅选择其当前公示版本。MVP 数据模型与规则输入均不包含保底、计数器或跨包状态。

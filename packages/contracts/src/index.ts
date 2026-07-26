@@ -322,6 +322,28 @@ export interface PriceSnapshot {
   sourceVersion: string;
 }
 
+/** I13B 管理端价格同步状态；下载地址和 Provider 原始内容永不进入 DTO。 */
+export interface PriceSyncRunDto {
+  id: string;
+  sourceVersion: string;
+  pricesChecksumSha256: string;
+  mappingChecksumSha256: string;
+  status: "running" | "succeeded" | "failed";
+  mappedSkus: number;
+  pricedSkus: number;
+  unpricedSkus: number;
+  mappingFailedSkus: number;
+  failureReason: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface PriceSyncStatusDto {
+  latestSuccessful: PriceSyncRunDto | null;
+  current: PriceSyncRunDto | null;
+  currentJob: JobDto | null;
+}
+
 export interface FeeDto {
   kind: "npc_spread" | "order_fee" | "fulfillment_deposit";
   amount: Money;

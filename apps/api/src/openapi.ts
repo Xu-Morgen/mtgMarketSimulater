@@ -26,7 +26,8 @@ export const publicApiPaths = [
   "/v1/pack-openings",
   "/v1/admin/jobs",
   "/v1/admin/jobs/{id}/retry",
-  "/v1/admin/catalog/sync"
+  "/v1/admin/catalog/sync",
+  "/v1/admin/prices/sync"
 ] as const;
 
 export const openApiDocument = {
@@ -201,6 +202,10 @@ export const openApiDocument = {
           "400": { description: "缺少幂等键或参数无效" }
         }
       }
+    },
+    "/v1/admin/prices/sync": {
+      get: { summary: "查询 MTGJSON Cardmarket 价格同步状态", responses: { "200": { description: "价格快照状态" }, "403": { description: "需要管理员权限" } } },
+      post: { summary: "投递去重的 MTGJSON 价格同步任务", responses: { "201": { description: "任务已投递或返回活跃任务" }, "400": { description: "缺少幂等键或参数无效" }, "403": { description: "需要管理员权限" } } }
     },
     "/v1/admin/jobs": {
       get: { summary: "管理任务查询", responses: { "200": { description: "任务列表" } } },

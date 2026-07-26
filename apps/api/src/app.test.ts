@@ -103,6 +103,18 @@ describe("API cross-cutting HTTP boundary", () => {
     database.close();
   });
 
+  it("restricts price sync status and idempotent task dispatch to administrators", async () => {
+    const { app, database } = await createTestApp();
+    const anonymous = await app.inject({ method: "GET", url: "/v1/admin/prices/sync" }); const authorization = await adminAuthorization(app, database);
+    const missing = await app.inject({ method: "POST", url: "/v1/admin/prices/sync", headers: { authorization }, payload: {} });
+    const first = await app.inject({ method: "POST", url: "/v1/admin/prices/sync", headers: { authorization, "idempotency-key": "price-sync-key-123" }, payload: {} });
+    const replay = await app.inject({ method: "POST", url: "/v1/admin/prices/sync", headers: { authorization, "idempotency-key": "price-sync-key-123" }, payload: {} });
+    const status = await app.inject({ method: "GET", url: "/v1/admin/prices/sync", headers: { authorization } });
+    expect(anonymous.json()).toMatchObject({ ok: false, error: { code: "AUTHENTICATION_INVALID" } }); expect(missing.json()).toMatchObject({ ok: false, error: { code: "IDEMPOTENCY_KEY_REQUIRED" } });
+    expect(first.json()).toMatchObject({ ok: true, data: { type: "prices.sync", status: "pending" } }); expect(replay.json().data.id).toBe(first.json().data.id); expect(status.json()).toMatchObject({ ok: true, data: { latestSuccessful: null, current: null, currentJob: { id: first.json().data.id, type: "prices.sync" } } });
+    await app.close(); database.close();
+  });
+
   it("keeps the checked OpenAPI document aligned with public routes", () => {
     expect(openApiDocument.openapi).toBe("3.1.0");
     expect(Object.keys(openApiDocument.paths).sort()).toEqual([...publicApiPaths].sort());

@@ -14,6 +14,9 @@ const environmentSchema = z.object({
   ,SCRYFALL_BULK_ENDPOINT: z.string().url().default("https://api.scryfall.com/bulk-data/default-cards")
   ,SCRYFALL_USER_AGENT: z.string().trim().min(1).max(256).default("MTG-Market-Simulator/0.1 (local deployment)")
   ,CATALOG_ENABLED_SET_CODES: z.string().trim().optional()
+  ,MTGJSON_PRICES_ENDPOINT: z.string().url().default("https://mtgjson.com/api/v5/AllPricesToday.json.gz")
+  ,MTGJSON_PRINTINGS_ENDPOINT: z.string().url().default("https://mtgjson.com/api/v5/AllPrintings.json.gz")
+  ,MTGJSON_USER_AGENT: z.string().trim().min(1).max(256).default("MTG-Market-Simulator/0.1 (local deployment)")
 });
 
 export type ApiConfig = Omit<z.infer<typeof environmentSchema>, "CORS_ORIGINS" | "CATALOG_ENABLED_SET_CODES"> & {

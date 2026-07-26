@@ -56,6 +56,11 @@
 - `GET /v1/inventory/{skuId}` 返回当前玩家该 SKU 的持有量、可用量、订单/比赛锁定量、移动平均成本、市值快照和本地展示卡牌资料；未持有返回 `404 RESOURCE_NOT_FOUND`。`marketValue: null` 时响应带 `marketValueUnavailableReason`，客户端不得自行估算市值。
 - `GET /v1/inventory/{skuId}/reconciliation` 返回服务端校验的数量恒等式和不可变 `inventory_entries` 分页流水，供排障与未来管理查询反查。上述路由均不提供改库存或解锁功能；锁定、释放、扣减仅能由开包、订单和比赛的服务端命令完成。
 
+## I13B MTGJSON 价格同步协议
+
+- `GET /v1/admin/prices/sync` 仅管理员可读，返回 `PriceSyncStatusDto` 的最近成功/当前运行、两份输入的 SHA-256、版本、映射/有价/无价/映射失败统计、时间与脱敏失败摘要，并只返回最近的 `prices.sync` 任务；不返回外部下载地址或原始数据。
+- `POST /v1/admin/prices/sync` 仅管理员可投递 `prices.sync`，要求至少 8 位 `Idempotency-Key`。可选请求体为 `{ expectedPricesChecksumSha256?, expectedMappingChecksumSha256? }`，用于受控发布校验；同一键返回同一个持久化任务。缺键或格式错误返回 `400 IDEMPOTENCY_KEY_REQUIRED`/`VALIDATION_FAILED`，角色不足返回 `403 AUTHORIZATION_DENIED`。
+
 ## I11B 补充包概率公示协议
 
 - `GET /v1/packs` 与 `GET /v1/packs/{packId}` 要求有效 Bearer 会话，返回 `PackDto` 列表或单个配置。每项包含整数最小货币单位价格、启用状态/停用原因、规则版本和卡位稀有度概率；每个卡位的 `probabilityBasisPoints` 总和固定为 10,000，数值由服务端版本化规则计算。

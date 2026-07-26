@@ -22,6 +22,12 @@
 - 同步会先下载并校验整个 Bulk 文件（兼容 Scryfall 声明的 gzip 编码），以对象级扫描解析顶层数组而不转换完整文件为 JavaScript 字符串，并在读取时只保留启用系列；下载/解析失败最多重试三次、校验未压缩响应长度，再在短事务中替换 Scryfall 来源目录。任何 checksum、JSON 截断、Schema、重复印刷、图片或 SQLite 错误均保留最近成功目录和 `catalog_sync_state` 指针。修复外部问题后使用新的幂等键重新投递；不要将外部 URL 交给浏览器重试。
 - 卡图通过独立 `catalog.image-cache` 任务下载并写入 `CATALOG_DATA_DIR/images`。管理员可按 SKU 或系列投递任务；它仅补齐已有目录的 `missing`/`failed` 图片，不会重新下载 Bulk 或替换目录。持久化卷必须包含该目录；读取仅通过受保护的本地 `/v1/catalog/images/:imageName` 路径，禁止使用目录路径或 Scryfall 图片 URL 作公开静态根。
 
+## I13B MTGJSON Cardmarket 价格同步
+
+- 设置仅服务端可见的 `MTGJSON_PRICES_ENDPOINT`、`MTGJSON_PRINTINGS_ENDPOINT` 和标识服务的 `MTGJSON_USER_AGENT`。任务必须同时读取两个 URL 加 `.sha256` 的侧车校验和；`AllPricesToday` 提供当前日价格，`AllPrintings` 仅用于将 MTGJSON UUID/工艺映射到已导入的 Scryfall SKU；浏览器不得下载任一文件或读取其原始内容。
+- 管理员以新的 `Idempotency-Key` 调用 `POST /v1/admin/prices/sync`，再通过 `GET /v1/admin/prices/sync` 或通用 jobs API 观察运行。可选的两个 expected checksum 仅用于已获准的版本固定导入；不匹配、下载、gzip/JSON、映射或 SQLite 失败都会追加 `failed` 运行和任务错误摘要。
+- 成功运行会追加映射与每 SKU 快照，`price_sync_state` 才移动到该运行；无 Cardmarket EUR 正价、零价、缺失或歧义映射均明确标为不可新增交易。失败时不得删除 `price_snapshot_entries`、修改 state 指针、手工改 `tradable` 或把兜底价写成 Cardmarket 价；修复外部输入后重新投递任务。
+
 ## I30B 管理活动与玩家补偿（计划）
 
 以下是 I30B 实现时必须细化为可执行手册的边界；当前尚未实现，不授权通过数据库手工操作替代后台能力。

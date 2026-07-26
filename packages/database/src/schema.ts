@@ -330,6 +330,23 @@ export const catalogSyncState = sqliteTable("catalog_sync_state", {
   updatedAt: text("updated_at").notNull()
 });
 
+/** I13B：外部价格同步只追加运行、映射与快照；state 仅指向最近完整成功版本。 */
+export const priceSyncRuns = sqliteTable(
+  "price_sync_runs",
+  {
+    id: text("id").primaryKey(), source: text("source").notNull(), sourceVersion: text("source_version").notNull(),
+    pricesUri: text("prices_uri").notNull(), mappingUri: text("mapping_uri").notNull(), pricesChecksumSha256: text("prices_checksum_sha256").notNull(), mappingChecksumSha256: text("mapping_checksum_sha256").notNull(),
+    status: text("status").notNull(), mappedSkus: integer("mapped_skus").notNull(), pricedSkus: integer("priced_skus").notNull(), unpricedSkus: integer("unpriced_skus").notNull(), mappingFailedSkus: integer("mapping_failed_skus").notNull(), failureReason: text("failure_reason"), startedAt: text("started_at").notNull(), completedAt: text("completed_at")
+  },
+  (table) => [index("price_sync_runs_status_started_index").on(table.status, table.startedAt)]
+);
+
+export const priceSyncState = sqliteTable("price_sync_state", { singleton: integer("singleton").primaryKey(), latestSuccessfulRunId: text("latest_successful_run_id").references(() => priceSyncRuns.id), updatedAt: text("updated_at").notNull() });
+
+export const priceSkuMappings = sqliteTable("price_sku_mappings", { id: text("id").primaryKey(), syncRunId: text("sync_run_id").notNull().references(() => priceSyncRuns.id), skuId: text("sku_id").notNull().references(() => cardSkus.id), scryfallId: text("scryfall_id").notNull(), mtgjsonUuid: text("mtgjson_uuid").notNull(), finish: text("finish").notNull(), createdAt: text("created_at").notNull() }, (table) => [uniqueIndex("price_sku_mappings_run_sku_unique").on(table.syncRunId, table.skuId), uniqueIndex("price_sku_mappings_run_uuid_finish_unique").on(table.syncRunId, table.mtgjsonUuid, table.finish), index("price_sku_mappings_sku_index").on(table.skuId, table.createdAt)]);
+
+export const priceSnapshotEntries = sqliteTable("price_snapshot_entries", { id: text("id").primaryKey(), syncRunId: text("sync_run_id").notNull().references(() => priceSyncRuns.id), skuId: text("sku_id").notNull().references(() => cardSkus.id), mappingId: text("mapping_id").references(() => priceSkuMappings.id), mtgjsonUuid: text("mtgjson_uuid"), finish: text("finish").notNull(), priceType: text("price_type").notNull(), currency: text("currency").notNull(), priceAmount: integer("price_amount"), availability: text("availability").notNull(), unavailableReason: text("unavailable_reason"), capturedAt: text("captured_at").notNull(), createdAt: text("created_at").notNull() }, (table) => [uniqueIndex("price_snapshot_entries_run_sku_unique").on(table.syncRunId, table.skuId), index("price_snapshot_entries_sku_captured_index").on(table.skuId, table.capturedAt)]);
+
 /** I10B：库存数量、成本与市值快照；锁定明细与不可变流水见 inventoryHolds / inventoryEntries。 */
 export const inventoryHoldings = sqliteTable(
   "inventory_holdings",

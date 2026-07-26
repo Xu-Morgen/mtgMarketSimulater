@@ -16,7 +16,10 @@ describe("loadApiConfig", () => {
       CATALOG_DATA_DIR: "./data/catalog",
       SCRYFALL_BULK_ENDPOINT: "https://api.scryfall.com/bulk-data/default-cards",
       SCRYFALL_USER_AGENT: "MTG-Market-Simulator/0.1 (local deployment)",
-      CATALOG_ENABLED_SET_CODES: []
+      CATALOG_ENABLED_SET_CODES: [],
+      MTGJSON_PRICES_ENDPOINT: "https://mtgjson.com/api/v5/AllPricesToday.json.gz",
+      MTGJSON_PRINTINGS_ENDPOINT: "https://mtgjson.com/api/v5/AllPrintings.json.gz",
+      MTGJSON_USER_AGENT: "MTG-Market-Simulator/0.1 (local deployment)"
     });
   });
 
