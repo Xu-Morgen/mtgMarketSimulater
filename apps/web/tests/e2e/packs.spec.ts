@@ -7,7 +7,7 @@ const activePack = {
   id: activePackId,
   code: "PLAY-01",
   name: "测试补充包",
-  description: "用于验证服务端概率公示。",
+  description: "用于验证服务端概率公示和开包。",
   price: { amount: 500, currency: "GAME_CREDIT" },
   enabled: true,
   disabledReason: null,
@@ -32,9 +32,47 @@ const disabledPack = {
   enabled: false,
   disabledReason: "活动已结束"
 };
+const opening = {
+  id: "70000000-0000-4000-8000-000000000011",
+  packId: activePackId,
+  packRuleVersion: "pack/v1",
+  spent: { amount: 500, currency: "GAME_CREDIT" },
+  received: [
+    {
+      skuId: "30000000-0000-4000-8000-000000000011",
+      quantity: 1,
+      cost: { amount: 250, currency: "GAME_CREDIT" },
+      referencePrice: null,
+      gamePrice: null,
+      priceStatus: "unavailable_until_i17"
+    },
+    {
+      skuId: "30000000-0000-4000-8000-000000000012",
+      quantity: 1,
+      cost: { amount: 250, currency: "GAME_CREDIT" },
+      referencePrice: null,
+      gamePrice: null,
+      priceStatus: "unavailable_until_i17"
+    }
+  ],
+  profitLoss: {
+    spent: { amount: 500, currency: "GAME_CREDIT" },
+    referenceValue: null,
+    gameValue: null,
+    referenceProfitLoss: null,
+    gameProfitLoss: null,
+    priceStatus: "unavailable_until_i17"
+  },
+  openedAt: "2026-07-26T09:30:00.000Z"
+};
+const firstReceivedSkuId = "30000000-0000-4000-8000-000000000011";
 
 function envelope(data: unknown) {
-  return { ok: true, data, meta: { requestId: "i11f-e2e" } };
+  return { ok: true, data, meta: { requestId: "i12f-e2e" } };
+}
+
+function failure(code: string, message: string) {
+  return { ok: false, error: { code, message }, meta: { requestId: "i12f-failure" } };
 }
 
 async function registerPlayer(page: Page): Promise<void> {
@@ -42,20 +80,21 @@ async function registerPlayer(page: Page): Promise<void> {
   await page.getByLabel("显示名称").fill("补充包测试玩家");
   await page
     .getByLabel("邮箱")
-    .fill(`packs-${test.info().project.name}-${Date.now()}@example.test`);
+    .fill(`packs-${test.info().project.name}-${test.info().testId}-${Date.now()}@example.test`);
   await page.getByRole("textbox", { name: "密码" }).fill(password);
   await page.getByRole("button", { name: "创建账号" }).click();
   await expect(page.getByRole("link", { name: "补充包商店" })).toBeVisible();
 }
 
-test("玩家可查看服务端补充包、禁用原因和版本化概率详情，页面不提供抽卡入口", async ({ page }) => {
-  await registerPlayer(page);
+async function mockPackList(page: Page, items = [activePack, disabledPack]): Promise<void> {
   await page.route("**/v1/packs", async (route) =>
-    route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify(envelope({ items: [activePack, disabledPack] }))
-    })
+    route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items })) })
   );
+}
+
+test("玩家可查看服务端概率和禁用原因，并从详情返回商店购买", async ({ page }) => {
+  await registerPlayer(page);
+  await mockPackList(page);
   await page.route(`**/v1/packs/${activePackId}`, async (route) =>
     route.fulfill({
       contentType: "application/json",
@@ -66,16 +105,126 @@ test("玩家可查看服务端补充包、禁用原因和版本化概率详情�
   await expect(page.getByRole("heading", { name: "补充包商店" })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("当前不可购买：")).toBeVisible();
   await expect(page.getByText("活动已结束")).toBeVisible();
+  await expect(page.getByRole("button", { name: "购买并开包" }).first()).toBeEnabled();
+  await expect(page.getByRole("button", { name: "购买并开包" }).nth(1)).toBeDisabled();
   await page.getByRole("link", { name: "查看概率详情" }).first().click();
   await expect(page).toHaveURL(new RegExp(`/packs/${activePackId}$`));
   await expect(page.getByRole("heading", { name: "测试补充包" })).toBeVisible();
   await expect(page.getByText("pack/v1")).toBeVisible();
   await expect(page.getByText("90.00%（9,000 bp）")).toBeVisible();
   await expect(page.getByText("MVP 未启用保底机制")).toBeVisible();
-  await expect(page.getByRole("button", { name: /购买|开包/ })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "返回商店购买" })).toBeVisible();
 });
 
-test("补充包页覆盖概率加载、空列表、失败重试和规则版本刷新", async ({ page }) => {
+test("购买预览、重复点击、跳过动画和刷新历史只展示一次服务端开包", async ({ page }) => {
+  await registerPlayer(page);
+  await mockPackList(page, [activePack]);
+  let previewCalls = 0;
+  let openCalls = 0;
+  let historyCalls = 0;
+  let receivedKey: string | undefined;
+  await page.route(`**/v1/store/packs/${activePackId}/purchase-preview`, async (route) => {
+    previewCalls += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(
+        envelope({
+          preview: {
+            pack: activePack,
+            ruleVersion: "pack/v1",
+            cost: activePack.price,
+            canPurchase: true,
+            unavailableReason: null
+          }
+        })
+      )
+    });
+  });
+  await page.route(`**/v1/packs/${activePackId}/open`, async (route) => {
+    openCalls += 1;
+    receivedKey = route.request().headers()["idempotency-key"];
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify(envelope({ opening }))
+    });
+  });
+  await page.route("**/v1/pack-openings?*", async (route) => {
+    historyCalls += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(
+        envelope({ items: [opening], page: { hasMore: false, nextCursor: null } })
+      )
+    });
+  });
+  await page.goto("/packs");
+  await page.getByRole("button", { name: "购买并开包" }).click();
+  await expect(page.getByRole("heading", { name: "确认购买" })).toBeVisible();
+  await expect(page.getByText("本次扣款：500 游戏币")).toBeVisible();
+  const confirm = page.getByRole("button", { name: "确认购买并开包" });
+  await confirm.click();
+  await expect(page.getByRole("button", { name: "正在由服务端开包…" })).toBeDisabled();
+  await expect(page.getByRole("heading", { name: "本次开包结果" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "跳过动画" })).toBeVisible();
+  await page.getByRole("button", { name: "跳过动画" }).click({ force: true });
+  await expect(page.getByText(`SKU ${firstReceivedSkuId}`)).toBeVisible();
+  await expect(page.getByText("外部参考价和游戏内价将在 I17 后提供")).toBeVisible();
+  expect(openCalls).toBe(1);
+  expect(receivedKey).toMatch(/^[0-9a-f-]{36}$/i);
+  expect(previewCalls).toBeGreaterThanOrEqual(1);
+  await page.getByRole("link", { name: "查看开包历史" }).first().click();
+  await expect(page.getByRole("heading", { name: "开包历史" })).toBeVisible();
+  await expect(page.getByText(opening.openedAt)).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(opening.openedAt)).toBeVisible();
+  expect(historyCalls).toBeGreaterThanOrEqual(2);
+});
+
+test("余额不足和版本过期由服务端提示，失败不伪造开包结果", async ({ page }) => {
+  await registerPlayer(page);
+  await mockPackList(page, [activePack]);
+  let insufficient = true;
+  let openCalls = 0;
+  await page.route(`**/v1/store/packs/${activePackId}/purchase-preview`, async (route) => {
+    const preview = {
+      pack: activePack,
+      ruleVersion: "pack/v1",
+      cost: activePack.price,
+      canPurchase: !insufficient,
+      unavailableReason: insufficient ? "insufficient_balance" : null
+    };
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(envelope({ preview }))
+    });
+  });
+  await page.route(`**/v1/packs/${activePackId}/open`, async (route) => {
+    openCalls += 1;
+    await route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify(failure("VERSION_STALE", "补充包规则版本已更新，请重新确认购买"))
+    });
+  });
+  await page.goto("/packs");
+  await page.getByRole("button", { name: "购买并开包" }).click();
+  await expect(page.getByText("可用余额不足，请先获得更多游戏币。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "确认购买并开包" })).toBeDisabled();
+  expect(openCalls).toBe(0);
+  await page.getByRole("button", { name: "取消" }).click();
+  insufficient = false;
+  await page.getByRole("button", { name: "购买并开包" }).click();
+  const retryConfirm = page.getByRole("button", { name: "确认购买并开包" });
+  await expect(retryConfirm).toBeEnabled();
+  await retryConfirm.click();
+  await expect(page.getByText("补充包规则版本已更新，请重新确认购买")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "本次开包结果" })).toHaveCount(0);
+  expect(openCalls).toBe(1);
+});
+
+test("补充包页覆盖加载、空列表、失败重试和规则版本刷新", async ({ page }) => {
   await registerPlayer(page);
   let state: "loading" | "empty" | "failed" | "v1" | "v2" = "loading";
   await page.route("**/v1/packs", async (route) => {
@@ -90,11 +239,7 @@ test("补充包页覆盖概率加载、空列表、失败重试和规则版本�
       return route.fulfill({
         status: 500,
         contentType: "application/json",
-        body: JSON.stringify({
-          ok: false,
-          error: { code: "INTERNAL_ERROR", message: "补充包暂不可用" },
-          meta: { requestId: "i11f-failure" }
-        })
+        body: JSON.stringify(failure("INTERNAL_ERROR", "补充包暂不可用"))
       });
     const items =
       state === "empty"

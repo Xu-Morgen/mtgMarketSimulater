@@ -9,3 +9,7 @@
 ## I07F 存档与账本
 
 `archive-api.ts` 是 `/v1/archive` 与 `/v1/ledger` 的唯一前端访问入口。创建存档 mutation 在同一次用户意图重试中复用幂等键，成功响应直接写入存档查询缓存；余额、净资产和账本流水始终读取服务端 DTO，浏览器仅做金额与时间展示格式化。
+
+## I12F 补充包购买
+
+`packs-api.ts` 是补充包概率、购买预览、开包命令和历史记录的唯一入口。`useOpenPackMutation` 对同一 `packId + ruleVersion` 网络重试复用幂等键；成功后失效存档、账本、库存与开包历史缓存。开包响应和历史均使用 contracts 的 `PackOpeningDto`，浏览器不生成结果、费用、价格或库存变化。

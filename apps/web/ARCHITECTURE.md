@@ -61,7 +61,14 @@
 
 - `api/packs-api.ts` 只查询本地 Fastify 的 `GET /v1/packs` 和 `GET /v1/packs/{packId}`；TanStack Query key 按登录用户与补充包 ID 隔离，页面不保存候选池、随机种子、结果或保底进度。
 - `/packs` 公示服务端返回的补充包价格、规则版本、启用状态和禁用原因；`/packs/{packId}` 进一步按服务端 `probabilityBasisPoints` 显示每个卡位的稀有度概率。该 bp→百分比转换仅为展示格式化，前端不抽样或实现抽取规则。
-- I11F Playwright 在桌面与 390 × 844 窄屏覆盖概率加载、空列表、禁用包、规则版本刷新、失败重试和无购买/开包入口；人工记录固定在 `tests/manual/I11F.md`。
+- I11F Playwright 在桌面与 390 × 844 窄屏覆盖概率加载、空列表、禁用包、规则版本刷新和失败重试；购买/开包入口与结果交互由 I12F 扩展，人工记录固定在 `tests/manual/I11F.md`。
+
+## I12F 补充包购买、结果与历史（2026-07-26）
+
+- `api/packs-api.ts` 是购买预览、幂等开包和开包历史的唯一前端入口；开包 mutation 只回传预览给出的规则版本。同一 `packId + ruleVersion` 的网络重试保留同一幂等键，重新预览、切换补充包或成功完成后才开始新意图。
+- `/packs` 以确认框展示服务端购买预览，开包期间禁用确认动作；成功后只用服务端 `PackOpeningDto` 展示动画和结果，并失效存档、账本、库存与历史缓存。余额不足、版本过期等服务端错误保持在确认流程中，绝不制造卡牌结果。
+- `stores/pack-opening-animation-store.ts` 只保存可丢弃的揭晓阶段和索引；`/packs/history` 从服务端读取已结算历史。刷新页面不会保留或重放本地开奖结果。
+- I12F Playwright 与人工记录分别固定在 `tests/e2e/packs.spec.ts`、`tests/manual/I12F.md`，覆盖成功、失败、重复点击、跳过动画和刷新历史，并在桌面及窄屏执行。
 
 ## 不单独建层的内容
 

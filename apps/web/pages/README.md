@@ -8,9 +8,9 @@
 
 `inventory/inventory-page.tsx` 通过 `api/inventory-api.ts` 读取 I10B 的服务端分页持仓快照。筛选、排序和分页写入 URL；持有量、可用量、订单/比赛锁定、平均成本、市值和无价原因均原样展示服务端字段。页面没有修改库存、成本、市值或解锁资产的操作。
 
-## I11F 补充包概率
+## I11F–I12F 补充包概率、购买与历史
 
-`packs/packs-page.tsx` 通过 `api/packs-api.ts` 读取 I11B 已发布的补充包配置，并在 `/packs` 与 `/packs/<packId>` 分别展示列表和卡位概率详情。页面只格式化服务端返回的价格、规则版本、启用/禁用状态和 basis points；不暴露候选池、种子、保底状态，不抽卡，也不提供购买入口。
+`packs/packs-page.tsx` 通过 `api/packs-api.ts` 读取 I11B 已发布的补充包配置，并在 `/packs` 与 `/packs/<packId>` 分别展示列表和卡位概率详情。I12F 在 `/packs` 读取服务端购买预览并只提交其规则版本，成功后以服务端 `PackOpeningDto` 显示可跳过动画和单次结果；`/packs/history` 只读取服务端已结算记录。页面只格式化服务端返回的价格、规则版本、启用/禁用状态和 basis points；不暴露候选池、种子、保底状态，也不抽卡或生成结果。
 
 Next.js 的 `app/` 路由文件只负责路由协议和框架边界，应从本层引入对应的页面模块。建议的后续目录为 `auth/`、`dashboard/`、`catalog/`、`packs/`、`inventory/`、`market/`、`orders/`、`decks/`、`tournaments/`、`admin/`。
 

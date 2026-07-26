@@ -52,9 +52,88 @@
   gap: 12px;
   margin-top: 20px;
 }
+.preview {
+  background: #f3f2e8;
+  border: 1px solid #d8d6c5;
+  border-radius: 8px;
+  margin-top: 12px;
+  padding: 16px;
+}
+.preview p {
+  margin: 8px 0;
+}
+.purchaseError,
+.inlineError {
+  color: #9b2226;
+}
+.inlineError {
+  background: #fff1f0;
+  border: 1px solid #f3b6b3;
+  border-radius: 8px;
+  margin-top: 12px;
+  padding: 12px;
+}
+.result,
+.historyCard {
+  background: #fff;
+  border: 1px solid #8db36f;
+  border-radius: 12px;
+  margin-top: 28px;
+  padding: 22px;
+}
+.result:focus {
+  outline: 3px solid #ba8e38;
+  outline-offset: 3px;
+}
+.revealGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 18px 0;
+}
+.revealedCard,
+.hiddenCard {
+  border-radius: 8px;
+  display: grid;
+  gap: 7px;
+  min-height: 104px;
+  padding: 14px;
+}
+.revealedCard {
+  background: #e3f0d7;
+  border: 1px solid #8db36f;
+}
+.hiddenCard {
+  align-items: center;
+  background: #e8e7db;
+  border: 1px dashed #9b9a8e;
+  color: #596153;
+}
+.history {
+  max-width: 800px;
+}
+.historyList {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+}
+.historyCard {
+  border-color: #d8d6c5;
+  margin-top: 0;
+}
+.historyCard h2 {
+  font-size: 1rem;
+}
+.historyCard ul {
+  line-height: 1.7;
+  padding-left: 22px;
+}
 
 @media (max-width: 700px) {
   .cards {
+    grid-template-columns: 1fr;
+  }
+  .revealGrid {
     grid-template-columns: 1fr;
   }
 }
