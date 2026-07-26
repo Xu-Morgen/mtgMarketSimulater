@@ -18,6 +18,7 @@ export const publicApiPaths = [
   "/v1/catalog/cards",
   "/v1/catalog/cards/{skuId}",
   "/v1/catalog/images/{imageName}",
+  "/v1/prices/status",
   "/v1/packs",
   "/v1/packs/{packId}",
   "/v1/packs/{packId}/open",
@@ -136,6 +137,12 @@ export const openApiDocument = {
         responses: { "200": { description: "图片二进制" }, "404": { description: "图片不存在" } }
       }
     },
+    "/v1/prices/status": {
+      get: {
+        summary: "查询玩家可见的外部价格来源与新鲜度",
+        responses: { "200": { description: "公开价格状态" }, "401": { description: "认证无效或过期" } }
+      }
+    },
     "/v1/packs": {
       get: {
         summary: "公示补充包价格、启用状态和版本化卡位概率",
@@ -205,7 +212,7 @@ export const openApiDocument = {
     },
     "/v1/admin/prices/sync": {
       get: { summary: "查询 MTGJSON Cardmarket 价格同步状态", responses: { "200": { description: "价格快照状态" }, "403": { description: "需要管理员权限" } } },
-      post: { summary: "投递去重的 MTGJSON 价格同步任务", responses: { "201": { description: "任务已投递或返回活跃任务" }, "400": { description: "缺少幂等键或参数无效" }, "403": { description: "需要管理员权限" } } }
+      post: { summary: "投递去重的 MTGJSON 价格同步任务，或在 checksum 失败后提交管理员覆写", responses: { "201": { description: "任务已投递或返回活跃任务" }, "400": { description: "缺少幂等键或参数无效" }, "403": { description: "需要管理员权限" }, "409": { description: "当前没有可覆写的 checksum 失败运行" } } }
     },
     "/v1/admin/jobs": {
       get: { summary: "管理任务查询", responses: { "200": { description: "任务列表" } } },

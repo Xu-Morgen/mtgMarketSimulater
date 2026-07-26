@@ -336,7 +336,7 @@ export const priceSyncRuns = sqliteTable(
   {
     id: text("id").primaryKey(), source: text("source").notNull(), sourceVersion: text("source_version").notNull(),
     pricesUri: text("prices_uri").notNull(), mappingUri: text("mapping_uri").notNull(), pricesChecksumSha256: text("prices_checksum_sha256").notNull(), mappingChecksumSha256: text("mapping_checksum_sha256").notNull(),
-    status: text("status").notNull(), mappedSkus: integer("mapped_skus").notNull(), pricedSkus: integer("priced_skus").notNull(), unpricedSkus: integer("unpriced_skus").notNull(), mappingFailedSkus: integer("mapping_failed_skus").notNull(), failureReason: text("failure_reason"), startedAt: text("started_at").notNull(), completedAt: text("completed_at")
+    status: text("status").notNull(), checksumVerification: text("checksum_verification").notNull(), mappedSkus: integer("mapped_skus").notNull(), pricedSkus: integer("priced_skus").notNull(), unpricedSkus: integer("unpriced_skus").notNull(), mappingFailedSkus: integer("mapping_failed_skus").notNull(), failureCode: text("failure_code"), failureReason: text("failure_reason"), startedAt: text("started_at").notNull(), completedAt: text("completed_at")
   },
   (table) => [index("price_sync_runs_status_started_index").on(table.status, table.startedAt)]
 );

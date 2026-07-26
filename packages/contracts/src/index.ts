@@ -329,10 +329,13 @@ export interface PriceSyncRunDto {
   pricesChecksumSha256: string;
   mappingChecksumSha256: string;
   status: "running" | "succeeded" | "failed";
+  /** 成功运行是否经过 Provider SHA-256 校验；bypassed 只能由管理员明确覆写产生。 */
+  checksumVerification: "verified" | "bypassed" | "not_verified";
   mappedSkus: number;
   pricedSkus: number;
   unpricedSkus: number;
   mappingFailedSkus: number;
+  failureCode: "CHECKSUM_MISMATCH" | null;
   failureReason: string | null;
   startedAt: string;
   completedAt: string | null;
@@ -342,6 +345,15 @@ export interface PriceSyncStatusDto {
   latestSuccessful: PriceSyncRunDto | null;
   current: PriceSyncRunDto | null;
   currentJob: JobDto | null;
+  /** 仅当最近失败确定为 Provider checksum 不匹配时，管理员才可请求一次覆写任务。 */
+  checksumBypassAvailable: boolean;
+}
+
+/** 玩家可读的价格来源状态；不包含同步版本、校验和、任务或失败详情。 */
+export interface PublicPriceStatusDto {
+  source: "mtgjson-cardmarket" | null;
+  updatedAt: string | null;
+  freshness: "fresh" | "stale" | "unavailable";
 }
 
 export interface FeeDto {

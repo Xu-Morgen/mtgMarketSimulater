@@ -71,9 +71,9 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 
 ## MTGJSON 价格快照（I13B）
 
-- `platform/external/mtgjson` 是唯一下载 `AllPricesToday` 与 `AllPrintings` 的适配器。它校验各文件同 URL 的 `.sha256` 侧车文件，只接受 Cardmarket `EUR` retail 的 latest-date `normal`/`foil`/`etched` 数值，记录两份下载的 SHA-256；Provider 原文、下载 URI 与 User-Agent 不通过 HTTP 输出。
+- `platform/external/mtgjson` 是唯一下载 `AllPricesToday` 与 `AllPrintings` 的适配器。它默认校验各文件同 URL 的 `.sha256` 侧车文件，只接受 Cardmarket `EUR` retail 的 latest-date `normal`/`foil`/`etched` 数值，记录两份下载的 SHA-256；Provider 原文、下载 URI 与 User-Agent 不通过 HTTP 输出。
 - `modules/pricing/application/PriceSyncService` 以 AllPrintings 的 Scryfall ID、MTGJSON UUID 和工艺精确对应本地 SKU，并在一笔 SQLite 短事务中追加 `price_sync_runs`、`price_sku_mappings`、每 SKU 的 `price_snapshot_entries` 和物化 `card_skus.tradable`。无价、零价、币种不符、缺映射或歧义映射均追加明确不可用原因并暂停新增交易；成功运行才移动 `price_sync_state` 指针，失败不会替换旧快照。
-- `prices.sync` 在 task runner 注册到 pricing application；`/v1/admin/prices/sync` 仅管理员读写，写入以幂等键去重投递任务。I14B 前它不生成游戏内报价，也不改写库存估值或经济流水。
+- `prices.sync` 在 task runner 注册到 pricing application；`/v1/admin/prices/sync` 仅管理员读写，写入以幂等键去重投递任务。仅当最近一次运行持久化为 `CHECKSUM_MISMATCH` 时，管理员可提交 `{ allowChecksumMismatch: true }` 的独立覆写任务；该任务写入专门审计事实，成功运行标为 `bypassed`，不影响普通严格校验路径。I14B 前它不生成游戏内报价，也不改写库存估值或经济流水。
 
 ## 补充包规则（I11B）
 

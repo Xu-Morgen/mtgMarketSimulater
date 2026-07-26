@@ -27,6 +27,7 @@
 - 设置仅服务端可见的 `MTGJSON_PRICES_ENDPOINT`、`MTGJSON_PRINTINGS_ENDPOINT` 和标识服务的 `MTGJSON_USER_AGENT`。任务必须同时读取两个 URL 加 `.sha256` 的侧车校验和；`AllPricesToday` 提供当前日价格，`AllPrintings` 仅用于将 MTGJSON UUID/工艺映射到已导入的 Scryfall SKU；浏览器不得下载任一文件或读取其原始内容。
 - 管理员以新的 `Idempotency-Key` 调用 `POST /v1/admin/prices/sync`，再通过 `GET /v1/admin/prices/sync` 或通用 jobs API 观察运行。可选的两个 expected checksum 仅用于已获准的版本固定导入；不匹配、下载、gzip/JSON、映射或 SQLite 失败都会追加 `failed` 运行和任务错误摘要。
 - 成功运行会追加映射与每 SKU 快照，`price_sync_state` 才移动到该运行；无 Cardmarket EUR 正价、零价、缺失或歧义映射均明确标为不可新增交易。失败时不得删除 `price_snapshot_entries`、修改 state 指针、手工改 `tradable` 或把兜底价写成 Cardmarket 价；修复外部输入后重新投递任务。
+- 若管理状态的 `checksumBypassAvailable` 为真，页面会要求管理员明确确认后提交 `{ "allowChecksumMismatch": true }`。这是上游文件与侧车 SHA-256 不一致时的最后手段：先保存失败运行与请求 ID，再确认审计中的操作者、任务 ID 和 `price_sync.checksum_bypass_requested` 事实。覆写成功会标记为 `bypassed`；不得用直接改库或普通任务绕过该确认条件。
 
 ## I30B 管理活动与玩家补偿（计划）
 

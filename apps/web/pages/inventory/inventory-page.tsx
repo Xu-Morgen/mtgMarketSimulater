@@ -6,6 +6,8 @@ import type { CardFinish, InventoryHoldingDto } from "@mtg-market/contracts";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { type InventoryFilters, useInventoryQuery } from "../../api/inventory-api";
+import { usePublicPriceStatusQuery } from "../../api/pricing-api";
+import { PriceStatus } from "../../components/price-status";
 import { EmptyState, ErrorState, FilterBar, PageSkeleton } from "../../components/ui";
 import { formatMoney } from "../../utils/money";
 import styles from "./inventory-page.module.css";
@@ -38,7 +40,7 @@ function toUrl(filters: InventoryFilters): string {
 
 /** 资产锁定只能由订单和比赛流程改变；此页仅解释服务端当前快照。 */
 export function InventoryPage() {
-  const router = useRouter(); const search = useSearchParams(); const filters = filtersFromSearch(search); const inventory = useInventoryQuery(filters);
+  const router = useRouter(); const search = useSearchParams(); const filters = filtersFromSearch(search); const inventory = useInventoryQuery(filters); const priceStatus = usePublicPriceStatusQuery();
   const [draft, setDraft] = useState<{ query: string; setCode: string; finish: CardFinish | ""; locked: "any" | "locked" | "available" }>({ query: filters.query ?? "", setCode: filters.setCode ?? "", finish: filters.finish ?? "", locked: filters.locked ?? "any" });
   const pageSize = filters.limit ?? defaultPageSize; const currentPage = Math.floor(Number.parseInt(filters.cursor ?? "0", 10) / pageSize) + 1;
   const columns = useMemo<ColumnsType<InventoryHoldingDto>>(() => [
@@ -47,8 +49,9 @@ export function InventoryPage() {
     { title: "订单锁定", dataIndex: "orderLockedQuantity", key: "orderLocked" }, { title: "比赛锁定", dataIndex: "tournamentLockedQuantity", key: "tournamentLocked" },
     { title: "平均成本", key: "averageCost", render: (_, holding) => formatMoney(holding.averageCost) },
     { title: "市值 / 价格状态", key: "marketValue", render: (_, holding) => holding.marketValue ? <div><strong>{formatMoney(holding.marketValue)}</strong><br /><span className={styles.secondary}>服务端快照</span></div> : <Tag color="default">{unavailableReason(holding.marketValueUnavailableReason)}</Tag> },
+    { title: "参考价来源 / 可交易状态", key: "priceSource", render: (_, holding) => <PriceStatus status={priceStatus.isError ? null : priceStatus.data?.data} tradable={holding.sku.tradable} /> },
     { title: "锁定状态", key: "locked", render: (_, holding) => holding.orderLockedQuantity + holding.tournamentLockedQuantity > 0 ? <Tag color="gold">已锁定</Tag> : <Tag color="green">全部可用</Tag> }
-  ], []);
+  ], [priceStatus.data?.data, priceStatus.isError]);
   if (inventory.isPending) return <PageSkeleton label="正在加载库存" />;
   if (inventory.isError) return <main className="page"><ErrorState title="库存加载失败" onRetry={() => void inventory.refetch()} /></main>;
   const page = inventory.data.data; const total = page.page.total ?? (currentPage - 1) * pageSize + page.items.length + (page.page.hasMore ? 1 : 0);

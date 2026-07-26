@@ -11,7 +11,9 @@ try {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true
+  reactStrictMode: true,
+  // Playwright 可用独立构建目录，避免与开发者正在运行的 Next 服务争用 .next。
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {})
 };
 
 export default nextConfig;

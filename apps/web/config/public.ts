@@ -1,5 +1,10 @@
 const defaultApiBaseUrl = "http://localhost:3001";
 
+/** 使用显式字段让 Next.js 在浏览器构建时内联公开环境变量。 */
+export const publicWebEnvironment = {
+  NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL
+};
+
 export interface PublicWebConfig {
   apiBaseUrl: string;
 }

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { openSqliteDatabase } from "@mtg-market/database";
-import { MtgjsonClient, type MtgjsonPriceSource } from "../../../platform/external/mtgjson/mtgjson-client.js";
+import { MtgjsonChecksumMismatchError, MtgjsonClient, type MtgjsonPriceSource } from "../../../platform/external/mtgjson/mtgjson-client.js";
 import { PriceSyncService } from "./price-sync-service.js";
 
 const directories: string[] = [];
@@ -22,7 +22,7 @@ function database() {
   return result;
 }
 function source(overrides: Partial<MtgjsonPriceSource> = {}): MtgjsonPriceSource {
-  return { version: "5.3.0+fixture", pricesUri: "https://fixture.test/prices", mappingUri: "https://fixture.test/printings", pricesChecksumSha256: "a".repeat(64), mappingChecksumSha256: "b".repeat(64), mappings: ["nonfoil", "foil", "etched"].map((finish) => ({ scryfallId, finish: finish as "nonfoil" | "foil" | "etched", mtgjsonUuid: uuid })), prices: new Map([[`${uuid}:normal`, { priceType: "normal" as const, currency: "EUR", amount: 1.23 }], [`${uuid}:foil`, { priceType: "foil" as const, currency: "EUR", amount: 4.56 }], [`${uuid}:etched`, { priceType: "etched" as const, currency: "EUR", amount: 7.89 }]]), ...overrides };
+  return { version: "5.3.0+fixture", pricesUri: "https://fixture.test/prices", mappingUri: "https://fixture.test/printings", pricesChecksumSha256: "a".repeat(64), mappingChecksumSha256: "b".repeat(64), checksumVerification: "verified", mappings: ["nonfoil", "foil", "etched"].map((finish) => ({ scryfallId, finish: finish as "nonfoil" | "foil" | "etched", mtgjsonUuid: uuid })), prices: new Map([[`${uuid}:normal`, { priceType: "normal" as const, currency: "EUR", amount: 1.23 }], [`${uuid}:foil`, { priceType: "foil" as const, currency: "EUR", amount: 4.56 }], [`${uuid}:etched`, { priceType: "etched" as const, currency: "EUR", amount: 7.89 }]]), ...overrides };
 }
 function service(db: ReturnType<typeof database>, current: MtgjsonPriceSource) { return new PriceSyncService(db, { download: async () => current } as unknown as MtgjsonClient); }
 
@@ -52,5 +52,23 @@ describe("I13B MTGJSON Cardmarket 价格快照", () => {
     await expect(sync.synchronize({ expectedPricesChecksumSha256: "0".repeat(64) })).rejects.toThrow("checksum");
     db.exec("CREATE TRIGGER interrupt_price_snapshot BEFORE INSERT ON price_snapshot_entries BEGIN SELECT RAISE(ABORT, 'fixture interruption'); END;"); await expect(sync.synchronize()).rejects.toThrow("fixture interruption");
     expect(sync.status().latestSuccessful?.id).toBe(firstRun); expect(db.prepare("SELECT COUNT(*) AS count FROM price_snapshot_entries").get()).toEqual({ count: 3 }); expect(db.prepare("SELECT COUNT(*) AS count FROM price_sync_runs WHERE status = 'failed'").get()).toEqual({ count: 2 }); db.close();
+  });
+
+  it("只有显式 checksum 覆写才接受未验证下载，并持久化 bypassed 审计状态", async () => {
+    const db = database();
+    const client = {
+      download: async (options: { allowChecksumMismatch?: boolean } = {}) => {
+        if (!options.allowChecksumMismatch) throw new MtgjsonChecksumMismatchError();
+        return source({ checksumVerification: "bypassed" });
+      }
+    } as unknown as MtgjsonClient;
+    const sync = new PriceSyncService(db, client);
+    await expect(sync.synchronize()).rejects.toThrow("checksum");
+    await sync.synchronize({ allowChecksumMismatch: true });
+    expect(db.prepare("SELECT status, checksum_verification, failure_code FROM price_sync_runs ORDER BY started_at, rowid").all()).toEqual([
+      { status: "failed", checksum_verification: "not_verified", failure_code: "CHECKSUM_MISMATCH" },
+      { status: "succeeded", checksum_verification: "bypassed", failure_code: null }
+    ]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM card_skus WHERE tradable = 1").get()).toEqual({ count: 3 }); db.close();
   });
 });

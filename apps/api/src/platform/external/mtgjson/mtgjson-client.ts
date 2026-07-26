@@ -3,7 +3,15 @@ import { gunzipSync } from "node:zlib";
 
 type UnknownRecord = Record<string, unknown>;
 export type MappedMtgjsonCard = { scryfallId: string; finish: "nonfoil" | "foil" | "etched"; mtgjsonUuid: string };
-export type MtgjsonPriceSource = { version: string; pricesUri: string; mappingUri: string; pricesChecksumSha256: string; mappingChecksumSha256: string; mappings: MappedMtgjsonCard[]; prices: Map<string, { priceType: "normal" | "foil" | "etched"; currency: string; amount: number | null }> };
+export type ChecksumVerification = "verified" | "bypassed";
+export type MtgjsonPriceSource = { version: string; pricesUri: string; mappingUri: string; pricesChecksumSha256: string; mappingChecksumSha256: string; checksumVerification: ChecksumVerification; mappings: MappedMtgjsonCard[]; prices: Map<string, { priceType: "normal" | "foil" | "etched"; currency: string; amount: number | null }> };
+export type MtgjsonDownloadOptions = { allowChecksumMismatch?: boolean };
+
+/** 仅由 application 层映射为稳定失败码；消息不携带外部 URL 或原始响应。 */
+export class MtgjsonChecksumMismatchError extends Error {
+  readonly code = "CHECKSUM_MISMATCH" as const;
+  constructor() { super("MTGJSON 文件 checksum 不匹配"); }
+}
 
 function record(value: unknown, message: string): UnknownRecord { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(message); return value as UnknownRecord; }
 function string(value: unknown): string | null { return typeof value === "string" && value.length > 0 ? value : null; }
@@ -56,23 +64,28 @@ async function download(url: string, userAgent: string, fetcher: typeof fetch): 
   const bytes = Buffer.from(await response.arrayBuffer()); if (bytes.length === 0 || bytes.length > 1_200 * 1024 * 1024 * 1024) throw new Error("MTGJSON 文件大小无效"); return bytes;
 }
 
-async function verifyChecksum(url: string, bytes: Buffer, userAgent: string, fetcher: typeof fetch): Promise<string> {
+async function verifyChecksum(url: string, bytes: Buffer, userAgent: string, fetcher: typeof fetch, options: MtgjsonDownloadOptions): Promise<{ checksum: string; verification: ChecksumVerification }> {
   const response = await fetcher(`${url}.sha256`, { headers: { accept: "text/plain", "user-agent": userAgent } });
   if (!response.ok) throw new Error(`MTGJSON checksum 下载失败：HTTP ${response.status}`);
   const expected = (await response.text()).trim().split(/\s+/)[0] ?? "";
   if (!/^[a-f0-9]{64}$/i.test(expected)) throw new Error("MTGJSON checksum 文件格式无效");
-  const actual = createHash("sha256").update(bytes).digest("hex"); if (actual !== expected.toLowerCase()) throw new Error("MTGJSON 文件 checksum 不匹配"); return actual;
+  const actual = createHash("sha256").update(bytes).digest("hex");
+  if (actual !== expected.toLowerCase()) {
+    if (!options.allowChecksumMismatch) throw new MtgjsonChecksumMismatchError();
+    return { checksum: actual, verification: "bypassed" };
+  }
+  return { checksum: actual, verification: "verified" };
 }
 
 /** 外部适配器只产出经过形状、币种与 SHA-256 校验的最小映射/价格输入。 */
 export class MtgjsonClient {
   constructor(private readonly pricesEndpoint: string, private readonly printingsEndpoint: string, private readonly userAgent: string, private readonly fetcher: typeof fetch = fetch) {}
 
-  async download(): Promise<MtgjsonPriceSource> {
+  async download(options: MtgjsonDownloadOptions = {}): Promise<MtgjsonPriceSource> {
     const [priceBytes, mappingBytes] = await Promise.all([download(this.pricesEndpoint, this.userAgent, this.fetcher), download(this.printingsEndpoint, this.userAgent, this.fetcher)]);
-    const [pricesChecksumSha256, mappingChecksumSha256] = await Promise.all([verifyChecksum(this.pricesEndpoint, priceBytes, this.userAgent, this.fetcher), verifyChecksum(this.printingsEndpoint, mappingBytes, this.userAgent, this.fetcher)]);
+    const [pricesCheck, mappingCheck] = await Promise.all([verifyChecksum(this.pricesEndpoint, priceBytes, this.userAgent, this.fetcher, options), verifyChecksum(this.printingsEndpoint, mappingBytes, this.userAgent, this.fetcher, options)]);
     const priceJson = parseJson(priceBytes, "MTGJSON AllPricesToday"); const mappingJson = parseJson(mappingBytes, "MTGJSON AllPrintings");
     const meta = record(priceJson.meta ?? {}, "MTGJSON AllPricesToday 缺少 meta"); const version = string(meta.date) ?? string(meta.version) ?? "unknown";
-    return { version, pricesUri: this.pricesEndpoint, mappingUri: this.printingsEndpoint, pricesChecksumSha256, mappingChecksumSha256, mappings: allPrintingsMappings(mappingJson), prices: pricesFrom(priceJson) };
+    return { version, pricesUri: this.pricesEndpoint, mappingUri: this.printingsEndpoint, pricesChecksumSha256: pricesCheck.checksum, mappingChecksumSha256: mappingCheck.checksum, checksumVerification: pricesCheck.verification === "verified" && mappingCheck.verification === "verified" ? "verified" : "bypassed", mappings: allPrintingsMappings(mappingJson), prices: pricesFrom(priceJson) };
   }
 }

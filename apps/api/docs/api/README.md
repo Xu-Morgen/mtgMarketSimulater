@@ -58,8 +58,13 @@
 
 ## I13B MTGJSON 价格同步协议
 
-- `GET /v1/admin/prices/sync` 仅管理员可读，返回 `PriceSyncStatusDto` 的最近成功/当前运行、两份输入的 SHA-256、版本、映射/有价/无价/映射失败统计、时间与脱敏失败摘要，并只返回最近的 `prices.sync` 任务；不返回外部下载地址或原始数据。
-- `POST /v1/admin/prices/sync` 仅管理员可投递 `prices.sync`，要求至少 8 位 `Idempotency-Key`。可选请求体为 `{ expectedPricesChecksumSha256?, expectedMappingChecksumSha256? }`，用于受控发布校验；同一键返回同一个持久化任务。缺键或格式错误返回 `400 IDEMPOTENCY_KEY_REQUIRED`/`VALIDATION_FAILED`，角色不足返回 `403 AUTHORIZATION_DENIED`。
+- `GET /v1/admin/prices/sync` 仅管理员可读，返回 `PriceSyncStatusDto` 的最近成功/当前运行、两份输入的 SHA-256、校验状态、稳定失败码、映射/有价/无价/映射失败统计、时间与脱敏失败摘要，以及 `checksumBypassAvailable`；不返回外部下载地址或原始数据。
+- `POST /v1/admin/prices/sync` 仅管理员可投递 `prices.sync`，要求至少 8 位 `Idempotency-Key`。可选请求体为 `{ expectedPricesChecksumSha256?, expectedMappingChecksumSha256?, allowChecksumMismatch?: true }`。`allowChecksumMismatch` 仅在最近一次运行的稳定失败码为 `CHECKSUM_MISMATCH` 时接受，否则返回 `409 RESOURCE_CONFLICT`；成功投递写入 `price_sync.checksum_bypass_requested` 审计事实，并把成功快照标为 `bypassed`。同一键返回同一个持久化任务。缺键或格式错误返回 `400 IDEMPOTENCY_KEY_REQUIRED`/`VALIDATION_FAILED`，角色不足返回 `403 AUTHORIZATION_DENIED`。
+
+## I13F 公开价格状态协议
+
+- `GET /v1/prices/status` 要求有效会话，返回 `PublicPriceStatusDto` 的公开来源、最近成功同步更新时间与服务端判定的 `fresh`、`stale` 或 `unavailable` 状态。最近一次同步失败但有成功快照时为 `stale`；没有成功快照时为 `unavailable`。
+- 此端点绝不返回版本、校验和、映射统计、任务、失败摘要、下载地址或 Provider 原始内容；这些管理详情继续只由 `/v1/admin/prices/sync` 返回并要求 admin。
 
 ## I11B 补充包概率公示协议
 

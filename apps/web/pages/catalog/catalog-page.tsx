@@ -1,13 +1,15 @@
 "use client";
 
-import { Button, Descriptions, Modal, Pagination as AntPagination, Spin, Table, Tag } from "antd";
+import { Button, Descriptions, Modal, Pagination as AntPagination, Spin, Table } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { CardFinish, CatalogSkuDto } from "@mtg-market/contracts";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { type CatalogFilters, useCatalogDetailQuery, useCatalogQuery } from "../../api/catalog-api";
+import { usePublicPriceStatusQuery } from "../../api/pricing-api";
+import { PriceStatus } from "../../components/price-status";
 import { EmptyState, ErrorState, FilterBar, PageSkeleton } from "../../components/ui";
-import { loadPublicWebConfig } from "../../config/public";
+import { loadPublicWebConfig, publicWebEnvironment } from "../../config/public";
 import { useSession } from "../../providers/session-provider";
 import styles from "./catalog-table.module.css";
 
@@ -30,7 +32,7 @@ function LocalCatalogImage({ path, name }: { path: string | null; name: string }
   useEffect(() => {
     if (!path || !accessToken) { setImageUrl(null); return; }
     let disposed = false; let objectUrl: string | null = null;
-    void fetch(`${loadPublicWebConfig(process.env).apiBaseUrl}${path}`, { credentials: "include", headers: { Authorization: `Bearer ${accessToken}` } })
+    void fetch(`${loadPublicWebConfig(publicWebEnvironment).apiBaseUrl}${path}`, { credentials: "include", headers: { Authorization: `Bearer ${accessToken}` } })
       .then(async (response) => { if (!response.ok) throw new Error("图片读取失败"); return response.blob(); })
       .then((blob) => { objectUrl = URL.createObjectURL(blob); if (!disposed) setImageUrl(objectUrl); })
       .catch(() => { if (!disposed) setFailed(true); });
@@ -58,7 +60,7 @@ function CatalogDetailModal({ skuId, onClose }: { skuId: string | null; onClose:
 }
 
 export function CatalogPage() {
-  const router = useRouter(); const search = useSearchParams(); const filters = filtersFromSearch(search); const catalog = useCatalogQuery(filters);
+  const router = useRouter(); const search = useSearchParams(); const filters = filtersFromSearch(search); const catalog = useCatalogQuery(filters); const priceStatus = usePublicPriceStatusQuery();
   const [selectedSkuId, setSelectedSkuId] = useState<string | null>(null); const [draft, setDraft] = useState({ query: filters.query ?? "", setCode: filters.setCode ?? "", rarity: filters.rarity ?? "", finish: filters.finish ?? "" });
   const apply = (next: Omit<CatalogFilters, "cursor">) => router.push(toUrl(next));
   const pageSize = filters.limit ?? defaultPageSize;
@@ -69,9 +71,9 @@ export function CatalogPage() {
     { title: "工艺", dataIndex: "finish", key: "finish", render: (finish: CardFinish) => finishLabel(finish) },
     { title: "稀有度", dataIndex: "rarity", key: "rarity" },
     { title: "来源", key: "source", render: (_, sku) => sourceLabel(sku) },
-    { title: "状态", key: "tradable", render: (_, sku) => <Tag color={sku.tradable ? "green" : "red"}>{sku.tradable ? "可交易" : "不可交易"}</Tag> },
+    { title: "价格与交易状态", key: "tradable", render: (_, sku) => <PriceStatus status={priceStatus.isError ? null : priceStatus.data?.data} tradable={sku.tradable} /> },
     { title: "操作", key: "actions", render: (_, sku) => <Button type="link" onClick={() => setSelectedSkuId(sku.id)}>详情</Button> }
-  ], []);
+  ], [priceStatus.data?.data, priceStatus.isError]);
   if (catalog.isPending) return <PageSkeleton label="正在加载卡牌目录" />;
   if (catalog.isError) return <main className="page"><ErrorState title="卡牌目录加载失败" onRetry={() => void catalog.refetch()} /></main>;
   const page = catalog.data.data; const total = page.page.total ?? (currentPage - 1) * pageSize + page.items.length + (page.page.hasMore ? 1 : 0);

@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { loadPublicWebConfig } from "../config/public";
+import { loadPublicWebConfig, publicWebEnvironment } from "../config/public";
 
 export function HealthStatus() {
   const [status, setStatus] = useState("检查中");
 
   useEffect(() => {
-    const { apiBaseUrl } = loadPublicWebConfig(process.env);
+    const { apiBaseUrl } = loadPublicWebConfig(publicWebEnvironment);
 
     fetch(`${apiBaseUrl}/health`)
       .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))

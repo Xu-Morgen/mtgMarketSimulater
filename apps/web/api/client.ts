@@ -1,5 +1,5 @@
 import type { ApiFailure, ApiResponse, ApiSuccess, UserDto } from "@mtg-market/contracts";
-import { loadPublicWebConfig } from "../config/public";
+import { loadPublicWebConfig, publicWebEnvironment } from "../config/public";
 
 export class ApiClientError extends Error {
   constructor(readonly response: ApiFailure, readonly status: number) { super(response.error.message); this.name = "ApiClientError"; }
@@ -8,7 +8,7 @@ export class ApiClientError extends Error {
 
 type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown; accessToken?: string | null; csrfToken?: string | null; idempotencyKey?: string };
 
-function apiUrl(path: string): string { return `${loadPublicWebConfig(process.env).apiBaseUrl}${path}`; }
+function apiUrl(path: string): string { return `${loadPublicWebConfig(publicWebEnvironment).apiBaseUrl}${path}`; }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<ApiSuccess<T>> {
   const { body, accessToken, csrfToken, idempotencyKey, headers, ...init } = options;

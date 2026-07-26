@@ -70,6 +70,12 @@
 - `stores/pack-opening-animation-store.ts` 只保存可丢弃的揭晓阶段和索引；`/packs/history` 从服务端读取已结算历史。刷新页面不会保留或重放本地开奖结果。
 - I12F Playwright 与人工记录分别固定在 `tests/e2e/packs.spec.ts`、`tests/manual/I12F.md`，覆盖成功、失败、重复点击、跳过动画和刷新历史，并在桌面及窄屏执行。
 
+## I13F 价格同步状态（2026-07-26）
+
+- `api/pricing-api.ts` 将玩家的 `GET /v1/prices/status` 与管理端 `GET /v1/admin/prices/sync` 分成不同 TanStack Query；查询键始终包含当前用户，管理查询只在 admin 会话下启用并在任务等待/执行中轮询。
+- `components/price-status.tsx` 只展示服务端公开来源、更新时间/新鲜度和 SKU 可新增交易状态，供目录、库存复用；不显示参考价金额、版本、校验和或同步失败详情，也不在浏览器推导过期状态。
+- `/admin/price-sync` 复用 admin layout 的服务端 RBAC 体验，运行详情仅在管理页面展示；管理员主动刷新会先经确认框，再以新的幂等键投递 `prices.sync`，失败重试同一意图复用该键，成功后失效状态查询并轮询任务。服务端明确返回 `checksumBypassAvailable` 时页面自动弹出风险确认；覆写与普通刷新属于不同幂等意图，确认后才提交 `allowChecksumMismatch: true`。组件在无查询数据时保持加载状态，避免会话权限跳转期间读取空缓存。`tests/e2e/price-sync.spec.ts` 覆盖管理员、玩家与越权三条路径。
+
 ## 不单独建层的内容
 
 - DTO、事件与 API 契约由共享 `packages/contracts` 提供，因此前端不建立会产生重复定义的 `types/` 层。

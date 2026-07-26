@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { withinTransaction } from "@mtg-market/database";
-import type { MtgjsonClient, MtgjsonPriceSource } from "../../../platform/external/mtgjson/mtgjson-client.js";
+import { MtgjsonChecksumMismatchError, type MtgjsonClient, type MtgjsonPriceSource } from "../../../platform/external/mtgjson/mtgjson-client.js";
 
-type SyncPayload = { expectedPricesChecksumSha256?: string; expectedMappingChecksumSha256?: string };
-type SyncRow = { id: string; source_version: string; prices_checksum_sha256: string; mapping_checksum_sha256: string; status: "running" | "succeeded" | "failed"; mapped_skus: number; priced_skus: number; unpriced_skus: number; mapping_failed_skus: number; failure_reason: string | null; started_at: string; completed_at: string | null };
+type SyncPayload = { expectedPricesChecksumSha256?: string; expectedMappingChecksumSha256?: string; allowChecksumMismatch?: boolean };
+type SyncRow = { id: string; source_version: string; prices_checksum_sha256: string; mapping_checksum_sha256: string; status: "running" | "succeeded" | "failed"; checksum_verification: "verified" | "bypassed" | "not_verified"; mapped_skus: number; priced_skus: number; unpriced_skus: number; mapping_failed_skus: number; failure_code: "CHECKSUM_MISMATCH" | null; failure_reason: string | null; started_at: string; completed_at: string | null };
 type CatalogSku = { id: string; scryfall_id: string; finish: "nonfoil" | "foil" | "etched" };
 export type PriceSyncStatus = { latestSuccessful: SyncRow | null; current: SyncRow | null };
 
@@ -23,7 +23,7 @@ export class PriceSyncService {
   async synchronize(payload: SyncPayload = {}): Promise<void> {
     const startedAt = new Date().toISOString(); const runId = randomUUID(); let source: MtgjsonPriceSource | null = null;
     try {
-      source = await this.client.download();
+      source = await this.client.download({ allowChecksumMismatch: payload.allowChecksumMismatch === true });
       if (payload.expectedPricesChecksumSha256 && payload.expectedPricesChecksumSha256 !== source.pricesChecksumSha256) throw new Error("MTGJSON AllPricesToday checksum 不匹配");
       if (payload.expectedMappingChecksumSha256 && payload.expectedMappingChecksumSha256 !== source.mappingChecksumSha256) throw new Error("MTGJSON AllPrintings checksum 不匹配");
       const counts = withinTransaction(this.database, () => this.appendSnapshot(runId, source!, startedAt));
@@ -31,13 +31,14 @@ export class PriceSyncService {
       this.database.prepare("INSERT INTO price_sync_state (singleton, latest_successful_run_id, updated_at) VALUES (1, ?, ?) ON CONFLICT(singleton) DO UPDATE SET latest_successful_run_id = excluded.latest_successful_run_id, updated_at = excluded.updated_at").run(runId, new Date().toISOString());
     } catch (error) {
       const reason = (error instanceof Error ? error.message : String(error)).slice(0, 1000);
-      this.database.prepare("INSERT INTO price_sync_runs (id, source, source_version, prices_uri, mapping_uri, prices_checksum_sha256, mapping_checksum_sha256, status, failure_reason, started_at, completed_at) VALUES (?, 'mtgjson-cardmarket', ?, ?, ?, ?, ?, 'failed', ?, ?, ?)").run(runId, source?.version ?? "unavailable", source?.pricesUri ?? "unavailable", source?.mappingUri ?? "unavailable", source?.pricesChecksumSha256 ?? "unavailable", source?.mappingChecksumSha256 ?? "unavailable", reason, startedAt, new Date().toISOString());
+      const failureCode = error instanceof MtgjsonChecksumMismatchError ? error.code : null;
+      this.database.prepare("INSERT INTO price_sync_runs (id, source, source_version, prices_uri, mapping_uri, prices_checksum_sha256, mapping_checksum_sha256, status, checksum_verification, failure_code, failure_reason, started_at, completed_at) VALUES (?, 'mtgjson-cardmarket', ?, ?, ?, ?, ?, 'failed', 'not_verified', ?, ?, ?, ?)").run(runId, source?.version ?? "unavailable", source?.pricesUri ?? "unavailable", source?.mappingUri ?? "unavailable", source?.pricesChecksumSha256 ?? "unavailable", source?.mappingChecksumSha256 ?? "unavailable", failureCode, reason, startedAt, new Date().toISOString());
       throw error;
     }
   }
 
   private appendSnapshot(runId: string, source: MtgjsonPriceSource, now: string) {
-    this.database.prepare("INSERT INTO price_sync_runs (id, source, source_version, prices_uri, mapping_uri, prices_checksum_sha256, mapping_checksum_sha256, status, started_at) VALUES (?, 'mtgjson-cardmarket', ?, ?, ?, ?, ?, 'running', ?)").run(runId, source.version, source.pricesUri, source.mappingUri, source.pricesChecksumSha256, source.mappingChecksumSha256, now);
+    this.database.prepare("INSERT INTO price_sync_runs (id, source, source_version, prices_uri, mapping_uri, prices_checksum_sha256, mapping_checksum_sha256, status, checksum_verification, started_at) VALUES (?, 'mtgjson-cardmarket', ?, ?, ?, ?, ?, 'running', ?, ?)").run(runId, source.version, source.pricesUri, source.mappingUri, source.pricesChecksumSha256, source.mappingChecksumSha256, source.checksumVerification, now);
     const skus = this.database.prepare("SELECT sku.id, printing.scryfall_id, sku.finish FROM card_skus sku JOIN card_printings printing ON printing.id = sku.printing_id WHERE sku.source = 'scryfall'").all() as CatalogSku[];
     const candidates = new Map<string, typeof source.mappings>();
     for (const mapping of source.mappings) { const key = `${mapping.scryfallId}:${mapping.finish}`; candidates.set(key, [...(candidates.get(key) ?? []), mapping]); }

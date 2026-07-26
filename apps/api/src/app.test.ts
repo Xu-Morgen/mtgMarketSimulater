@@ -115,6 +115,41 @@ describe("API cross-cutting HTTP boundary", () => {
     await app.close(); database.close();
   });
 
+  it("requires an administrator and records one explicit audit fact for a checksum-bypass task", async () => {
+    const { app, database } = await createTestApp();
+    const authorization = await adminAuthorization(app, database);
+    const unavailable = await app.inject({ method: "POST", url: "/v1/admin/prices/sync", headers: { authorization, "idempotency-key": "price-bypass-key-none" }, payload: { allowChecksumMismatch: true } });
+    database.prepare("INSERT INTO price_sync_runs (id, source, source_version, prices_uri, mapping_uri, prices_checksum_sha256, mapping_checksum_sha256, status, checksum_verification, failure_code, failure_reason, started_at, completed_at) VALUES (?, 'mtgjson-cardmarket', 'unavailable', 'private', 'private', 'unavailable', 'unavailable', 'failed', 'not_verified', 'CHECKSUM_MISMATCH', 'MTGJSON 文件 checksum 不匹配', ?, ?)").run("10000000-0000-4000-8000-000000000099", "2026-07-26T00:00:00.000Z", "2026-07-26T00:00:00.000Z");
+    const first = await app.inject({ method: "POST", url: "/v1/admin/prices/sync", headers: { authorization, "idempotency-key": "price-bypass-key-123" }, payload: { allowChecksumMismatch: true } });
+    const replay = await app.inject({ method: "POST", url: "/v1/admin/prices/sync", headers: { authorization, "idempotency-key": "price-bypass-key-123" }, payload: { allowChecksumMismatch: true } });
+    const job = first.json().data;
+    const audit = database.prepare("SELECT actor_id, action, entity_type, entity_id, summary_json FROM audit_logs WHERE action = 'price_sync.checksum_bypass_requested'").all();
+
+    expect(unavailable).toMatchObject({ statusCode: 409 }); expect(first.statusCode).toBe(201); expect(replay.json().data.id).toBe(job.id);
+    expect(database.prepare("SELECT payload_json FROM jobs WHERE id = ?").get(job.id)).toEqual({ payload_json: JSON.stringify({ allowChecksumMismatch: true }) });
+    expect(audit).toEqual([expect.objectContaining({ action: "price_sync.checksum_bypass_requested", entity_type: "job", entity_id: job.id, summary_json: JSON.stringify({ taskType: "prices.sync", checksumVerification: "bypassed" }) })]);
+    await app.close(); database.close();
+  });
+
+  it("only exposes the public price freshness fields to players", async () => {
+    const { app, database } = await createTestApp();
+    const registration = await app.inject({ method: "POST", url: "/v1/auth/register", payload: { email: "player@example.test", displayName: "玩家", password: "correct-horse-battery-staple" } });
+    const authorization = `Bearer ${registration.json().data.accessToken as string}`;
+    const completedAt = "2026-07-26T08:00:00.000Z";
+    database.prepare("INSERT INTO price_sync_runs (id, source, source_version, prices_uri, mapping_uri, prices_checksum_sha256, mapping_checksum_sha256, status, mapped_skus, priced_skus, unpriced_skus, mapping_failed_skus, started_at, completed_at) VALUES (?, 'mtgjson-cardmarket', 'fixture', 'private', 'private', ?, ?, 'succeeded', 12, 9, 2, 1, ?, ?)").run("10000000-0000-4000-8000-000000000001", "a".repeat(64), "b".repeat(64), completedAt, completedAt);
+    database.prepare("INSERT INTO price_sync_state (singleton, latest_successful_run_id, updated_at) VALUES (1, ?, ?)").run("10000000-0000-4000-8000-000000000001", completedAt);
+    database.prepare("INSERT INTO price_sync_runs (id, source, source_version, prices_uri, mapping_uri, prices_checksum_sha256, mapping_checksum_sha256, status, failure_reason, started_at, completed_at) VALUES (?, 'mtgjson-cardmarket', 'unavailable', 'private', 'private', 'unavailable', 'unavailable', 'failed', 'fixture failure', ?, ?)").run("10000000-0000-4000-8000-000000000002", completedAt, completedAt);
+    const publicStatus = await app.inject({ method: "GET", url: "/v1/prices/status", headers: { authorization } });
+    const adminStatus = await app.inject({ method: "GET", url: "/v1/admin/prices/sync", headers: { authorization } });
+
+    expect(publicStatus.json()).toEqual(expect.objectContaining({ ok: true, data: { source: "mtgjson-cardmarket", updatedAt: completedAt, freshness: "stale" } }));
+    expect(JSON.stringify(publicStatus.json())).not.toContain("checksum");
+    expect(JSON.stringify(publicStatus.json())).not.toContain("mappedSkus");
+    expect(adminStatus.statusCode).toBe(403);
+    expect(adminStatus.json()).toMatchObject({ ok: false, error: { code: "AUTHORIZATION_DENIED" } });
+    await app.close(); database.close();
+  });
+
   it("keeps the checked OpenAPI document aligned with public routes", () => {
     expect(openApiDocument.openapi).toBe("3.1.0");
     expect(Object.keys(openApiDocument.paths).sort()).toEqual([...publicApiPaths].sort());
