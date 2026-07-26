@@ -18,21 +18,51 @@ function string(value: unknown): string | null { return typeof value === "string
 function decode(bytes: Buffer): Buffer { return bytes[0] === 0x1f && bytes[1] === 0x8b ? gunzipSync(bytes) : bytes; }
 function parseJson(bytes: Buffer, label: string): UnknownRecord { try { return record(JSON.parse(decode(bytes).toString("utf8")), `${label} 根节点必须为对象`); } catch (error) { throw new Error(`${label} 文件损坏或 JSON 无法解析：${error instanceof Error ? error.message : String(error)}`); } }
 
-function allPrintingsMappings(value: UnknownRecord): MappedMtgjsonCard[] {
-  const data = record(value.data, "MTGJSON AllPrintings 缺少 data"); const mappings: MappedMtgjsonCard[] = [];
-  for (const setValue of Object.values(data)) {
-    const set = record(setValue, "MTGJSON AllPrintings set 无效"); const cards = set.cards;
-    if (!Array.isArray(cards)) continue;
-    for (const rawCard of cards) {
-      const card = record(rawCard, "MTGJSON AllPrintings card 无效"); const scryfallId = string(record(card.identifiers ?? {}, "MTGJSON identifiers 无效").scryfallId); const uuid = string(card.uuid);
-      if (!scryfallId || !uuid) continue;
-      for (const finish of ["nonfoil", "foil", "etched"] as const) {
-        const finishes = Array.isArray(card.finishes) ? card.finishes : [];
-        if (finishes.includes(finish)) mappings.push({ scryfallId, finish, mtgjsonUuid: uuid });
-      }
-    }
+function whitespace(byte: number): boolean { return byte === 0x20 || byte === 0x0a || byte === 0x0d || byte === 0x09; }
+function nextToken(bytes: Buffer, index: number): number { let cursor = index; while (cursor < bytes.length && whitespace(bytes[cursor]!)) cursor += 1; return cursor; }
+function stringEnd(bytes: Buffer, start: number): number {
+  let cursor = start + 1;
+  while (cursor < bytes.length) { if (bytes[cursor] === 0x5c) { cursor += 2; continue; } if (bytes[cursor] === 0x22) return cursor; cursor += 1; }
+  throw new Error("JSON 字符串未闭合");
+}
+function isCardsKey(bytes: Buffer, start: number, end: number): boolean { return end - start === 6 && bytes[start + 1] === 0x63 && bytes[start + 2] === 0x61 && bytes[start + 3] === 0x72 && bytes[start + 4] === 0x64 && bytes[start + 5] === 0x73; }
+function objectEnd(bytes: Buffer, start: number): number {
+  let depth = 0; let cursor = start;
+  while (cursor < bytes.length) {
+    const byte = bytes[cursor]!;
+    if (byte === 0x22) { cursor = stringEnd(bytes, cursor) + 1; continue; }
+    if (byte === 0x7b || byte === 0x5b) depth += 1;
+    if (byte === 0x7d || byte === 0x5d) { depth -= 1; if (depth === 0) return cursor; }
+    cursor += 1;
   }
-  return mappings;
+  throw new Error("JSON 对象未闭合");
+}
+function appendCardMappings(rawCard: unknown, mappings: MappedMtgjsonCard[]): void {
+  const card = record(rawCard, "MTGJSON AllPrintings card 无效"); const scryfallId = string(record(card.identifiers ?? {}, "MTGJSON identifiers 无效").scryfallId); const uuid = string(card.uuid);
+  if (!scryfallId || !uuid) return;
+  const finishes = Array.isArray(card.finishes) ? card.finishes : [];
+  for (const finish of ["nonfoil", "foil", "etched"] as const) if (finishes.includes(finish)) mappings.push({ scryfallId, finish, mtgjsonUuid: uuid });
+}
+/** AllPrintings 解压后可能超过 V8 单一字符串限制；只把单张卡对象转换为字符串。 */
+function allPrintingsMappings(bytes: Buffer): MappedMtgjsonCard[] {
+  try {
+    const decoded = decode(bytes); const mappings: MappedMtgjsonCard[] = []; let foundCards = false; let cursor = 0;
+    while (cursor < decoded.length) {
+      if (decoded[cursor] !== 0x22) { cursor += 1; continue; }
+      const end = stringEnd(decoded, cursor); const colon = nextToken(decoded, end + 1);
+      if (!isCardsKey(decoded, cursor, end) || decoded[colon] !== 0x3a) { cursor = end + 1; continue; }
+      let item = nextToken(decoded, colon + 1); if (decoded[item] !== 0x5b) { cursor = end + 1; continue; }
+      foundCards = true; item = nextToken(decoded, item + 1);
+      while (item < decoded.length && decoded[item] !== 0x5d) {
+        if (decoded[item] !== 0x7b) throw new Error("MTGJSON AllPrintings cards 数组无效");
+        const endObject = objectEnd(decoded, item); appendCardMappings(JSON.parse(decoded.subarray(item, endObject + 1).toString("utf8")), mappings);
+        item = nextToken(decoded, endObject + 1); if (decoded[item] === 0x2c) item = nextToken(decoded, item + 1); else if (decoded[item] !== 0x5d) throw new Error("MTGJSON AllPrintings cards 分隔符无效");
+      }
+      cursor = item + 1;
+    }
+    if (!foundCards) throw new Error("MTGJSON AllPrintings 缺少 cards");
+    return mappings;
+  } catch (error) { throw new Error(`MTGJSON AllPrintings 文件损坏或 JSON 无法解析：${error instanceof Error ? error.message : String(error)}`); }
 }
 
 function latestPrice(value: unknown): number | null {
@@ -84,8 +114,8 @@ export class MtgjsonClient {
   async download(options: MtgjsonDownloadOptions = {}): Promise<MtgjsonPriceSource> {
     const [priceBytes, mappingBytes] = await Promise.all([download(this.pricesEndpoint, this.userAgent, this.fetcher), download(this.printingsEndpoint, this.userAgent, this.fetcher)]);
     const [pricesCheck, mappingCheck] = await Promise.all([verifyChecksum(this.pricesEndpoint, priceBytes, this.userAgent, this.fetcher, options), verifyChecksum(this.printingsEndpoint, mappingBytes, this.userAgent, this.fetcher, options)]);
-    const priceJson = parseJson(priceBytes, "MTGJSON AllPricesToday"); const mappingJson = parseJson(mappingBytes, "MTGJSON AllPrintings");
+    const priceJson = parseJson(priceBytes, "MTGJSON AllPricesToday");
     const meta = record(priceJson.meta ?? {}, "MTGJSON AllPricesToday 缺少 meta"); const version = string(meta.date) ?? string(meta.version) ?? "unknown";
-    return { version, pricesUri: this.pricesEndpoint, mappingUri: this.printingsEndpoint, pricesChecksumSha256: pricesCheck.checksum, mappingChecksumSha256: mappingCheck.checksum, checksumVerification: pricesCheck.verification === "verified" && mappingCheck.verification === "verified" ? "verified" : "bypassed", mappings: allPrintingsMappings(mappingJson), prices: pricesFrom(priceJson) };
+    return { version, pricesUri: this.pricesEndpoint, mappingUri: this.printingsEndpoint, pricesChecksumSha256: pricesCheck.checksum, mappingChecksumSha256: mappingCheck.checksum, checksumVerification: pricesCheck.verification === "verified" && mappingCheck.verification === "verified" ? "verified" : "bypassed", mappings: allPrintingsMappings(mappingBytes), prices: pricesFrom(priceJson) };
   }
 }
