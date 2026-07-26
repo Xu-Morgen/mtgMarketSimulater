@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { withinTransaction } from "@mtg-market/database";
 import { type ScryfallBulkCard, type ScryfallBulkClient, scryfallPrintingId } from "../../../platform/external/scryfall/scryfall-bulk-client.js";
+import { BasePackCatalogService } from "../../packs/application/base-pack-catalog-service.js";
 
 type SyncPayload = { expectedChecksumSha256?: string };
 type SyncRow = { id: string; source_version: string; checksum_sha256: string; enabled_sets_json: string; status: "running" | "succeeded" | "failed"; imported_printings: number; imported_skus: number; cached_images: number; diff_json: string; failure_reason: string | null; started_at: string; completed_at: string | null };
@@ -16,7 +17,8 @@ function normalImageUrl(card: ScryfallBulkCard): string | null { return card.ima
 
 /** 同步先完整下载/解析，再在一个短事务替换 Scryfall 来源行；异常永远不会清空上个成功目录。 */
 export class CatalogSyncService {
-  constructor(private readonly database: Database.Database, private readonly client: ScryfallBulkClient, private readonly enabledSetCodes: readonly string[]) {}
+  private readonly basePacks: BasePackCatalogService;
+  constructor(private readonly database: Database.Database, private readonly client: ScryfallBulkClient, private readonly enabledSetCodes: readonly string[]) { this.basePacks = new BasePackCatalogService(database); }
 
   status(): CatalogSyncStatus {
     const current = this.database.prepare("SELECT * FROM catalog_sync_runs ORDER BY started_at DESC, rowid DESC LIMIT 1").get() as SyncRow | undefined;
@@ -63,6 +65,7 @@ export class CatalogSyncService {
       for (const finish of finishes) { insertSku.run(randomUUID(), printingId, finish, card.id, startedAt, startedAt); skus += 1; }
       insertImage.run(randomUUID(), printingId, normalImageUrl(card), null, "missing", null, null, null, startedAt);
     }
+    this.basePacks.refreshAfterCatalogSync(version, runId, startedAt);
     return { printings: cards.length, skus, added: cards.length, removed: before };
   }
 }

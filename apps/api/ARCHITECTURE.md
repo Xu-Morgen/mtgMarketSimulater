@@ -59,6 +59,7 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 
 - `platform/external/scryfall` 是唯一可访问 Scryfall Bulk Data 与卡图 URL 的适配器。适配器使用仅服务端可配的自定义 User-Agent，兼容 gzip Bulk 文件，并以对象级扫描避免将完整 Bulk 文件转为 JS 字符串；浏览器目录路由只读取 SQLite，任务下载完成后校验 JSON、启用系列、印刷 ID、工艺与可选 checksum，绝不把 Provider 原文转发给客户端。
 - `modules/catalog/application/CatalogSyncService` 先在内存中验证 Bulk 文件，再在一个 SQLite 短事务内替换 `scryfall` 来源的目录行；任何下载、解析、Schema、重复印刷或事务错误都只新增失败运行记录，不删除最近成功目录或其状态指针。`CatalogImageCacheService` 是独立的补图用例，只读取既有目录的图片地址并更新对应缓存元数据，不重导入目录。
+- 迁移 `0013_base_bro_sos_packs.sql` 仅创建停用的 `BRO-BASE`、`SOS-BASE` 商品和可公示 bootstrap 卡位；`CatalogSyncService` 在目录替换短事务内调用 packs application 的 `BasePackCatalogService`，从当前 `BRO`/`SOS` 非闪 Scryfall SKU 生成新规则版本、退休旧快照并启用完整卡池。候选 SKU 不写死在迁移中，目录同步失败也不会改变现有基础包规则。
 - `catalog_sync_runs` 只追加来源版本、SHA-256、启用系列、导入差异与失败摘要；`catalog_sync_state` 只指向最近成功运行。`catalog.sync` 由 task runner 注册到 catalog application，而不是在 jobs 模块实现业务写入。
 - 图片仅能由 `catalog.image-cache` 任务写入 `CATALOG_DATA_DIR/images`，文件名由服务端打印 UUID 和受限扩展名产生；`/v1/catalog/images/:imageName` 认证后只提供该目录内的本地文件，拒绝路径穿越和外部图片 URL。
 
@@ -71,6 +72,7 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 ## 补充包规则（I11B）
 
 - `modules/packs` 持有补充包商品、活动规则版本、卡位与候选池。`booster_pack_rules.definition_json` 是不可变完整规则快照；`booster_packs.active_rule_version` 仅选择其当前公示版本。MVP 数据模型与规则输入均不包含保底、计数器或跨包状态。
+- `BRO-BASE` 与 `SOS-BASE` 分别只从各自系列的 `nonfoil`、`common`/`uncommon`/`rare`/`mythic` Scryfall SKU 生成候选池；卡位固定为 10 张普通、3 张非普通、1 张稀有（有秘稀时按 7:1 选择稀有/秘稀）。每次成功目录同步都追加新版本，不覆盖历史规则或已结算开包记录。
 - `@mtg-market/rules` 的 `openPack` 和 `packSlotProbabilities` 只接受版本、整数权重、候选池、卡位和随机种子，返回可重放产出或服务端计算的合计 10,000 bp 稀有度概率。浏览器与 AI 不调用规则来指定或推导产出。
 - `PackService.generateAuditedResult` 使用 Node CSPRNG 创建 32-byte 种子，在短事务中将种子、SHA-256、规则版本关联及结果摘要追加到 `pack_rule_replays`；该表没有 HTTP 读取路由，种子也不在 `PackDto` 中出现。
 

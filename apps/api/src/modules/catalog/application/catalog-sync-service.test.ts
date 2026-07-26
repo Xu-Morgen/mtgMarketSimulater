@@ -19,10 +19,13 @@ function source(cards: unknown[]) {
   });
   return { client, checksum };
 }
-function service(cards: unknown[]) {
+function service(cards: unknown[], enabledSetCodes: string[] = ["ONE"]) {
   const directory = mkdtempSync(join(tmpdir(), "mtg-catalog-sync-")); directories.push(directory);
   const database = openSqliteDatabase(join(directory, "test.db")); const fixture = source(cards);
-  return { database, checksum: fixture.checksum, sync: new CatalogSyncService(database, fixture.client, ["ONE"]) };
+  return { database, checksum: fixture.checksum, sync: new CatalogSyncService(database, fixture.client, enabledSetCodes) };
+}
+function setCard(id: string, set: "bro" | "sos", rarity: "common" | "uncommon" | "rare" | "mythic", collectorNumber: string) {
+  return { ...card, id, set, set_name: set === "bro" ? "The Brothers' War" : "Secrets of Strixhaven", name: `${set.toUpperCase()} ${rarity} fixture`, collector_number: collectorNumber, rarity, finishes: ["nonfoil"] };
 }
 
 describe("I09B Scryfall Bulk 同步", () => {
@@ -33,6 +36,36 @@ describe("I09B Scryfall Bulk 同步", () => {
     expect(database.prepare("SELECT finish FROM card_skus ORDER BY finish").all()).toEqual([{ finish: "foil" }, { finish: "nonfoil" }]);
     expect(database.prepare("SELECT source_version, checksum_sha256, status, cached_images FROM catalog_sync_runs").get()).toEqual(expect.objectContaining({ source_version: "2026-07-24T00:00:00.000Z", checksum_sha256: checksum, status: "succeeded", cached_images: 0 }));
     expect(sync.status().latestSuccessful).toEqual(expect.objectContaining({ imported_printings: 1, imported_skus: 2 }));
+    database.close();
+  });
+
+  it("在同一目录事务中为 BRO 与 SOS 基础包发布系列隔离的不可变候选池", async () => {
+    const cards = [
+      setCard("21000000-0000-4000-8000-000000000001", "bro", "common", "1"),
+      setCard("21000000-0000-4000-8000-000000000002", "bro", "uncommon", "2"),
+      setCard("21000000-0000-4000-8000-000000000003", "bro", "rare", "3"),
+      setCard("21000000-0000-4000-8000-000000000004", "bro", "mythic", "4"),
+      setCard("22000000-0000-4000-8000-000000000001", "sos", "common", "1"),
+      setCard("22000000-0000-4000-8000-000000000002", "sos", "uncommon", "2"),
+      setCard("22000000-0000-4000-8000-000000000003", "sos", "rare", "3"),
+      setCard("22000000-0000-4000-8000-000000000004", "sos", "mythic", "4")
+    ];
+    const { database, sync } = service(cards, ["BRO", "SOS"]);
+    await sync.synchronize();
+    const packs = database.prepare("SELECT code, enabled, active_rule_version FROM booster_packs ORDER BY code").all() as Array<{ code: string; enabled: number; active_rule_version: string }>;
+    expect(packs).toEqual([
+      expect.objectContaining({ code: "BRO-BASE", enabled: 1, active_rule_version: expect.stringMatching(/^base\/bro\//) }),
+      expect.objectContaining({ code: "SOS-BASE", enabled: 1, active_rule_version: expect.stringMatching(/^base\/sos\//) })
+    ]);
+    for (const pack of packs) {
+      const rule = database.prepare("SELECT definition_json FROM booster_pack_rules WHERE pack_id = (SELECT id FROM booster_packs WHERE code = ?) AND version = ?").get(pack.code, pack.active_rule_version) as { definition_json: string };
+      const skuIds = (JSON.parse(rule.definition_json) as { pools: Array<{ candidates: Array<{ skuId: string }> }> }).pools.flatMap((pool) => pool.candidates.map((candidate) => candidate.skuId));
+      const placeholders = skuIds.map(() => "?").join(", ");
+      const sourceSets = database.prepare(`SELECT DISTINCT card_set.code FROM card_skus sku JOIN card_printings printing ON printing.id = sku.printing_id JOIN card_sets card_set ON card_set.id = printing.set_id WHERE sku.id IN (${placeholders})`).all(...skuIds);
+      expect(sourceSets).toEqual([{ code: pack.code.slice(0, 3) }]);
+    }
+    await sync.synchronize();
+    expect(database.prepare("SELECT COUNT(*) AS count FROM booster_pack_rules WHERE pack_id = (SELECT id FROM booster_packs WHERE code = 'BRO-BASE')").get()).toEqual({ count: 3 });
     database.close();
   });
 

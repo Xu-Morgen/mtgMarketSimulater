@@ -20,7 +20,7 @@ describe("database foundation", () => {
     const database = openSqliteDatabase(join(directory, "test.db"));
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
     expect(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get()).toEqual({
-      count: 12
+      count: 13
     });
     expect(
       database
@@ -75,6 +75,14 @@ describe("database foundation", () => {
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pack_openings'")
         .get()
     ).toEqual({ name: "pack_openings" });
+    expect(
+      database
+        .prepare("SELECT code, enabled, disabled_reason FROM booster_packs ORDER BY code")
+        .all()
+    ).toEqual([
+      { code: "BRO-BASE", enabled: 0, disabled_reason: "等待 BRO 目录同步" },
+      { code: "SOS-BASE", enabled: 0, disabled_reason: "等待 SOS 目录同步" }
+    ]);
     expect(
       database.prepare("SELECT version FROM rule_versions WHERE rule_set = 'initial-funds'").get()
     ).toEqual({ version: "v1" });
