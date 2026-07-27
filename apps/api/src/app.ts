@@ -17,6 +17,7 @@ import { registerInventoryRoutes } from "./modules/inventory/api/inventory-route
 import { registerPackRoutes } from "./modules/packs/api/pack-routes.js";
 import { registerPricingRoutes } from "./modules/pricing/api/pricing-routes.js";
 import { registerMarketRoutes } from "./modules/market/api/market-routes.js";
+import { registerNpcTradeRoutes } from "./modules/orders/api/npc-trade-routes.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -104,6 +105,7 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
   await registerPackRoutes(app, database);
   await registerPricingRoutes(app, config, database);
   await registerMarketRoutes(app, database);
+  await registerNpcTradeRoutes(app, database);
 
   app.get("/health", async (request) => success(request.requestId, { status: "ok", database: databaseHealth(database) }));
 

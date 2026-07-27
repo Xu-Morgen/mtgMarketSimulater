@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import { calculateMarketQuote, MARKET_RULE_VERSION, propagateMarketPressure, type MarketFactorInput } from "@mtg-market/rules";
+import { calculateMarketQuote, marketQuoteValidUntil, MARKET_RULE_VERSION, propagateMarketPressure, type MarketFactorInput } from "@mtg-market/rules";
 import type { MarketQuoteListItemDto, Page, QuoteDto } from "@mtg-market/contracts";
 import { withinTransaction } from "@mtg-market/database";
 
 type ParametersRow = { rule_version: string; eur_cent_to_game_credit_bps: number; minimum_price: number; npc_buy_spread_bps: number; npc_sell_spread_bps: number; npc_fee_bps: number };
 type SnapshotRow = { id: string; sku_id: string; price_amount: number; captured_at: string; source_version: string; set_id: string };
 type MarketReason = NonNullable<QuoteDto["reasons"]>[number];
-type QuoteRow = { sku_id: string; rule_version: string; reference_price_eur_cents: number; market_price_amount: number; npc_buy_price_amount: number; npc_sell_price_amount: number; calculated_at: string; valid_until: string; reasons_json: string };
+type QuoteRow = { id: string; sku_id: string; rule_version: string; reference_price_eur_cents: number; market_price_amount: number; npc_buy_price_amount: number; npc_sell_price_amount: number; npc_buy_fee_amount: number; npc_sell_fee_amount: number; calculated_at: string; valid_until: string; reasons_json: string };
 type MarketListRow = QuoteRow & { name: string; set_code: string; set_name: string; collector_number: string; finish: "nonfoil" | "foil" | "etched"; rarity: string; tradable: number };
 type FactRow = { id: string; event_type: string; payload_json: string };
 
@@ -20,6 +20,17 @@ export type MarketQuoteFilters = {
   tradable?: "any" | "tradable" | "untradable" | undefined;
   cursor?: string | undefined;
   limit: number;
+};
+
+/** 只供 Order application 结算使用的已持久化快照，避免订单模块直接读取市场表。 */
+export type NpcSettlementQuote = {
+  quoteId: string;
+  skuId: string;
+  quoteVersion: string;
+  unitPriceAmount: number;
+  unitFeeAmount: number;
+  validUntil: string;
+  tradable: boolean;
 };
 
 function asMoney(amount: number) { return { amount, currency: "GAME_CREDIT" as const }; }
@@ -46,6 +57,7 @@ export class MarketService {
          WHERE entry.sync_run_id = ? AND entry.availability = 'priced' AND entry.price_amount IS NOT NULL`
       ).all(runId) as SnapshotRow[];
       const pressure = this.aggregateFactPressure();
+      const validUntil = marketQuoteValidUntil(parameters.rule_version, now);
       let written = 0;
       for (const snapshot of snapshots) {
         const factors = this.factorsFor(snapshot, pressure, now);
@@ -68,7 +80,7 @@ export class MarketService {
         ).run(
           randomUUID(), snapshot.sku_id, snapshot.id, triggerKey, result.ruleVersion, result.referencePriceEurCents,
           result.marketPrice, result.npcBuyPrice, result.npcSellPrice, result.npcBuyFee, result.npcSellFee,
-          JSON.stringify(parameters), JSON.stringify(result.reasons), now, snapshot.captured_at
+          JSON.stringify(parameters), JSON.stringify(result.reasons), now, validUntil
         );
         written += changed.changes;
       }
@@ -78,10 +90,34 @@ export class MarketService {
 
   quote(skuId: string): QuoteDto | null {
     const row = this.database.prepare(
-      `SELECT sku_id, rule_version, reference_price_eur_cents, market_price_amount, npc_buy_price_amount, npc_sell_price_amount, calculated_at, valid_until, reasons_json
+      `SELECT id, sku_id, rule_version, reference_price_eur_cents, market_price_amount, npc_buy_price_amount, npc_sell_price_amount, npc_buy_fee_amount, npc_sell_fee_amount, calculated_at, valid_until, reasons_json
        FROM market_quotes WHERE sku_id = ? ORDER BY calculated_at DESC, rowid DESC LIMIT 1`
     ).get(skuId) as QuoteRow | undefined;
     return row ? this.toQuote(row) : null;
+  }
+
+  /** 订单模块只可通过该应用接口取得报价快照，不拥有 market_quotes 的表访问权。 */
+  npcSettlementQuote(skuId: string, quoteId?: string): NpcSettlementQuote | null {
+    const row = this.database.prepare(
+      `SELECT quote.id, quote.sku_id, quote.rule_version, quote.npc_sell_price_amount, quote.npc_sell_fee_amount,
+        quote.valid_until, sku.tradable
+       FROM market_quotes quote JOIN card_skus sku ON sku.id = quote.sku_id
+       WHERE quote.sku_id = ? ${quoteId ? "AND quote.id = ?" : ""}
+       ORDER BY quote.calculated_at DESC, quote.rowid DESC LIMIT 1`
+    ).get(...(quoteId ? [skuId, quoteId] : [skuId])) as
+      | { id: string; sku_id: string; rule_version: string; npc_sell_price_amount: number; npc_sell_fee_amount: number; valid_until: string; tradable: number }
+      | undefined;
+    return row
+      ? {
+          quoteId: row.id,
+          skuId: row.sku_id,
+          quoteVersion: row.rule_version,
+          unitPriceAmount: row.npc_sell_price_amount,
+          unitFeeAmount: row.npc_sell_fee_amount,
+          validUntil: row.valid_until,
+          tradable: row.tradable === 1
+        }
+      : null;
   }
 
   /** 只读市场投影把目录筛选与最新服务端报价合并，浏览器无需也不得自行拼接或计算。 */
@@ -106,7 +142,7 @@ export class MarketService {
     const total = (this.database.prepare(`SELECT COUNT(*) AS count ${from} ${clause}`).get(...values) as { count: number }).count;
     const rows = this.database.prepare(
       `SELECT sku.id AS sku_id, p.name, s.code AS set_code, s.name AS set_name, p.collector_number, sku.finish, p.rarity, sku.tradable,
-        quote.rule_version, quote.reference_price_eur_cents, quote.market_price_amount, quote.npc_buy_price_amount, quote.npc_sell_price_amount,
+        quote.id, quote.rule_version, quote.reference_price_eur_cents, quote.market_price_amount, quote.npc_buy_price_amount, quote.npc_sell_price_amount, quote.npc_buy_fee_amount, quote.npc_sell_fee_amount,
         quote.calculated_at, quote.valid_until, quote.reasons_json
        ${from} ${clause}
        ORDER BY p.name COLLATE NOCASE, s.code, p.collector_number, sku.finish LIMIT ? OFFSET ?`
@@ -146,6 +182,7 @@ export class MarketService {
 
   private toQuote(row: QuoteRow): QuoteDto {
     return {
+      quoteId: row.id,
       skuId: row.sku_id,
       quoteVersion: row.rule_version,
       referencePrice: { amount: row.reference_price_eur_cents, currency: "EUR" },

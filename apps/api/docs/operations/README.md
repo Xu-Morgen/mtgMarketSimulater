@@ -36,6 +36,12 @@
 - 处理器只读取最近成功运行中的有效 EUR 快照、已结算事实、当前处于 UTC 生效区间的系列周期/关联/市场事件及版本化参数，写入带参数/原因 JSON 的报价投影。失败时旧报价保持可读；修复数据或代码后只重试原任务，勿通过复制或修改系数补偿。
 - 基础市场事件必须同时核对 scope（global/set/sku）、目标、UTC `starts_at`/`ends_at`、5,000–20,000 bp 上限和原因。到期事件自然退出后续重定价；I30B 才会提供受审计的发布/暂停/结束命令，在此之前不允许数据库手工运营。
 
+## I15B NPC 买入排障
+
+- 玩家先读取 `/v1/npc-trades/buy/{skuId}/preview`，再以返回的 `quoteId`、`quoteVersion`、`maxUnitPrice` 和新的 `Idempotency-Key` 调用确认端点。报价过期、价格高于限价、余额不足或额度不足时，要求玩家重新预览；不得通过手工改 `market_quotes`、`npc_trade_limits`、账户或库存来绕过检查。
+- 排查成交时，按请求 ID、幂等键或 `npc_trades.id` 关联 `idempotency_requests`、`ledger_entries(reason=npc_buy)`、`inventory_entries(reason=npc_buy)`、`fact_events(npc.trade.settled)`、outbox 与 audit 日志。任何一项缺失应按故障处理，不得手补单条流水；短事务回滚后应不存在经济写入或运行中的幂等占位。
+- 当日额度以 UTC `settlement_date` 聚合已结算 `npc_trades`，默认单笔 20、单用户/SKU/日 100，仅可由未来受审计的管理命令改变。额度触发或价格变更不应手动删除历史成交；等待下个 UTC 日或由后续正式配置流程处理。
+
 ## I30B 管理活动与玩家补偿（计划）
 
 以下是 I30B 实现时必须细化为可执行手册的边界；当前尚未实现，不授权通过数据库手工操作替代后台能力。

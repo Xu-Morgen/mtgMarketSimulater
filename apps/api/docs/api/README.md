@@ -77,6 +77,12 @@
 - `GET /v1/market/quotes?query=&setCode=&rarity=&finish=&tradable=&cursor=&limit=` 要求有效会话，服务器按目录字段筛选并返回精确总数的 `Page<MarketQuoteListItemDto>`。每项含最小 SKU 资料、最新持久化 `QuoteDto`（外部锚点、游戏内/NPC 报价、计算时间和受界原因）及服务端判定的 `tradable`/`tradeDisabledReason`；不返回可由浏览器重算的市场参数、费用或原始 Provider 数据。
 - `tradable=untradable` 用于查阅无有效参考价 SKU；其 `quote` 可以为 `null`，页面必须禁用交易入口并显示服务端原因。全局来源、新鲜度和最后成功同步时间仍仅由 `GET /v1/prices/status` 返回；任何查询失败均不得被客户端包装成实时或可交易数据。
 
+## I15B NPC 买入协议
+
+- `GET /v1/npc-trades/buy/{skuId}/preview?quantity=` 要求有效玩家会话，返回 `NpcBuyPreviewDto`：不可变 `quoteId`、`quoteVersion`、服务端 `unitPrice`/内含 `unitFee`、总价、总费用、有效期和服务端单笔/单日额度。`market/v1` 报价从服务端计算时间起有效 15 分钟；浏览器只可展示结果，不得自行计算金额、费用或额度。没有可交易报价返回 `404 PRICE_UNAVAILABLE`，报价已过期返回 `409 VERSION_STALE`。
+- `POST /v1/npc-trades/buy/{skuId}` 要求有效玩家会话及格式正确的 `Idempotency-Key`。请求体严格为 `{ quoteId, quoteVersion, quantity, maxUnitPrice }`；`maxUnitPrice` 是玩家确认的上限，不是服务端定价输入。服务端只从 `quoteId` 指向的持久化 `market_quotes` 读取成交价和费用，并校验 SKU 可交易、规则版本、有效期、限价、余额、单笔额度与当日已成交量。
+- 成功以 `201` 返回成交、服务端余额与持仓；同键同参重放以 `200` 返回首次完整响应，同键异参返回 `409 IDEMPOTENCY_CONFLICT`。无报价、报价/限价过期、余额不足和交易量限制分别使用 `PRICE_UNAVAILABLE`、`VERSION_STALE`、`INSUFFICIENT_BALANCE`、`RULE_VIOLATION`；失败同样完成幂等记录，但任何未处理写入异常会回滚经济变更及幂等占位。
+
 ## I11B 补充包概率公示协议
 
 - `GET /v1/packs` 与 `GET /v1/packs/{packId}` 要求有效 Bearer 会话，返回 `PackDto` 列表或单个配置。每项包含整数最小货币单位价格、启用状态/停用原因、规则版本和卡位稀有度概率；每个卡位的 `probabilityBasisPoints` 总和固定为 10,000，数值由服务端版本化规则计算。

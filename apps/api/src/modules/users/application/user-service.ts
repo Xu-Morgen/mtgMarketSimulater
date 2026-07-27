@@ -106,6 +106,10 @@ export class UserService {
   spendAvailableFunds(userId: string, amount: number, now: string, correlationId: string) {
     return this.users.spendAvailableFunds(userId, amount, now, correlationId);
   }
+  /** NPC 买入的命名补偿入口；账本仍只由 users 模块写入。 */
+  spendForNpcBuy(userId: string, amount: number, now: string, correlationId: string) {
+    return this.users.spendAvailableFunds(userId, amount, now, correlationId, "npc_buy");
+  }
   writeEconomicAudit(
     actorId: string,
     action: string,

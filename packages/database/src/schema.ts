@@ -421,6 +421,33 @@ export const inventoryEntries = sqliteTable(
   ]
 );
 
+/** I15B：每笔 NPC 成交绑定当时的市场报价快照；当日额度由该追加记录聚合。 */
+export const npcTradeLimits = sqliteTable("npc_trade_limits", {
+  singleton: integer("singleton").primaryKey(),
+  maxQuantityPerTrade: integer("max_quantity_per_trade").notNull(),
+  maxQuantityPerUserSkuDay: integer("max_quantity_per_user_sku_day").notNull(),
+  updatedAt: text("updated_at").notNull()
+});
+
+export const npcTrades = sqliteTable(
+  "npc_trades",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    skuId: text("sku_id").notNull().references(() => cardSkus.id),
+    side: text("side").notNull(),
+    quoteId: text("quote_id").notNull(),
+    quoteVersion: text("quote_version").notNull(),
+    unitPriceAmount: integer("unit_price_amount").notNull(),
+    unitFeeAmount: integer("unit_fee_amount").notNull(),
+    totalAmount: integer("total_amount").notNull(),
+    quantity: integer("quantity").notNull(),
+    settlementDate: text("settlement_date").notNull(),
+    createdAt: text("created_at").notNull()
+  },
+  (table) => [index("npc_trades_user_sku_day_index").on(table.userId, table.skuId, table.side, table.settlementDate)]
+);
+
 /** I11B：补充包商品及其不可变规则快照；保底状态明确不在 MVP 数据模型中。 */
 export const boosterPacks = sqliteTable(
   "booster_packs",

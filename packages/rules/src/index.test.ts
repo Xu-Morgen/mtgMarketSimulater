@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { INITIAL_FUNDING, INITIAL_FUNDING_RULE_VERSION, MARKET_RULE_VERSION, calculateMarketQuote, openPack, packSlotProbabilities, propagateMarketPressure, resolveInitialFunding, type PackRuleInput } from "./index.js";
+import { INITIAL_FUNDING, INITIAL_FUNDING_RULE_VERSION, MARKET_RULE_VERSION, calculateMarketQuote, marketQuoteValidUntil, openPack, packSlotProbabilities, propagateMarketPressure, resolveInitialFunding, type PackRuleInput } from "./index.js";
 
 const PACK_RULE: PackRuleInput = {
   version: "pack/v1",
@@ -67,5 +67,10 @@ describe("I14B 市场报价规则", () => {
     expect(() => calculateMarketQuote({ ...input, referencePriceEurCents: 0 })).toThrow("外部参考价");
     expect(() => calculateMarketQuote({ ...input, npcBuySpreadBasisPoints: 10_000 })).toThrow("NPC 买入价差");
     expect(() => calculateMarketQuote({ ...input, factors: [{ kind: "event", factorBasisPoints: 4_999, reason: "越界" }] })).toThrow("bp");
+  });
+
+  it("以固定窗口生成可重放报价有效期，并拒绝非 UTC 时间", () => {
+    expect(marketQuoteValidUntil(MARKET_RULE_VERSION, "2026-07-27T00:00:00.000Z")).toBe("2026-07-27T00:15:00.000Z");
+    expect(() => marketQuoteValidUntil(MARKET_RULE_VERSION, "2026-07-27")).toThrow("UTC ISO 8601");
   });
 });

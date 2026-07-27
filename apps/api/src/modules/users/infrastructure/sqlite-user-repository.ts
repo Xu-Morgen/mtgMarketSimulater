@@ -236,7 +236,8 @@ export class SqliteUserRepository {
     userId: string,
     amount: number,
     now: string,
-    correlationId: string
+    correlationId: string,
+    reason = "pack_purchase"
   ): AccountBalanceDto | "insufficient" {
     if (!Number.isSafeInteger(amount) || amount < 0)
       throw new RangeError("消费金额必须是非负安全整数最小单位");
@@ -252,9 +253,9 @@ export class SqliteUserRepository {
     const after = this.getBalance(userId)!;
     this.database
       .prepare(
-        "INSERT INTO ledger_entries (id, account_id, direction, amount, balance_after, reason, correlation_id, occurred_at) VALUES (?, ?, 'debit', ?, ?, 'pack_purchase', ?, ?)"
+        "INSERT INTO ledger_entries (id, account_id, direction, amount, balance_after, reason, correlation_id, occurred_at) VALUES (?, ?, 'debit', ?, ?, ?, ?, ?)"
       )
-      .run(randomUUID(), account.id, amount, after.total.amount, correlationId, now);
+      .run(randomUUID(), account.id, amount, after.total.amount, reason, correlationId, now);
     return after;
   }
 

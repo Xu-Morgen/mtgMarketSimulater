@@ -302,6 +302,8 @@ export interface GameArchiveSummaryDto {
 }
 
 export interface QuoteDto {
+  /** 不可变报价快照标识；交易确认必须回传它，客户端不得自行拼接金额。 */
+  quoteId: string;
   skuId: string;
   quoteVersion: string;
   referencePrice: Money | null;
@@ -317,6 +319,42 @@ export interface QuoteDto {
     factorBasisPoints: number;
     reason: string;
   }>;
+}
+
+/** NPC 向玩家出售时的服务端预览；费用已包含在 unitPrice/total 中，仅作拆分展示。 */
+export interface NpcBuyPreviewDto {
+  skuId: string;
+  quantity: number;
+  quoteId: string;
+  quoteVersion: string;
+  unitPrice: Money;
+  unitFee: Money;
+  total: Money;
+  fee: Money;
+  validUntil: string;
+  limit: {
+    maxQuantityPerTrade: number;
+    maxQuantityPerUserSkuDay: number;
+    remainingQuantityToday: number;
+  };
+  canPurchase: boolean;
+  unavailableReason: "archive_required" | "insufficient_balance" | "trade_limit_reached" | null;
+}
+
+/** 已结算 NPC 交易；价格字段来自所引用的不可变市场报价快照。 */
+export interface NpcTradeDto {
+  id: string;
+  userId: string;
+  skuId: string;
+  side: "buy" | "sell";
+  quantity: number;
+  quoteId: string;
+  quoteVersion: string;
+  unitPrice: Money;
+  unitFee: Money;
+  total: Money;
+  fee: Money;
+  settledAt: string;
 }
 
 /** I14F 市场列表的只读投影；价格、可交易资格和禁用原因均由 API 判定。 */

@@ -9,6 +9,8 @@ export const publicApiPaths = [
   "/v1/market/quotes",
   "/v1/market/quotes/{skuId}",
   "/v1/market/index",
+  "/v1/npc-trades/buy/{skuId}/preview",
+  "/v1/npc-trades/buy/{skuId}",
   "/v1/auth/register",
   "/v1/auth/login",
   "/v1/auth/refresh",
@@ -60,6 +62,18 @@ export const openApiDocument = {
       }
     },
     "/v1/market/index": { get: { summary: "查询本服与外部市场指数", responses: { "200": { description: "市场指数" }, "401": { description: "认证无效或过期" } } } },
+    "/v1/npc-trades/buy/{skuId}/preview": {
+      get: {
+        summary: "取得服务端 NPC 买入预览、不可变报价标识和额度",
+        responses: { "200": { description: "NPC 买入预览" }, "404": { description: "无可结算报价" }, "409": { description: "报价已过期" } }
+      }
+    },
+    "/v1/npc-trades/buy/{skuId}": {
+      post: {
+        summary: "以限价和幂等键确认 NPC 买入",
+        responses: { "201": { description: "成交已结算" }, "200": { description: "幂等重放" }, "400": { description: "请求无效或缺少幂等键" }, "404": { description: "无可结算报价" }, "409": { description: "报价过期、余额不足、额度或幂等冲突" } }
+      }
+    },
     "/v1/auth/register": {
       post: {
         summary: "注册玩家账户并创建会话",

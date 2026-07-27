@@ -79,8 +79,15 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 
 - `modules/market/application/MarketService` 只读取 `price_snapshot_entries`、已结算 `fact_events` 和版本化市场配置，使用 `@mtg-market/rules` 的 `market/v1` 物化 `market_quotes`。它不是余额、库存或外部价的写入者；外部快照保持只追加，经济事实仅被聚合消费。
 - `market_parameters` 保存 EUR 欧分到游戏币的整数 bp 兑换、最低报价、NPC 买卖价差与费用；`market_series_cycles`、`market_card_relations` 与 `market_events` 分别表达系列周期、关联传播和有作用域/UTC 生效区间/上限的基础事件。数据库与规则包共同限制系数为 5,000–20,000 bp，过期事件不会进入新投影。
-- 同一 `(sku_id, trigger_key)` 的报价只可写入一次。价格同步以 `price-sync:<runId>`、开包事实以 `fact-event:<eventId>` 投递重定价，因此 worker 至少执行一次时仍不会重复累乘；失败任务保留最近成功报价，由 jobs 的退避与重试处置。
+- 同一 `(sku_id, trigger_key)` 的报价只可写入一次。价格同步以 `price-sync:<runId>`、开包事实以 `fact-event:<eventId>` 投递重定价，因此 worker 至少执行一次时仍不会重复累乘；失败任务保留最近成功报价，由 jobs 的退避与重试处置。`market/v1` 以计算时间生成固定 15 分钟有效期，外部快照采集时刻仍单独保留，避免日快照在当天稍后重定价时立即失效。
 - `GET /v1/market/quotes/{skuId}` 与 `GET /v1/market/index` 仅返回已持久化的服务端报价/指数，均要求已认证会话。无有效外部价或尚未完成投影的 SKU 返回 `PRICE_UNAVAILABLE`；浏览器不得提交系数、价格或报价参数。
+
+## NPC 买入结算（I15B）
+
+- `modules/orders/application/NpcTradeService` 是玩家向 NPC 买入的唯一命令入口。它只经 `MarketService.npcSettlementQuote` 读取 `market_quotes` 快照、经 users application 写 `npc_buy` 账本、经 inventory application 入库；Orders 模块不跨界读写对方表。
+- `npc_trades` 只追加成交记录，并以 `quote_id`、规则版本、单价、内含手续费、总价、数量和 UTC 结算日固定成交输入。`npc_trade_limits` 保存服务器单笔和单用户/SKU/自然日上限；当日额度由已结算记录聚合，前端不得提交额度、价格或手续费。
+- `GET /v1/npc-trades/buy/{skuId}/preview?quantity=` 返回服务端选择的不可变报价 ID、规则版本、限价确认所需单位价、费用、总价与剩余额度。`POST /v1/npc-trades/buy/{skuId}` 必须携带报价 ID/版本、数量、最高单位价和 `Idempotency-Key`；报价缺失/不可交易、过期、版本或限价不符、余额不足、交易量超限都不会产生半完成记录。
+- 成功结算在一个 `InventoryService.withLedgerTransaction` 中写账本、库存流水、`npc_trades`、`npc.trade.settled`、outbox、唯一 `market.reprice` 任务、业务审计与幂等响应。任一写入失败回滚整笔结算；同一 actor/key 由 `idempotency_requests` 唯一约束收敛为一次结果。
 
 ## 补充包规则（I11B）
 

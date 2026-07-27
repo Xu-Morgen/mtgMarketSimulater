@@ -165,6 +165,8 @@ export function resolveInitialFunding(version: string): typeof INITIAL_FUNDING {
 export const MARKET_RULE_VERSION = "market/v1" as const;
 export const MARKET_FACTOR_MIN_BPS = 5_000;
 export const MARKET_FACTOR_MAX_BPS = 20_000;
+/** 报价快照只可在短窗口内确认，避免浏览器长期持有旧报价。 */
+export const MARKET_QUOTE_VALIDITY_MS = 15 * 60 * 1_000;
 
 export interface MarketFactorInput {
   kind: "supply-demand" | "series-cycle" | "relation" | "event" | "liquidity";
@@ -260,4 +262,13 @@ export function propagateMarketPressure(sourcePressure: number, relationWeightBa
   basisPoints(relationWeightBasisPoints, "关联权重", 0, 10_000);
   const adjustment = Math.trunc((sourcePressure * relationWeightBasisPoints) / 10_000) * 25;
   return Math.min(MARKET_FACTOR_MAX_BPS, Math.max(MARKET_FACTOR_MIN_BPS, 10_000 + adjustment));
+}
+
+/** 市场报价的有效期由计算时间和版本化固定窗口确定，不依赖外部快照的采集时刻。 */
+export function marketQuoteValidUntil(version: string, calculatedAt: string): string {
+  if (version !== MARKET_RULE_VERSION) throw new RangeError(`不支持的市场规则版本：${version}`);
+  const timestamp = Date.parse(calculatedAt);
+  if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString() !== calculatedAt)
+    throw new RangeError("报价计算时间必须是 UTC ISO 8601");
+  return new Date(timestamp + MARKET_QUOTE_VALIDITY_MS).toISOString();
 }
