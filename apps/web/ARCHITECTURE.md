@@ -82,6 +82,12 @@
 - `features/market/market-page.tsx` 在 `/market` 展示 API 已物化的外部锚点、游戏内/NPC 报价、原因摘要和分页筛选；筛选条件写入 URL。无价或报价缺失条目依据服务端禁用原因保持不可交易，过期/失败状态不会被渲染成实时价格。
 - I14F Playwright 通过可配置的本机端口启动隔离 API/Web 服务，避免复用开发者已有服务；`tests/e2e/market.spec.ts` 在桌面和窄屏验证价格展示、活动受界原因、无价禁用与失败恢复。
 
+## I15F NPC 买入页面（2026-07-27）
+
+- `api/npc-trade-api.ts` 是 NPC 买入预览和成交的唯一前端入口。预览 query 按用户、SKU、数量隔离且每次数量提交均重新读取；mutation 对同一个 SKU、报价标识、规则版本、数量及单位限价意图复用幂等键，重新预览后才丢弃该键。
+- `features/market/npc-buy-dialog.tsx` 仅收集数量并展示服务端 `NpcBuyPreviewDto`；它既不计算总价/费用/额度，也不接受浏览器传入的价格。确认期间的 UI 禁用与成功提示只反映 mutation 状态和 `NpcTradeDto`，随后使存档、库存、账本、市场与价格状态的 TanStack Query 缓存失效。
+- `tests/e2e/npc-buy.spec.ts` 覆盖桌面和窄屏的成交、重复点击、余额不足、额度、报价过期和重新预览；人工执行记录固定在 `tests/manual/I15F.md`。
+
 ## 不单独建层的内容
 
 - DTO、事件与 API 契约由共享 `packages/contracts` 提供，因此前端不建立会产生重复定义的 `types/` 层。

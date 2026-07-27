@@ -11,4 +11,14 @@
 .disabledEntry { background: #f4e4e4; border: 1px solid #9b2226; border-radius: 6px; color: #9b2226; cursor: not-allowed; font-weight: 700; margin: 0 8px 4px 0; padding: 5px 8px; }
 .pendingEntry { color: #596153; }
 .stale { background: #fff3cd; border: 1px solid #d6b968; border-radius: 8px; margin: 16px 0; padding: 12px; }
+.quantityForm { align-items: end; display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+.quantityForm label { display: grid; font-size: .9rem; font-weight: 700; gap: 5px; }
+.quantityForm input { border: 1px solid #9b9a8e; border-radius: 7px; min-height: 40px; padding: 7px 9px; width: 130px; }
+.tradePreview, .tradeSuccess { background: #f3f2e8; border: 1px solid #d8d6c5; border-radius: 8px; margin-top: 12px; padding: 14px; }
+.tradePreview h3, .tradeSuccess h2 { margin-bottom: 8px; }
+.tradePreview p { margin: 7px 0; }
+.tradeError, .inlineError { color: #9b2226; }
+.inlineError { background: #fff1f0; border: 1px solid #f3b6b3; border-radius: 8px; margin-top: 12px; padding: 12px; }
+.tradeReady { color: #254d22; }
+.tradeSuccess { background: #e3f0d7; border-color: #8db36f; color: #254d22; margin-bottom: 20px; }
 @media (max-width: 700px) { .summary { grid-template-columns: 1fr; } }
