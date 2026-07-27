@@ -108,6 +108,7 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 - 预览由 `@mtg-market/rules` 的 `order/v1` 计算限价带（`market_price ± limit_price_band_bps`，下限不低于 `minimum_price`）、order_fee 与 fulfillment_deposit，并派生 `previewVersion`（报价 ID+版本+方向+数量+带+预占金额）。买单预占 数量*限价+order_fee；卖单锁定库存并只预占 fulfillment_deposit，order_fee 留到 I19B/I20B 撮合/履约时扣除。
 - 创建、预占与锁定共享 `InventoryService.withLedgerTransaction` 一个短事务，回滚不留半完成委托、资金/库存预占或幂等占位。撤单以幂等键 + 状态版本条件 UPDATE 推进 `open|partially_filled → cancelled` 并释放对应预占；重复撤单返回 `RESOURCE_CONFLICT`。订单簿只读，买单按价格降序、卖单按价格升序聚合，不含用户身份。
 - 撮合（价格-时间优先、成交价、部分成交）、模拟履约、`p2p.trade.settled` 事实事件与 `order.expire` 定时回收延后至 I19B/I20B/I22B；本期委托只处于 `open` 状态。
+- I18F 前端消费：`apps/web/api/orders-api.ts` 是上述命令与查询的唯一前端入口，请求体与错误语义严格遵循 `order/v1` 与本模块；浏览器只回传 `{quoteId,quoteVersion,previewVersion,quantity,limitPrice}` 与玩家确认的限价，绝不回传或本地重算费用、保证金、限价带或预计金额。后端契约与端点在 I18F 无变更。
 
 ## 库存卖出与估值投影（I16F）
 

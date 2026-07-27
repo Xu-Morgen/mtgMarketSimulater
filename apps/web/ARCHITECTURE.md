@@ -102,6 +102,15 @@
 - 页面区分 Cardmarket EUR 参考价/指数（金色）与游戏内报价/指数（蓝色），并复用 `components/price-status.tsx` 的服务端来源、更新时间、过期状态与固定 disclaimer；`freshness=stale` 时显示“沿用最近成功快照；这不是实时 Cardmarket 价格。”，绝不渲染为空白或实时价格。空 points 显示“该 SKU/范围暂无历史快照”，查询失败显示错误重试。
 - `tests/e2e/price-history.spec.ts` 在桌面与 390 × 844 窄屏覆盖默认 30d、范围切换写 URL 与重查、单卡双曲线/降级表格/空历史、`stale` 旧价降级、查询失败重试与窄屏不阻断；人工执行记录固定在 `tests/manual/I17F.md`。
 
+## I18F P2P 委托创建与我的订单页面（2026-07-27）
+
+- `api/orders-api.ts` 是委托预览、创建、列表、详情、撤单与只读订单簿的唯一前端入口。`useOrderPreviewQuery(skuId, side, quantity)` 按用户、SKU、方向、数量隔离且每次输入提交均重新读取（`refetchOnMount:"always"`、`retry:false`）；`useCreateOrderMutation(side)` 对同一个 `(skuId,quoteId,quoteVersion,previewVersion,quantity,limitPrice)` 网络重试复用幂等键，任一变化（含重新预览得到新 `previewVersion`）才换键。
+- 创建请求体严格等于 `{quoteId,quoteVersion,previewVersion,quantity,limitPrice}`；`previewVersion` 为 64 位 hex 原样回传，`limitPrice` 为整数最小货币单位，限价带、费用、保证金、预计金额、可用量均只展示服务端 DTO，不回传或本地重算。
+- `features/orders/create-order-dialog.tsx` 复用 `npc-sell-dialog` 的同步 `confirmationLock` ref 双击锁，防止 React `disabled` 渲染前的同一事件循环第二击发出第二个 HTTP 请求；`VERSION_STALE` 必须重新预览（换新幂等键），`INSUFFICIENT_*`/`INVENTORY_LOCKED`/`RULE_VIOLATION`/`IDEMPOTENCY_CONFLICT` 展示服务端 message 并提供「重新预览」。
+- `features/orders/orders-page.tsx` 在 `/orders` 以服务端订单字段（方向、状态、SKU id、数量、限价、费用、预占资金/库存、版本、到期/创建时间）展示我的委托，URL 驱动 status/side/cursor/limit 筛选；撤单以幂等键提交并经 `ConfirmDialog` 二次确认，`409 RESOURCE_CONFLICT` 提示刷新后重试。成功只失效 `orders/archive/ledger/inventory/market*/prices.public-status` 缓存，不写 Zustand 或本地副本。
+- 挂单入口由市场页可交易 SKU 行「挂买单」与库存页可用持仓行「挂卖单」触发；玩家导航新增 `/orders`。撮合、模拟履约、`p2p.trade.settled` 与 `order.expire` 延后至 I19B/I20B/I22B；本迭代订单只处于 `open` 状态，页面不展示撮合/履约 UI。
+- `tests/e2e/orders.spec.ts` 在桌面与窄屏覆盖买单创建/双击/限价越界/余额不足、报价过期重新预览换键、卖单创建+我的委托+撤单、状态/方向筛选写 URL、空委托与查询失败；人工执行记录固定在 `tests/manual/I18F.md`。
+
 ## 不单独建层的内容
 
 - DTO、事件与 API 契约由共享 `packages/contracts` 提供，因此前端不建立会产生重复定义的 `types/` 层。

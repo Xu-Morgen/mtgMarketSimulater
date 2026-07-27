@@ -95,6 +95,7 @@
 - `POST /v1/orders/buy|sell/{skuId}` 要求有效玩家会话及格式正确的 `Idempotency-Key`；请求体严格为 `{ quoteId, quoteVersion, previewVersion, quantity, limitPrice }`。服务端校验预览版本未过期、报价/快照 ID 与版本一致、限价落在带内、单笔/单日额度、余额（买单）或可用库存（卖单）。买单原子预占 数量*限价+order_fee；卖单锁定库存并只预占 fulfillment_deposit（order_fee 在 I19B/I20B 履约时扣除）。客户端不得自报费用或保证金。
 - 成功以 `201` 返回 `BilateralOrderDto`；同键同参重放为 `200`，同键异参为 `409 IDEMPOTENCY_CONFLICT`。余额不足、库存不足/被锁定、额度超限、限价越界分别使用 `INSUFFICIENT_BALANCE`/`INSUFFICIENT_INVENTORY`/`INVENTORY_LOCKED`/`RULE_VIOLATION`；预览或报价过期使用 `VERSION_STALE`。创建与预占/锁定在同一短事务完成，未处理异常回滚委托、资金/库存预占和幂等占位。
 - `GET /v1/orders?status=&side=&cursor=&limit=`、`GET /v1/orders/{orderId}` 只返回当前玩家的委托；`POST /v1/orders/{orderId}/cancel` 以幂等键撤单，释放未成交资金（买单）或库存+保证金（卖单），重复撤单返回 `409 RESOURCE_CONFLICT`。`GET /v1/orders/book/{skuId}` 返回只读订单簿（买单按价格降序、卖单按价格升序聚合），不含用户身份。
+- I18F 前端消费：`apps/web/api/orders-api.ts` 是上述 8 个端点的唯一入口，请求体与错误语义严格遵循本协议；浏览器只回传 `{quoteId,quoteVersion,previewVersion,quantity,limitPrice}` 与玩家确认的限价，绝不回传或本地重算费用、保证金、限价带或预计金额。
 
 ## I17B 价格历史、每日同步与 AllPrices 回填协议
 

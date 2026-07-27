@@ -2,7 +2,7 @@
 
 import { Button, Pagination as AntPagination, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import type { CardFinish, InventoryHoldingDto, NpcTradeDto } from "@mtg-market/contracts";
+import type { BilateralOrderDto, CardFinish, InventoryHoldingDto, NpcTradeDto } from "@mtg-market/contracts";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { type InventoryFilters, useInventoryQuery } from "../../api/inventory-api";
@@ -10,6 +10,7 @@ import { usePublicPriceStatusQuery } from "../../api/pricing-api";
 import { PriceStatus } from "../../components/price-status";
 import { EmptyState, ErrorState, FilterBar, PageSkeleton } from "../../components/ui";
 import { formatMoney } from "../../utils/money";
+import { CreateOrderDialog } from "../orders/create-order-dialog";
 import { NpcSellDialog } from "./npc-sell-dialog";
 import styles from "./inventory-page.module.css";
 
@@ -44,7 +45,9 @@ export function InventoryPage() {
   const router = useRouter(); const search = useSearchParams(); const filters = filtersFromSearch(search); const inventory = useInventoryQuery(filters); const priceStatus = usePublicPriceStatusQuery();
   const [draft, setDraft] = useState<{ query: string; setCode: string; finish: CardFinish | ""; locked: "any" | "locked" | "available" }>({ query: filters.query ?? "", setCode: filters.setCode ?? "", finish: filters.finish ?? "", locked: filters.locked ?? "any" });
   const [sellHolding, setSellHolding] = useState<InventoryHoldingDto | null>(null);
+  const [orderHolding, setOrderHolding] = useState<InventoryHoldingDto | null>(null);
   const [completedTrade, setCompletedTrade] = useState<NpcTradeDto | null>(null);
+  const [completedOrder, setCompletedOrder] = useState<BilateralOrderDto | null>(null);
   const pageSize = filters.limit ?? defaultPageSize; const currentPage = Math.floor(Number.parseInt(filters.cursor ?? "0", 10) / pageSize) + 1;
   const columns = useMemo<ColumnsType<InventoryHoldingDto>>(() => [
     { title: "SKU / 印刷", key: "sku", render: (_, holding) => <div><strong>{holding.sku.name}</strong><br /><span className={styles.secondary}>{holding.sku.setCode} · #{holding.sku.collectorNumber} · {finishLabel(holding.sku.finish)}</span></div> },
@@ -55,7 +58,7 @@ export function InventoryPage() {
     { title: "服务端未实现盈亏", key: "profitLoss", render: (_, holding) => holding.unrealizedProfitLoss ? <span className={holding.unrealizedProfitLoss.amount < 0 ? styles.loss : styles.profit}>{formatMoney(holding.unrealizedProfitLoss)}</span> : <Tag color="default">暂不可用</Tag> },
     { title: "参考价来源 / 可交易状态", key: "priceSource", render: (_, holding) => <PriceStatus status={priceStatus.isError ? null : priceStatus.data?.data} tradable={holding.sku.tradable} /> },
     { title: "锁定状态", key: "locked", render: (_, holding) => holding.orderLockedQuantity + holding.tournamentLockedQuantity > 0 ? <Tag color="gold">已锁定（仅可卖出可用量）</Tag> : <Tag color="green">全部可用</Tag> },
-    { title: "操作", key: "action", render: (_, holding) => holding.availableQuantity > 0 && holding.sku.tradable ? <button type="button" className="button" onClick={() => { setCompletedTrade(null); setSellHolding(holding); }}>向 NPC 卖出</button> : <button type="button" className={styles.disabledEntry} disabled title={holding.availableQuantity === 0 ? "全部库存已被订单或比赛锁定，不能出售" : "该 SKU 当前不可交易"}>{holding.availableQuantity === 0 ? "无可用库存" : "暂不可交易"}</button> }
+    { title: "操作", key: "action", render: (_, holding) => holding.availableQuantity > 0 && holding.sku.tradable ? <div className={styles.actionGroup}><button type="button" className="button" onClick={() => { setCompletedTrade(null); setSellHolding(holding); }}>向 NPC 卖出</button><button type="button" className="button secondary" onClick={() => { setCompletedOrder(null); setOrderHolding(holding); }}>挂卖单</button></div> : <button type="button" className={styles.disabledEntry} disabled title={holding.availableQuantity === 0 ? "全部库存已被订单或比赛锁定，不能出售" : "该 SKU 当前不可交易"}>{holding.availableQuantity === 0 ? "无可用库存" : "暂不可交易"}</button> }
   ], [priceStatus.data?.data, priceStatus.isError]);
   if (inventory.isPending) return <PageSkeleton label="正在加载库存" />;
   if (inventory.isError) return <main className="page"><ErrorState title="库存加载失败" onRetry={() => void inventory.refetch()} /></main>;
@@ -63,6 +66,7 @@ export function InventoryPage() {
   const apply = () => router.push(toUrl({ query: draft.query.trim() || undefined, setCode: draft.setCode.trim().toUpperCase() || undefined, finish: draft.finish || undefined, locked: draft.locked, sort: filters.sort, direction: filters.direction, limit: pageSize }));
   return <main className="page inventory-page"><p className="eyebrow">服务端库存快照</p><h1>我的库存</h1><p className="intro">数量、成本、现价、市值、盈亏与锁定状态均来自服务端。此页面不提供修改库存或解锁资产的入口。</p>
     {completedTrade ? <section className={styles.tradeSuccess} role="status"><h2>卖出已完成</h2><p>服务端已成交 {completedTrade.quantity} 张，实际收入 {formatMoney(completedTrade.total)}（其中费用 {formatMoney(completedTrade.fee)}）。余额、库存、报价与账本正在按服务器响应刷新。</p></section> : null}
+    {completedOrder ? <section className={styles.tradeSuccess} role="status"><h2>挂单已创建</h2><p>服务端已创建{completedOrder.side === "buy" ? "买单" : "卖单"}（限价 {formatMoney(completedOrder.limitPrice)}，数量 {completedOrder.originalQuantity} 张，状态 {completedOrder.status}）。余额、库存、报价、委托与账本正在按服务器响应刷新；撮合与履约在后续迭代上线。</p></section> : null}
     <form className="catalog-filters" onSubmit={(event) => { event.preventDefault(); apply(); }}><FilterBar>
       <label>名称<input aria-label="库存名称筛选" value={draft.query} onChange={(event) => setDraft({ ...draft, query: event.target.value })} /></label>
       <label>系列<input aria-label="库存系列筛选" value={draft.setCode} onChange={(event) => setDraft({ ...draft, setCode: event.target.value })} placeholder="例如 ONE" /></label>
@@ -73,5 +77,6 @@ export function InventoryPage() {
     </FilterBar></form>
     {page.items.length === 0 ? <EmptyState title="库存为空">尚未持有符合当前条件的卡牌。获得卡牌后会由服务端更新库存。</EmptyState> : <><div className={styles.tableWrap}><Table columns={columns} dataSource={page.items} rowKey="skuId" pagination={false} scroll={{ x: 1300 }} /></div><div className={styles.pagination}><AntPagination current={currentPage} pageSize={pageSize} total={total} showSizeChanger showQuickJumper pageSizeOptions={pageSizeOptions} showTotal={(count, range) => `第 ${range[0]}–${range[1]} 项，共 ${count} 项`} onChange={(nextPage, nextPageSize) => { const nextLimit = Number(nextPageSize); const changedSize = nextLimit !== pageSize; router.push(toUrl({ ...filters, limit: nextLimit, cursor: changedSize || nextPage === 1 ? undefined : String((nextPage - 1) * nextLimit) })); }} /></div></>}
     {sellHolding ? <NpcSellDialog holding={sellHolding} onClose={() => setSellHolding(null)} onSettled={(trade) => { setSellHolding(null); setCompletedTrade(trade); }} /> : null}
+    {orderHolding ? <CreateOrderDialog sku={{ id: orderHolding.sku.id, name: orderHolding.sku.name, setCode: orderHolding.sku.setCode, collectorNumber: orderHolding.sku.collectorNumber }} initialSide="sell" onClose={() => setOrderHolding(null)} onSettled={(order) => { setOrderHolding(null); setCompletedOrder(order); }} /> : null}
   </main>;
 }
