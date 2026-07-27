@@ -1,15 +1,26 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { calculateMarketQuote, MARKET_RULE_VERSION, propagateMarketPressure, type MarketFactorInput } from "@mtg-market/rules";
-import type { QuoteDto } from "@mtg-market/contracts";
+import type { MarketQuoteListItemDto, Page, QuoteDto } from "@mtg-market/contracts";
 import { withinTransaction } from "@mtg-market/database";
 
 type ParametersRow = { rule_version: string; eur_cent_to_game_credit_bps: number; minimum_price: number; npc_buy_spread_bps: number; npc_sell_spread_bps: number; npc_fee_bps: number };
 type SnapshotRow = { id: string; sku_id: string; price_amount: number; captured_at: string; source_version: string; set_id: string };
-type QuoteRow = { sku_id: string; rule_version: string; reference_price_eur_cents: number; market_price_amount: number; npc_buy_price_amount: number; npc_sell_price_amount: number; calculated_at: string; valid_until: string };
+type MarketReason = NonNullable<QuoteDto["reasons"]>[number];
+type QuoteRow = { sku_id: string; rule_version: string; reference_price_eur_cents: number; market_price_amount: number; npc_buy_price_amount: number; npc_sell_price_amount: number; calculated_at: string; valid_until: string; reasons_json: string };
+type MarketListRow = QuoteRow & { name: string; set_code: string; set_name: string; collector_number: string; finish: "nonfoil" | "foil" | "etched"; rarity: string; tradable: number };
 type FactRow = { id: string; event_type: string; payload_json: string };
 
 export type MarketRepricePayload = { priceSyncRunId?: string; triggerKey?: string };
+export type MarketQuoteFilters = {
+  query?: string | undefined;
+  setCode?: string | undefined;
+  rarity?: string | undefined;
+  finish?: "nonfoil" | "foil" | "etched" | undefined;
+  tradable?: "any" | "tradable" | "untradable" | undefined;
+  cursor?: string | undefined;
+  limit: number;
+};
 
 function asMoney(amount: number) { return { amount, currency: "GAME_CREDIT" as const }; }
 
@@ -67,20 +78,48 @@ export class MarketService {
 
   quote(skuId: string): QuoteDto | null {
     const row = this.database.prepare(
-      `SELECT sku_id, rule_version, reference_price_eur_cents, market_price_amount, npc_buy_price_amount, npc_sell_price_amount, calculated_at, valid_until
+      `SELECT sku_id, rule_version, reference_price_eur_cents, market_price_amount, npc_buy_price_amount, npc_sell_price_amount, calculated_at, valid_until, reasons_json
        FROM market_quotes WHERE sku_id = ? ORDER BY calculated_at DESC, rowid DESC LIMIT 1`
     ).get(skuId) as QuoteRow | undefined;
-    if (!row) return null;
+    return row ? this.toQuote(row) : null;
+  }
+
+  /** 只读市场投影把目录筛选与最新服务端报价合并，浏览器无需也不得自行拼接或计算。 */
+  list(filters: MarketQuoteFilters): Page<MarketQuoteListItemDto> {
+    const where: string[] = []; const values: unknown[] = [];
+    if (filters.query) { where.push("lower(p.name) LIKE lower(?)"); values.push(`%${filters.query}%`); }
+    if (filters.setCode) { where.push("s.code = ?"); values.push(filters.setCode); }
+    if (filters.rarity) { where.push("p.rarity = ?"); values.push(filters.rarity); }
+    if (filters.finish) { where.push("sku.finish = ?"); values.push(filters.finish); }
+    if (filters.tradable === "tradable") where.push("sku.tradable = 1");
+    if (filters.tradable === "untradable") where.push("sku.tradable = 0");
+    const offset = filters.cursor ? Number.parseInt(filters.cursor, 10) : 0;
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new RangeError("市场分页游标无效");
+    const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const from = `FROM card_skus sku
+      JOIN card_printings p ON p.id = sku.printing_id
+      JOIN card_sets s ON s.id = p.set_id
+      LEFT JOIN market_quotes quote ON quote.rowid = (
+        SELECT latest.rowid FROM market_quotes latest WHERE latest.sku_id = sku.id
+        ORDER BY latest.calculated_at DESC, latest.rowid DESC LIMIT 1
+      )`;
+    const total = (this.database.prepare(`SELECT COUNT(*) AS count ${from} ${clause}`).get(...values) as { count: number }).count;
+    const rows = this.database.prepare(
+      `SELECT sku.id AS sku_id, p.name, s.code AS set_code, s.name AS set_name, p.collector_number, sku.finish, p.rarity, sku.tradable,
+        quote.rule_version, quote.reference_price_eur_cents, quote.market_price_amount, quote.npc_buy_price_amount, quote.npc_sell_price_amount,
+        quote.calculated_at, quote.valid_until, quote.reasons_json
+       ${from} ${clause}
+       ORDER BY p.name COLLATE NOCASE, s.code, p.collector_number, sku.finish LIMIT ? OFFSET ?`
+    ).all(...values, filters.limit + 1, offset) as MarketListRow[];
+    const hasMore = rows.length > filters.limit;
     return {
-      skuId: row.sku_id,
-      quoteVersion: row.rule_version,
-      referencePrice: { amount: row.reference_price_eur_cents, currency: "EUR" },
-      marketPrice: asMoney(row.market_price_amount),
-      npcBuyPrice: asMoney(row.npc_buy_price_amount),
-      npcSellPrice: asMoney(row.npc_sell_price_amount),
-      validUntil: row.valid_until,
-      source: "mtgjson-cardmarket",
-      capturedAt: row.calculated_at
+      items: rows.slice(0, filters.limit).map((row) => ({
+        sku: { id: row.sku_id, name: row.name, setCode: row.set_code, setName: row.set_name, collectorNumber: row.collector_number, finish: row.finish, rarity: row.rarity },
+        quote: row.rule_version === null ? null : this.toQuote(row),
+        tradable: row.tradable === 1,
+        tradeDisabledReason: row.tradable === 1 ? (row.rule_version === null ? "quote_unavailable" : null) : "no_valid_reference_price"
+      })),
+      page: { total, hasMore, nextCursor: hasMore ? String(offset + filters.limit) : null }
     };
   }
 
@@ -103,6 +142,36 @@ export class MarketService {
     const parameters = this.database.prepare("SELECT rule_version, eur_cent_to_game_credit_bps, minimum_price, npc_buy_spread_bps, npc_sell_spread_bps, npc_fee_bps FROM market_parameters WHERE singleton = 1").get() as ParametersRow | undefined;
     if (!parameters || parameters.rule_version !== MARKET_RULE_VERSION) throw new Error("市场参数或规则版本未初始化");
     return parameters;
+  }
+
+  private toQuote(row: QuoteRow): QuoteDto {
+    return {
+      skuId: row.sku_id,
+      quoteVersion: row.rule_version,
+      referencePrice: { amount: row.reference_price_eur_cents, currency: "EUR" },
+      marketPrice: asMoney(row.market_price_amount),
+      npcBuyPrice: asMoney(row.npc_buy_price_amount),
+      npcSellPrice: asMoney(row.npc_sell_price_amount),
+      validUntil: row.valid_until,
+      source: "mtgjson-cardmarket",
+      capturedAt: row.calculated_at,
+      reasons: this.parseReasons(row.reasons_json)
+    };
+  }
+
+  private parseReasons(value: string): MarketReason[] {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.flatMap((item): MarketReason[] => {
+        if (!item || typeof item !== "object") return [];
+        const reason = item as Record<string, unknown>;
+        const kind = reason.kind;
+        const factorBasisPoints = reason.factorBasisPoints;
+        if (!(kind === "supply-demand" || kind === "series-cycle" || kind === "relation" || kind === "event" || kind === "liquidity") || typeof factorBasisPoints !== "number" || !Number.isSafeInteger(factorBasisPoints) || typeof reason.reason !== "string") return [];
+        return [{ kind, factorBasisPoints, reason: reason.reason }];
+      });
+    } catch { return []; }
   }
 
   private latestSuccessfulRunId(): string | null {

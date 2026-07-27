@@ -311,6 +311,20 @@ export interface QuoteDto {
   validUntil: string;
   source: PriceSource | null;
   capturedAt: string;
+  /** 服务端规则在本次报价中实际消费的已受界因素；仅供解释，不可用于浏览器重算。 */
+  reasons: Array<{
+    kind: "supply-demand" | "series-cycle" | "relation" | "event" | "liquidity";
+    factorBasisPoints: number;
+    reason: string;
+  }>;
+}
+
+/** I14F 市场列表的只读投影；价格、可交易资格和禁用原因均由 API 判定。 */
+export interface MarketQuoteListItemDto {
+  sku: Pick<CatalogSkuDto, "id" | "name" | "setCode" | "setName" | "collectorNumber" | "finish" | "rarity">;
+  quote: QuoteDto | null;
+  tradable: boolean;
+  tradeDisabledReason: "no_valid_reference_price" | "quote_unavailable" | null;
 }
 
 /** 不可变外部参考价快照；游戏内报价使用 QuoteDto 表达。 */

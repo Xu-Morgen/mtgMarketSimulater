@@ -164,9 +164,11 @@ describe("API cross-cutting HTTP boundary", () => {
     database.prepare("INSERT INTO price_snapshot_entries (id, sync_run_id, sku_id, mapping_id, mtgjson_uuid, finish, price_type, currency, price_amount, availability, unavailable_reason, captured_at, created_at) VALUES (?, ?, ?, NULL, NULL, 'nonfoil', 'normal', 'EUR', 123, 'priced', NULL, ?, ?)").run("50000000-0000-4000-8000-000000000010", runId, skuId, now, now);
     new MarketService(database).reprice({ priceSyncRunId: runId, triggerKey: "route-fixture" }, now);
     const quote = await app.inject({ method: "GET", url: `/v1/market/quotes/${skuId}`, headers: { authorization } });
+    const listed = await app.inject({ method: "GET", url: "/v1/market/quotes?query=%E5%B8%82%E5%9C%BA&tradable=tradable", headers: { authorization } });
     const index = await app.inject({ method: "GET", url: "/v1/market/index", headers: { authorization } });
     const anonymous = await app.inject({ method: "GET", url: `/v1/market/quotes/${skuId}` });
     expect(quote.json()).toMatchObject({ ok: true, data: { quote: { skuId, referencePrice: { amount: 123, currency: "EUR" } } } });
+    expect(listed.json()).toMatchObject({ ok: true, data: { items: [{ sku: { id: skuId, name: "市场测试卡" }, tradable: true, quote: { skuId, reasons: expect.any(Array) } }], page: { total: 1 } } });
     expect(index.json()).toMatchObject({ ok: true, data: { quotedSkus: 1, referenceIndex: 123 } });
     expect(anonymous.statusCode).toBe(401);
     await app.close(); database.close();

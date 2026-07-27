@@ -76,6 +76,12 @@
 - `components/price-status.tsx` 只展示服务端公开来源、更新时间/新鲜度和 SKU 可新增交易状态，供目录、库存复用；不显示参考价金额、版本、校验和或同步失败详情，也不在浏览器推导过期状态。
 - `/admin/price-sync` 复用 admin layout 的服务端 RBAC 体验，运行详情仅在管理页面展示；管理员主动刷新会先经确认框，再以新的幂等键投递 `prices.sync`，失败重试同一意图复用该键，成功后失效状态查询并轮询任务。服务端明确返回 `checksumBypassAvailable` 时页面自动弹出风险确认；覆写与普通刷新属于不同幂等意图，确认后才提交 `allowChecksumMismatch: true`。组件在无查询数据时保持加载状态，避免会话权限跳转期间读取空缓存。`tests/e2e/price-sync.spec.ts` 覆盖管理员、玩家与越权三条路径。
 
+## I14F 市场报价页面（2026-07-27）
+
+- `api/market-api.ts` 是市场页唯一数据入口：TanStack Query 按当前用户和完整 URL 筛选隔离 `GET /v1/market/quotes`，另读服务端市场指数；价格来源与新鲜度继续复用公开价格状态查询。它不接收、保存或计算市场规则参数。
+- `features/market/market-page.tsx` 在 `/market` 展示 API 已物化的外部锚点、游戏内/NPC 报价、原因摘要和分页筛选；筛选条件写入 URL。无价或报价缺失条目依据服务端禁用原因保持不可交易，过期/失败状态不会被渲染成实时价格。
+- I14F Playwright 通过可配置的本机端口启动隔离 API/Web 服务，避免复用开发者已有服务；`tests/e2e/market.spec.ts` 在桌面和窄屏验证价格展示、活动受界原因、无价禁用与失败恢复。
+
 ## 不单独建层的内容
 
 - DTO、事件与 API 契约由共享 `packages/contracts` 提供，因此前端不建立会产生重复定义的 `types/` 层。

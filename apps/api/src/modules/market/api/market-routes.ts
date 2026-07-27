@@ -5,8 +5,21 @@ import { success, failure } from "../../../shared/http/api-response.js";
 import { requireRole } from "../../auth/api/auth-routes.js";
 import { MarketService } from "../application/market-service.js";
 
+const listQuerySchema = z.object({
+  query: z.string().trim().min(1).max(120).optional(),
+  setCode: z.string().trim().min(1).max(20).transform((value) => value.toUpperCase()).optional(),
+  rarity: z.string().trim().min(1).max(40).optional(),
+  finish: z.enum(["nonfoil", "foil", "etched"]).optional(),
+  tradable: z.enum(["any", "tradable", "untradable"]).default("any"),
+  cursor: z.string().regex(/^\d+$/).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20)
+}).strict();
+
 export async function registerMarketRoutes(app: FastifyInstance, database: Database.Database): Promise<void> {
   const market = new MarketService(database);
+  app.get("/v1/market/quotes", { preHandler: requireRole("player") }, async (request) =>
+    success(request.requestId, market.list(listQuerySchema.parse(request.query)))
+  );
   app.get("/v1/market/quotes/:skuId", { preHandler: requireRole("player") }, async (request, reply) => {
     const { skuId } = z.object({ skuId: z.string().uuid() }).parse(request.params);
     const quote = market.quote(skuId);

@@ -6,6 +6,7 @@ export const publicApiPaths = [
   "/health",
   "/ready",
   "/openapi.json",
+  "/v1/market/quotes",
   "/v1/market/quotes/{skuId}",
   "/v1/market/index",
   "/v1/auth/register",
@@ -45,6 +46,12 @@ export const openApiDocument = {
     },
     "/openapi.json": {
       get: { summary: "OpenAPI 3.1 文档", responses: { "200": { description: "API 协议文档" } } }
+    },
+    "/v1/market/quotes": {
+      get: {
+        summary: "按服务端筛选分页查询市场报价投影",
+        responses: { "200": { description: "市场报价分页" }, "401": { description: "认证无效或过期" } }
+      }
     },
     "/v1/market/quotes/{skuId}": {
       get: {

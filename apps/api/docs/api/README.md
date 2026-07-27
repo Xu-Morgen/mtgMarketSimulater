@@ -72,6 +72,11 @@
 - `GET /v1/market/index` 要求有效会话，返回最新每 SKU 报价投影的外部参考指数、游戏指数、已报价 SKU 数和最近计算时间。指数为展示用聚合，客户端不得根据它或单卡报价推导交易结算。
 - `market.reprice` 由成功 `prices.sync` 的运行 ID 或已结算经济事实 ID 唯一投递。每次报价保留规则版本、参数快照和原因摘要；重放相同触发键不会重复叠加事件或生成第二份报价。同步或重定价失败时保留最近成功报价，SKU 的新交易资格仍以价格快照的 `tradable` 状态为准。
 
+## I14F 市场首页只读查询协议
+
+- `GET /v1/market/quotes?query=&setCode=&rarity=&finish=&tradable=&cursor=&limit=` 要求有效会话，服务器按目录字段筛选并返回精确总数的 `Page<MarketQuoteListItemDto>`。每项含最小 SKU 资料、最新持久化 `QuoteDto`（外部锚点、游戏内/NPC 报价、计算时间和受界原因）及服务端判定的 `tradable`/`tradeDisabledReason`；不返回可由浏览器重算的市场参数、费用或原始 Provider 数据。
+- `tradable=untradable` 用于查阅无有效参考价 SKU；其 `quote` 可以为 `null`，页面必须禁用交易入口并显示服务端原因。全局来源、新鲜度和最后成功同步时间仍仅由 `GET /v1/prices/status` 返回；任何查询失败均不得被客户端包装成实时或可交易数据。
+
 ## I11B 补充包概率公示协议
 
 - `GET /v1/packs` 与 `GET /v1/packs/{packId}` 要求有效 Bearer 会话，返回 `PackDto` 列表或单个配置。每项包含整数最小货币单位价格、启用状态/停用原因、规则版本和卡位稀有度概率；每个卡位的 `probabilityBasisPoints` 总和固定为 10,000，数值由服务端版本化规则计算。
