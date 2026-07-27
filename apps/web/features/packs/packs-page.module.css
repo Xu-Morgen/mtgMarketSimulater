@@ -103,6 +103,16 @@
   background: #e3f0d7;
   border: 1px solid #8db36f;
 }
+.openingCardContent {
+  display: grid;
+  gap: 7px;
+}
+.openingCardHeader {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
 .hiddenCard {
   align-items: center;
   background: #e8e7db;
@@ -127,6 +137,11 @@
 .historyCard ul {
   line-height: 1.7;
   padding-left: 22px;
+}
+.historyOpeningCard {
+  display: grid;
+  gap: 4px;
+  padding: 6px 0;
 }
 
 @media (max-width: 700px) {

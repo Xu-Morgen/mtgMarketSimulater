@@ -1,7 +1,7 @@
 "use client";
 
 import { Descriptions, Tag } from "antd";
-import type { PackDto, PackOpeningDto, PackPurchasePreviewDto } from "@mtg-market/contracts";
+import type { PackDto, PackOpeningCardDto, PackOpeningDto, PackPurchasePreviewDto } from "@mtg-market/contracts";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -11,7 +11,10 @@ import {
   usePackPurchasePreviewQuery,
   usePacksQuery
 } from "../../api/packs-api";
+import { useCatalogDetailQuery } from "../../api/catalog-api";
+import { useMarketQuoteQuery } from "../../api/market-api";
 import { ApiClientError } from "../../api/client";
+import { CatalogCardDetailModal } from "../../components/catalog-card-detail-modal";
 import { EmptyState, ErrorState, PageSkeleton } from "../../components/ui";
 import { usePackOpeningAnimationStore } from "../../stores/pack-opening-animation-store";
 import { formatMoney } from "../../utils/money";
@@ -130,6 +133,28 @@ function PurchaseDialog({
   );
 }
 
+/**
+ * 开包记录只保存已结算事实；名称、罕贵度、卡图与“当前市场价”均实时读取本地只读投影。
+ * 因而市场波动不会回写开包成本，也不会把当前报价误称为开包时价格。
+ */
+function OpeningCardPresentation({ card, className }: { card: PackOpeningCardDto; className?: string | undefined }) {
+  const catalog = useCatalogDetailQuery(card.skuId);
+  const quote = useMarketQuoteQuery(card.skuId);
+  const [selectedSkuId, setSelectedSkuId] = useState<string | null>(null);
+  const name = catalog.data?.data.sku.name;
+  return <div className={className ?? styles.openingCardContent}>
+    <div className={styles.openingCardHeader}>
+      <strong>{catalog.isPending ? "正在加载卡牌名称…" : name ?? "卡牌资料暂不可用"}</strong>
+      <button className="text-button" type="button" onClick={() => setSelectedSkuId(card.skuId)}>详情</button>
+    </div>
+    {catalog.isError ? <span className={styles.metadata}>卡牌名称暂不可用。</span> : null}
+    <span>数量：{card.quantity}</span>
+    <span>本次分摊成本：{formatMoney(card.cost)}</span>
+    <span>当前市场价：{quote.isPending ? "正在加载…" : quote.data ? formatMoney(quote.data.data.quote.marketPrice) : "暂无有效市场报价"}</span>
+    <CatalogCardDetailModal skuId={selectedSkuId} onClose={() => setSelectedSkuId(null)} />
+  </div>;
+}
+
 function OpeningResult({
   opening,
   onOpenAgain
@@ -166,11 +191,7 @@ function OpeningResult({
               key={`${card.skuId}-${index}`}
             >
               {visible ? (
-                <>
-                  <strong>SKU {card.skuId}</strong>
-                  <span>数量：{card.quantity}</span>
-                  <span>本次分摊成本：{formatMoney(card.cost)}</span>
-                </>
+                <OpeningCardPresentation card={card} />
               ) : (
                 <span>正在揭晓第 {index + 1} 项…</span>
               )}
@@ -186,11 +207,6 @@ function OpeningResult({
         >
           跳过动画
         </button>
-      ) : null}
-      {opening.profitLoss.priceStatus === "unavailable_until_i17" ? (
-        <p className={styles.metadata}>
-          外部参考价和游戏内价将在 I17 后提供；本次结果不展示估值或盈亏。
-        </p>
       ) : null}
       <div className="actions">
         <button className="button" type="button" onClick={onOpenAgain}>
@@ -308,13 +324,10 @@ function OpeningSummary({ opening }: { opening: PackOpeningDto }) {
       <ul>
         {opening.received.map((card, index) => (
           <li key={`${opening.id}-${card.skuId}-${index}`}>
-            SKU {card.skuId} × {card.quantity}（分摊成本 {formatMoney(card.cost)}）
+            <OpeningCardPresentation card={card} className={styles.historyOpeningCard} />
           </li>
         ))}
       </ul>
-      {opening.profitLoss.priceStatus === "unavailable_until_i17" ? (
-        <p className={styles.metadata}>该记录暂无外部参考价与游戏内价。</p>
-      ) : null}
     </article>
   );
 }

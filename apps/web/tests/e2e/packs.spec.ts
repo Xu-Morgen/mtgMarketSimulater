@@ -66,6 +66,10 @@ const opening = {
   openedAt: "2026-07-26T09:30:00.000Z"
 };
 const firstReceivedSkuId = "30000000-0000-4000-8000-000000000011";
+const openingCards = [
+  { id: firstReceivedSkuId, name: "测试火花法师", rarity: "rare" },
+  { id: "30000000-0000-4000-8000-000000000012", name: "测试林地精灵", rarity: "common" }
+];
 
 function envelope(data: unknown) {
   return { ok: true, data, meta: { requestId: "i12f-e2e" } };
@@ -90,6 +94,24 @@ async function mockPackList(page: Page, items = [activePack, disabledPack]): Pro
   await page.route("**/v1/packs", async (route) =>
     route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items })) })
   );
+}
+
+/** 开包结果补充展示资料与当前报价时，浏览器仍只请求本地 API。 */
+async function mockOpeningPresentations(page: Page): Promise<void> {
+  await page.route("**/v1/catalog/cards/30000000-0000-4000-8000-00000000001*", async (route) => {
+    const card = openingCards.find((item) => route.request().url().endsWith(item.id));
+    if (!card) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify(failure("RESOURCE_NOT_FOUND", "卡牌不存在")) });
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ sku: {
+      ...card, printingId: `printing-${card.id}`, scryfallId: `scryfall-${card.id}`, setCode: "TST", setName: "测试系列", collectorNumber: "1", finish: "nonfoil", legalities: {}, imagePath: null, tradable: true, source: "scryfall", sourceReference: null, isManualException: false,
+      image: { path: null, sourceUrl: null, status: "missing", cachedAt: null }, oracleText: null, artist: null, releasedAt: null
+    } })) });
+  });
+  await page.route("**/v1/market/quotes/30000000-0000-4000-8000-00000000001*", async (route) => {
+    const skuId = openingCards.find((item) => route.request().url().endsWith(item.id))?.id;
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ quote: {
+      skuId, quoteVersion: "market/v1", referencePrice: { amount: 25, currency: "EUR" }, marketPrice: { amount: 250, currency: "GAME_CREDIT" }, npcBuyPrice: { amount: 225, currency: "GAME_CREDIT" }, npcSellPrice: { amount: 275, currency: "GAME_CREDIT" }, validUntil: "2026-07-27T10:00:00.000Z", source: "mtgjson-cardmarket", capturedAt: "2026-07-27T09:00:00.000Z", reasons: []
+    } })) });
+  });
 }
 
 test("玩家可查看服务端概率和禁用原因，并从详情返回商店购买", async ({ page }) => {
@@ -119,6 +141,7 @@ test("玩家可查看服务端概率和禁用原因，并从详情返回商店�
 test("购买预览、重复点击、跳过动画和刷新历史只展示一次服务端开包", async ({ page }) => {
   await registerPlayer(page);
   await mockPackList(page, [activePack]);
+  await mockOpeningPresentations(page);
   let previewCalls = 0;
   let openCalls = 0;
   let historyCalls = 0;
@@ -169,8 +192,13 @@ test("购买预览、重复点击、跳过动画和刷新历史只展示一次�
   await expect(page.getByRole("heading", { name: "本次开包结果" })).toBeVisible();
   await expect(page.getByRole("button", { name: "跳过动画" })).toBeVisible();
   await page.getByRole("button", { name: "跳过动画" }).click({ force: true });
-  await expect(page.getByText(`SKU ${firstReceivedSkuId}`)).toBeVisible();
-  await expect(page.getByText("外部参考价和游戏内价将在 I17 后提供")).toBeVisible();
+  await expect(page.getByText("测试火花法师")).toBeVisible();
+  await expect(page.getByText("当前市场价：250 游戏币").first()).toBeVisible();
+  await page.getByRole("button", { name: "详情" }).first().click();
+  await expect(page.getByRole("dialog", { name: "卡牌详情" })).toBeVisible();
+  await expect(page.getByText("罕贵度")).toBeVisible();
+  await expect(page.getByText("rare")).toBeVisible();
+  await expect(page.getByText("暂无本地图片；管理员可按需缓存该印刷的卡图。")).toBeVisible();
   expect(openCalls).toBe(1);
   expect(receivedKey).toMatch(/^[0-9a-f-]{36}$/i);
   expect(previewCalls).toBeGreaterThanOrEqual(1);
@@ -251,7 +279,7 @@ test("补充包页覆盖加载、空列表、失败重试和规则版本刷新",
     });
   });
   await page.goto("/packs");
-  await expect(page.locator('[aria-busy="true"]')).toBeVisible();
+  await expect(page.locator('[aria-busy="true"]').first()).toBeVisible();
   await expect(page.getByText("测试补充包")).toBeVisible();
   state = "empty";
   await page.reload();

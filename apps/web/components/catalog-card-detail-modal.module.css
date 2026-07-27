@@ -1,0 +1,19 @@
+.image {
+  display: block;
+  margin: 0 auto 16px;
+  max-height: 520px;
+  max-width: 100%;
+}
+
+.imagePlaceholder {
+  background: #f3f2e8;
+  border: 1px dashed #9b9a8e;
+  border-radius: 8px;
+  color: #596153;
+  margin-bottom: 16px;
+  padding: 16px;
+}
+
+.details {
+  margin-top: 16px;
+}
