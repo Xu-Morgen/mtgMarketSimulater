@@ -5,7 +5,7 @@
  * 这里的事件只描述已经提交的业务事实，绝不能被当作结算命令消费。
  */
 
-export const CONTRACTS_VERSION = "2026-07-26" as const;
+export const CONTRACTS_VERSION = "2026-07-27" as const;
 
 export type CurrencyCode = "EUR" | "GAME_CREDIT";
 export type PriceSource = "mtgjson-cardmarket" | "manual-test";
@@ -339,6 +339,28 @@ export interface NpcBuyPreviewDto {
   };
   canPurchase: boolean;
   unavailableReason: "archive_required" | "insufficient_balance" | "trade_limit_reached" | null;
+}
+
+/** 玩家向 NPC 出售时的服务端预览；`quantity=all` 在 HTTP 边界解析为当前可用库存。 */
+export interface NpcSellPreviewDto {
+  skuId: string;
+  quantity: number;
+  availableQuantity: number;
+  quoteId: string;
+  quoteVersion: string;
+  /** NPC 收购单价，已扣除规则定义的价差与费用。 */
+  unitPrice: Money;
+  unitFee: Money;
+  total: Money;
+  fee: Money;
+  validUntil: string;
+  limit: {
+    maxQuantityPerTrade: number;
+    maxQuantityPerUserSkuDay: number;
+    remainingQuantityToday: number;
+  };
+  canSell: boolean;
+  unavailableReason: "archive_required" | "insufficient_inventory" | "trade_limit_reached" | null;
 }
 
 /** 已结算 NPC 交易；价格字段来自所引用的不可变市场报价快照。 */

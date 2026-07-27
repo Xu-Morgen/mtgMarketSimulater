@@ -110,6 +110,10 @@ export class UserService {
   spendForNpcBuy(userId: string, amount: number, now: string, correlationId: string) {
     return this.users.spendAvailableFunds(userId, amount, now, correlationId, "npc_buy");
   }
+  /** NPC 卖出的命名收入入口；账本仍只由 users 模块写入。 */
+  creditForNpcSell(userId: string, amount: number, now: string, correlationId: string) {
+    return this.users.creditAvailableFunds(userId, amount, now, correlationId, "npc_sell");
+  }
   writeEconomicAudit(
     actorId: string,
     action: string,

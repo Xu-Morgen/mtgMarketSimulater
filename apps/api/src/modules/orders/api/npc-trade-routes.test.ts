@@ -48,6 +48,10 @@ function buyRequest(authorization: string, body: Record<string, unknown> = {}) {
   return { method: "POST" as const, url: `/v1/npc-trades/buy/${ids.sku}`, headers: { authorization, "idempotency-key": "npc-buy-key-0001" }, payload: { quoteId: ids.quote, quoteVersion: "market/v1", quantity: 2, maxUnitPrice: 250, ...body } };
 }
 
+function sellRequest(authorization: string, body: Record<string, unknown> = {}) {
+  return { method: "POST" as const, url: `/v1/npc-trades/sell/${ids.sku}`, headers: { authorization, "idempotency-key": "npc-sell-key-0001" }, payload: { quoteId: ids.quote, quoteVersion: "market/v1", quantity: 2, minUnitPrice: 170, ...body } };
+}
+
 describe("I15B NPC 买入", () => {
   it("预览并以不可变报价、限价和幂等键原子结算余额、库存、成交、账本和事实事件", async () => {
     const { app, database } = await createTestApp();
@@ -103,6 +107,64 @@ describe("I15B NPC 买入", () => {
     expect(database.prepare("SELECT COUNT(*) AS count FROM npc_trades").get()).toEqual({ count: 0 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM fact_events WHERE event_type = 'npc.trade.settled'").get()).toEqual({ count: 0 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM idempotency_requests WHERE idempotency_key = 'npc-buy-key-0001'").get()).toEqual({ count: 0 });
+    await app.close(); database.close();
+  });
+});
+
+describe("I16B NPC 卖出", () => {
+  it("按服务端收购价原子结算指定数量与全部可用库存，且锁定量不参与出售", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    const authorization = await player(app);
+    expect((await app.inject(buyRequest(authorization))).statusCode).toBe(201);
+
+    const allPreview = await app.inject({ method: "GET", url: `/v1/npc-trades/sell/${ids.sku}/preview?quantity=all`, headers: { authorization } });
+    expect(allPreview.json()).toMatchObject({ ok: true, data: { preview: { quantity: 2, availableQuantity: 2, unitPrice: { amount: 170 }, unitFee: { amount: 20 }, total: { amount: 340 }, fee: { amount: 40 }, canSell: true } } });
+    const [first, replay] = await Promise.all([app.inject(sellRequest(authorization)), app.inject(sellRequest(authorization))]);
+    expect([first.statusCode, replay.statusCode].sort()).toEqual([200, 201]);
+    expect((first.statusCode === 201 ? first : replay).json()).toMatchObject({ ok: true, data: { trade: { side: "sell", quantity: 2, unitPrice: { amount: 170 }, total: { amount: 340 } }, balance: { total: { amount: 9840 } }, holding: { quantity: 0, availableQuantity: 0, averageCost: { amount: 0 } } } });
+    expect(database.prepare("SELECT reason, direction, amount FROM ledger_entries WHERE reason = 'npc_sell'").get()).toEqual({ reason: "npc_sell", direction: "credit", amount: 340 });
+    expect(database.prepare("SELECT reason, quantity_delta FROM inventory_entries WHERE reason = 'npc_sell'").get()).toEqual({ reason: "npc_sell", quantity_delta: -2 });
+    expect(database.prepare("SELECT side, unit_price_amount, total_amount FROM npc_trades WHERE side = 'sell'").get()).toEqual({ side: "sell", unit_price_amount: 170, total_amount: 340 });
+    expect(database.prepare("SELECT payload_json FROM fact_events WHERE event_type = 'npc.trade.settled' ORDER BY rowid DESC LIMIT 1").get()).toMatchObject({ payload_json: expect.stringContaining('"side":"sell"') });
+    await app.close(); database.close();
+  });
+
+  it("拒绝同键异参、被锁定或不足的库存、低于最低价的报价与超额出售", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    const authorization = await player(app);
+    expect((await app.inject(buyRequest(authorization))).statusCode).toBe(201);
+    const sold = await app.inject(sellRequest(authorization, { quantity: 1 }));
+    expect(sold.statusCode).toBe(201);
+    const conflict = await app.inject(sellRequest(authorization, { quantity: 2 }));
+    expect(conflict.json()).toMatchObject({ ok: false, error: { code: "IDEMPOTENCY_CONFLICT" } });
+    database.prepare("UPDATE inventory_holdings SET available_quantity = 0, order_locked_quantity = 1").run();
+    const locked = await app.inject({ ...sellRequest(authorization, { quantity: 1 }), headers: { authorization, "idempotency-key": "npc-sell-locked-0001" } });
+    expect(locked.json()).toMatchObject({ ok: false, error: { code: "INSUFFICIENT_INVENTORY" } });
+    database.prepare("UPDATE inventory_holdings SET available_quantity = 1, order_locked_quantity = 0").run();
+    database.prepare("UPDATE market_quotes SET npc_buy_price_amount = 160").run();
+    const belowLimit = await app.inject({ ...sellRequest(authorization, { quantity: 1 }), headers: { authorization, "idempotency-key": "npc-sell-price-0001" } });
+    expect(belowLimit.json()).toMatchObject({ ok: false, error: { code: "VERSION_STALE" } });
+    database.prepare("UPDATE market_quotes SET npc_buy_price_amount = 170").run();
+    database.prepare("UPDATE npc_trade_limits SET max_quantity_per_trade = 1, max_quantity_per_user_sku_day = 1").run();
+    const overLimit = await app.inject({ ...sellRequest(authorization, { quantity: 1 }), headers: { authorization, "idempotency-key": "npc-sell-limit-0001" } });
+    expect(overLimit.json()).toMatchObject({ ok: false, error: { code: "RULE_VIOLATION" } });
+    await app.close(); database.close();
+  });
+
+  it("库存流水异常时回滚库存、收入、成交、事件和幂等占位", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    const authorization = await player(app);
+    expect((await app.inject(buyRequest(authorization))).statusCode).toBe(201);
+    database.exec("CREATE TRIGGER fail_npc_sell_inventory BEFORE INSERT ON inventory_entries WHEN NEW.reason = 'npc_sell' BEGIN SELECT RAISE(ABORT, 'forced sell inventory failure'); END");
+    const failed = await app.inject(sellRequest(authorization));
+    expect(failed.statusCode).toBe(500);
+    expect(database.prepare("SELECT total_amount, available_amount FROM accounts").get()).toEqual({ total_amount: 9500, available_amount: 9500 });
+    expect(database.prepare("SELECT quantity, available_quantity FROM inventory_holdings").get()).toEqual({ quantity: 2, available_quantity: 2 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM npc_trades WHERE side = 'sell'").get()).toEqual({ count: 0 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM idempotency_requests WHERE idempotency_key = 'npc-sell-key-0001'").get()).toEqual({ count: 0 });
     await app.close(); database.close();
   });
 });

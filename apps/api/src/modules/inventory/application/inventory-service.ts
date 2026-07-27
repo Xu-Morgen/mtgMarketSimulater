@@ -31,6 +31,12 @@ export class InventoryService {
     assertPositiveQuantity(input.quantityDelta);
     return this.inventory.adjust(input);
   }
+  /** 已结算出售的受控扣减入口；repository 仅会扣减可用库存，不能触碰锁定量。 */
+  disposeAvailableInLedgerTransaction(input: InventoryAdjustment): InventoryHoldingDto | "insufficient" {
+    if (input.quantityDelta >= 0) throw new RangeError("出售库存变更必须为负数");
+    assertPositiveQuantity(-input.quantityDelta);
+    return this.inventory.adjust(input);
+  }
   acquire(
     input: InventoryAdjustment,
     withLedger?: () => void

@@ -97,23 +97,25 @@ export class MarketService {
   }
 
   /** 订单模块只可通过该应用接口取得报价快照，不拥有 market_quotes 的表访问权。 */
-  npcSettlementQuote(skuId: string, quoteId?: string): NpcSettlementQuote | null {
+  npcSettlementQuote(skuId: string, side: "buy" | "sell", quoteId?: string): NpcSettlementQuote | null {
     const row = this.database.prepare(
-      `SELECT quote.id, quote.sku_id, quote.rule_version, quote.npc_sell_price_amount, quote.npc_sell_fee_amount,
+      `SELECT quote.id, quote.sku_id, quote.rule_version,
+        ${side === "buy" ? "quote.npc_sell_price_amount" : "quote.npc_buy_price_amount"} AS unit_price_amount,
+        ${side === "buy" ? "quote.npc_sell_fee_amount" : "quote.npc_buy_fee_amount"} AS unit_fee_amount,
         quote.valid_until, sku.tradable
        FROM market_quotes quote JOIN card_skus sku ON sku.id = quote.sku_id
        WHERE quote.sku_id = ? ${quoteId ? "AND quote.id = ?" : ""}
        ORDER BY quote.calculated_at DESC, quote.rowid DESC LIMIT 1`
     ).get(...(quoteId ? [skuId, quoteId] : [skuId])) as
-      | { id: string; sku_id: string; rule_version: string; npc_sell_price_amount: number; npc_sell_fee_amount: number; valid_until: string; tradable: number }
+      | { id: string; sku_id: string; rule_version: string; unit_price_amount: number; unit_fee_amount: number; valid_until: string; tradable: number }
       | undefined;
     return row
       ? {
           quoteId: row.id,
           skuId: row.sku_id,
           quoteVersion: row.rule_version,
-          unitPriceAmount: row.npc_sell_price_amount,
-          unitFeeAmount: row.npc_sell_fee_amount,
+          unitPriceAmount: row.unit_price_amount,
+          unitFeeAmount: row.unit_fee_amount,
           validUntil: row.valid_until,
           tradable: row.tradable === 1
         }

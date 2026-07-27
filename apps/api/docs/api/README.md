@@ -83,6 +83,12 @@
 - `POST /v1/npc-trades/buy/{skuId}` 要求有效玩家会话及格式正确的 `Idempotency-Key`。请求体严格为 `{ quoteId, quoteVersion, quantity, maxUnitPrice }`；`maxUnitPrice` 是玩家确认的上限，不是服务端定价输入。服务端只从 `quoteId` 指向的持久化 `market_quotes` 读取成交价和费用，并校验 SKU 可交易、规则版本、有效期、限价、余额、单笔额度与当日已成交量。
 - 成功以 `201` 返回成交、服务端余额与持仓；同键同参重放以 `200` 返回首次完整响应，同键异参返回 `409 IDEMPOTENCY_CONFLICT`。无报价、报价/限价过期、余额不足和交易量限制分别使用 `PRICE_UNAVAILABLE`、`VERSION_STALE`、`INSUFFICIENT_BALANCE`、`RULE_VIOLATION`；失败同样完成幂等记录，但任何未处理写入异常会回滚经济变更及幂等占位。
 
+## I16B NPC 卖出协议
+
+- `GET /v1/npc-trades/sell/{skuId}/preview?quantity=<正整数|all>` 要求有效玩家会话，返回 `NpcSellPreviewDto`：不可变 `quoteId`、`quoteVersion`、服务端 NPC 收购 `unitPrice`/内含 `unitFee`、收入、可用库存、有效期与额度。`all` 只由服务端解析为当前可用数量；没有可用库存时预览明确返回 `canSell: false` 和 `insufficient_inventory`，不会出售订单或比赛锁定量。
+- `POST /v1/npc-trades/sell/{skuId}` 要求有效玩家会话、格式正确的 `Idempotency-Key`，且请求体严格为 `{ quoteId, quoteVersion, quantity, minUnitPrice }`。`minUnitPrice` 是玩家确认的保护下限，服务端只读取 `quoteId` 指向的持久化 NPC 收购价和费用，并校验可交易、版本、有效期、最低价、可用库存及单笔/当日额度。
+- 成功以 `201` 返回成交、服务端余额与持仓；同键同参重放为 `200`，同键异参为 `409 IDEMPOTENCY_CONFLICT`。无报价、报价/最低价过期、可用库存不足与交易量限制分别使用 `PRICE_UNAVAILABLE`、`VERSION_STALE`、`INSUFFICIENT_INVENTORY`、`RULE_VIOLATION`；成交在一笔短事务同时追加 `npc_sell` credit 账本、库存流水、成交、事实/outbox、重定价任务与审计，未处理异常回滚经济写入和幂等占位。
+
 ## I11B 补充包概率公示协议
 
 - `GET /v1/packs` 与 `GET /v1/packs/{packId}` 要求有效 Bearer 会话，返回 `PackDto` 列表或单个配置。每项包含整数最小货币单位价格、启用状态/停用原因、规则版本和卡位稀有度概率；每个卡位的 `probabilityBasisPoints` 总和固定为 10,000，数值由服务端版本化规则计算。

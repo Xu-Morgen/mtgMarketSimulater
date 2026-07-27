@@ -11,6 +11,8 @@ export const publicApiPaths = [
   "/v1/market/index",
   "/v1/npc-trades/buy/{skuId}/preview",
   "/v1/npc-trades/buy/{skuId}",
+  "/v1/npc-trades/sell/{skuId}/preview",
+  "/v1/npc-trades/sell/{skuId}",
   "/v1/auth/register",
   "/v1/auth/login",
   "/v1/auth/refresh",
@@ -72,6 +74,18 @@ export const openApiDocument = {
       post: {
         summary: "以限价和幂等键确认 NPC 买入",
         responses: { "201": { description: "成交已结算" }, "200": { description: "幂等重放" }, "400": { description: "请求无效或缺少幂等键" }, "404": { description: "无可结算报价" }, "409": { description: "报价过期、余额不足、额度或幂等冲突" } }
+      }
+    },
+    "/v1/npc-trades/sell/{skuId}/preview": {
+      get: {
+        summary: "取得服务端 NPC 卖出预览、可用库存与不可变报价标识",
+        responses: { "200": { description: "NPC 卖出预览" }, "404": { description: "无可结算报价" }, "409": { description: "报价已过期" } }
+      }
+    },
+    "/v1/npc-trades/sell/{skuId}": {
+      post: {
+        summary: "以最低可接受价和幂等键确认 NPC 卖出",
+        responses: { "201": { description: "成交已结算" }, "200": { description: "幂等重放" }, "400": { description: "请求无效或缺少幂等键" }, "404": { description: "无可结算报价" }, "409": { description: "报价过期、库存不足、额度或幂等冲突" } }
       }
     },
     "/v1/auth/register": {

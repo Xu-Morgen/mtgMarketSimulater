@@ -259,6 +259,33 @@ export class SqliteUserRepository {
     return after;
   }
 
+  /** 已结算收入直接增加总额与可用额，并追加账本；调用方必须处于经济短事务。 */
+  creditAvailableFunds(
+    userId: string,
+    amount: number,
+    now: string,
+    correlationId: string,
+    reason: string
+  ): AccountBalanceDto | "missing" {
+    if (!Number.isSafeInteger(amount) || amount < 0)
+      throw new RangeError("收入金额必须是非负安全整数最小单位");
+    const account = this.accountForUpdate(userId);
+    if (!account) return "missing";
+    const changed = this.database
+      .prepare(
+        "UPDATE accounts SET total_amount = total_amount + ?, available_amount = available_amount + ?, updated_at = ? WHERE id = ?"
+      )
+      .run(amount, amount, now, account.id);
+    if (changed.changes !== 1) throw new Error("账户收入写入失败");
+    const after = this.getBalance(userId)!;
+    this.database
+      .prepare(
+        "INSERT INTO ledger_entries (id, account_id, direction, amount, balance_after, reason, correlation_id, occurred_at) VALUES (?, ?, 'credit', ?, ?, ?, ?, ?)"
+      )
+      .run(randomUUID(), account.id, amount, after.total.amount, reason, correlationId, now);
+    return after;
+  }
+
   writeAudit(
     actorId: string,
     action: string,

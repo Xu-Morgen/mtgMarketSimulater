@@ -42,6 +42,12 @@
 - 排查成交时，按请求 ID、幂等键或 `npc_trades.id` 关联 `idempotency_requests`、`ledger_entries(reason=npc_buy)`、`inventory_entries(reason=npc_buy)`、`fact_events(npc.trade.settled)`、outbox 与 audit 日志。任何一项缺失应按故障处理，不得手补单条流水；短事务回滚后应不存在经济写入或运行中的幂等占位。
 - 当日额度以 UTC `settlement_date` 聚合已结算 `npc_trades`，默认单笔 20、单用户/SKU/日 100，仅可由未来受审计的管理命令改变。额度触发或价格变更不应手动删除历史成交；等待下个 UTC 日或由后续正式配置流程处理。
 
+## I16B NPC 卖出排障
+
+- 玩家先请求 `/v1/npc-trades/sell/{skuId}/preview?quantity=<n|all>`，再用返回的报价 ID/版本、解析后的确切数量、`minUnitPrice` 和新的 `Idempotency-Key` 调用确认端点。`all` 只包含当前可用库存；订单或比赛锁定量必须由其所属流程处理，禁止通过修改库存字段出售。
+- 按请求 ID、幂等键或 `npc_trades.id` 关联 `idempotency_requests`、`ledger_entries(reason=npc_sell)`、`inventory_entries(reason=npc_sell)`、`fact_events(npc.trade.settled)`、outbox 与审计记录。任何缺失均按故障处理，不得手补流水、余额、库存、成交或事件。
+- 收购价低于玩家确认下限、报价失效、库存锁定/不足或额度不足时，要求重新预览或等待正常库存状态变化；禁止手工修改 `market_quotes`、`npc_trade_limits`、账户、库存或历史成交来绕过校验。
+
 ## I30B 管理活动与玩家补偿（计划）
 
 以下是 I30B 实现时必须细化为可执行手册的边界；当前尚未实现，不授权通过数据库手工操作替代后台能力。
