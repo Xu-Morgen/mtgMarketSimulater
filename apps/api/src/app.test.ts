@@ -143,7 +143,7 @@ describe("API cross-cutting HTTP boundary", () => {
     const publicStatus = await app.inject({ method: "GET", url: "/v1/prices/status", headers: { authorization } });
     const adminStatus = await app.inject({ method: "GET", url: "/v1/admin/prices/sync", headers: { authorization } });
 
-    expect(publicStatus.json()).toEqual(expect.objectContaining({ ok: true, data: { source: "mtgjson-cardmarket", updatedAt: completedAt, freshness: "stale" } }));
+    expect(publicStatus.json()).toEqual(expect.objectContaining({ ok: true, data: { source: "mtgjson-cardmarket", updatedAt: completedAt, freshness: "stale", disclaimer: expect.stringContaining("MTGJSON") } }));
     expect(JSON.stringify(publicStatus.json())).not.toContain("checksum");
     expect(JSON.stringify(publicStatus.json())).not.toContain("mappedSkus");
     expect(adminStatus.statusCode).toBe(403);

@@ -19,6 +19,7 @@ describe("loadApiConfig", () => {
       CATALOG_ENABLED_SET_CODES: [],
       MTGJSON_PRICES_ENDPOINT: "https://mtgjson.com/api/v5/AllPricesToday.json.gz",
       MTGJSON_PRINTINGS_ENDPOINT: "https://mtgjson.com/api/v5/AllPrintings.json.gz",
+      MTGJSON_ALLPRICES_ENDPOINT: "https://mtgjson.com/api/v5/AllPrices.json.gz",
       MTGJSON_USER_AGENT: "MTG-Market-Simulator/0.1 (local deployment)"
     });
   });

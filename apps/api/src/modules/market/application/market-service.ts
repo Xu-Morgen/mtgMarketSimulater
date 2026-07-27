@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { calculateMarketQuote, marketQuoteValidUntil, MARKET_RULE_VERSION, propagateMarketPressure, type MarketFactorInput } from "@mtg-market/rules";
-import type { MarketQuoteListItemDto, Page, QuoteDto } from "@mtg-market/contracts";
+import type { MarketIndexHistoryDto, MarketIndexHistoryPointDto, MarketQuoteListItemDto, Page, PriceHistoryDto, PriceHistoryPointDto, PriceHistoryRange, QuoteDto } from "@mtg-market/contracts";
 import { withinTransaction } from "@mtg-market/database";
 
 type ParametersRow = { rule_version: string; eur_cent_to_game_credit_bps: number; minimum_price: number; npc_buy_spread_bps: number; npc_sell_spread_bps: number; npc_fee_bps: number };
@@ -173,6 +173,76 @@ export class MarketService {
       gameIndex: row.game_index === null ? null : Math.round(row.game_index),
       quotedSkus: row.quoted_skus,
       capturedAt: row.captured_at
+    };
+  }
+
+  /**
+   * I17B 单卡价格历史（按自然日采样）。reference 来自只追加的 `price_snapshot_entries`，
+   * game 来自只追加的 `market_quotes`；同日多次同步/重定价取该日最新值。任一缺失为 null，
+   * 不掩盖空态；空 points 表示无历史而非查询失败。
+   */
+  history(skuId: string, range: PriceHistoryRange, now = new Date().toISOString()): PriceHistoryDto {
+    const since = range === "all" ? null : new Date(now.slice(0, 10) + "T00:00:00.000Z").getTime() - (range === "7d" ? 7 : 30) * 86_400_000;
+    const sinceDate = since === null ? null : new Date(since).toISOString().slice(0, 10);
+    const days = new Map<string, PriceHistoryPointDto>();
+    const referenceRows = this.database.prepare(
+      `SELECT substr(entry.captured_at, 1, 10) AS day, entry.price_amount
+       FROM price_snapshot_entries entry
+       WHERE entry.sku_id = ? AND entry.availability = 'priced' AND entry.price_amount IS NOT NULL
+       ${sinceDate ? "AND substr(entry.captured_at, 1, 10) >= ?" : ""}
+       ORDER BY entry.captured_at DESC`
+    ).all(...(sinceDate ? [skuId, sinceDate] : [skuId])) as Array<{ day: string; price_amount: number }>;
+    for (const row of referenceRows) {
+      if (!days.has(row.day)) days.set(row.day, { date: row.day, referencePrice: { amount: row.price_amount, currency: "EUR" }, marketPrice: null });
+    }
+    const gameRows = this.database.prepare(
+      `SELECT substr(quote.calculated_at, 1, 10) AS day, quote.market_price_amount
+       FROM market_quotes quote
+       WHERE quote.sku_id = ? ${sinceDate ? "AND substr(quote.calculated_at, 1, 10) >= ?" : ""}
+       ORDER BY quote.calculated_at DESC`
+    ).all(...(sinceDate ? [skuId, sinceDate] : [skuId])) as Array<{ day: string; market_price_amount: number }>;
+    for (const row of gameRows) {
+      const point = days.get(row.day) ?? { date: row.day, referencePrice: null, marketPrice: null };
+      if (point.marketPrice === null) point.marketPrice = { amount: row.market_price_amount, currency: "GAME_CREDIT" };
+      days.set(row.day, point);
+    }
+    return {
+      skuId,
+      range,
+      points: [...days.values()].sort((left, right) => left.date.localeCompare(right.date)),
+      referenceSource: referenceRows.length > 0 ? "mtgjson-cardmarket" : null,
+      generatedAt: now
+    };
+  }
+
+  /** I17B 全服市场指数历史（按自然日采样）；任一指数缺失为 null。 */
+  indexHistory(range: PriceHistoryRange, now = new Date().toISOString()): MarketIndexHistoryDto {
+    const since = range === "all" ? null : new Date(now.slice(0, 10) + "T00:00:00.000Z").getTime() - (range === "7d" ? 7 : 30) * 86_400_000;
+    const sinceDate = since === null ? null : new Date(since).toISOString().slice(0, 10);
+    const days = new Map<string, MarketIndexHistoryPointDto>();
+    const referenceRows = this.database.prepare(
+      `SELECT substr(entry.captured_at, 1, 10) AS day, AVG(entry.price_amount) AS avg_price, COUNT(*) AS cnt
+       FROM price_snapshot_entries entry
+       WHERE entry.availability = 'priced' AND entry.price_amount IS NOT NULL
+       ${sinceDate ? "AND substr(entry.captured_at, 1, 10) >= ?" : ""}
+       GROUP BY day`
+    ).all(...(sinceDate ? [sinceDate] : [])) as Array<{ day: string; avg_price: number; cnt: number }>;
+    for (const row of referenceRows) days.set(row.day, { date: row.day, referenceIndex: Math.round(row.avg_price), gameIndex: null });
+    const gameRows = this.database.prepare(
+      `SELECT substr(quote.calculated_at, 1, 10) AS day, AVG(quote.market_price_amount) AS avg_price
+       FROM market_quotes quote
+       ${sinceDate ? "WHERE substr(quote.calculated_at, 1, 10) >= ?" : ""}
+       GROUP BY day`
+    ).all(...(sinceDate ? [sinceDate] : [])) as Array<{ day: string; avg_price: number }>;
+    for (const row of gameRows) {
+      const point = days.get(row.day) ?? { date: row.day, referenceIndex: null, gameIndex: null };
+      if (point.gameIndex === null) point.gameIndex = Math.round(row.avg_price);
+      days.set(row.day, point);
+    }
+    return {
+      range,
+      points: [...days.values()].sort((left, right) => left.date.localeCompare(right.date)),
+      generatedAt: now
     };
   }
 

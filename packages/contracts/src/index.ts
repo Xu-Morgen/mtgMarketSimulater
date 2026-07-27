@@ -401,6 +401,41 @@ export interface PriceSnapshot {
   sourceVersion: string;
 }
 
+/** I17B 价格历史时间范围；服务端按自然日采样，不返回原始分钟级流水。 */
+export type PriceHistoryRange = "7d" | "30d" | "all";
+
+/** I17B 单卡按自然日采样的历史点；reference/game 任一缺失时为 null，不掩盖空态。 */
+export interface PriceHistoryPointDto {
+  /** UTC 自然日 YYYY-MM-DD。 */
+  date: string;
+  referencePrice: Money | null;
+  marketPrice: Money | null;
+}
+
+/** I17B 单卡价格历史；points 按日期升序，空数组表示无历史而非查询失败。 */
+export interface PriceHistoryDto {
+  skuId: string;
+  range: PriceHistoryRange;
+  points: PriceHistoryPointDto[];
+  referenceSource: "mtgjson-cardmarket" | null;
+  generatedAt: string;
+}
+
+/** I17B 全服市场指数按自然日采样的历史点。 */
+export interface MarketIndexHistoryPointDto {
+  /** UTC 自然日 YYYY-MM-DD。 */
+  date: string;
+  referenceIndex: number | null;
+  gameIndex: number | null;
+}
+
+/** I17B 全服市场指数历史；空数组表示无历史。 */
+export interface MarketIndexHistoryDto {
+  range: PriceHistoryRange;
+  points: MarketIndexHistoryPointDto[];
+  generatedAt: string;
+}
+
 /** I13B 管理端价格同步状态；下载地址和 Provider 原始内容永不进入 DTO。 */
 export interface PriceSyncRunDto {
   id: string;
@@ -410,6 +445,8 @@ export interface PriceSyncRunDto {
   status: "running" | "succeeded" | "failed";
   /** 成功运行是否经过 Provider SHA-256 校验；bypassed 只能由管理员明确覆写产生。 */
   checksumVerification: "verified" | "bypassed" | "not_verified";
+  /** I17B：daily 为每日 AllPricesToday 同步，backfill 为一次性 AllPrices 历史回填。 */
+  runKind: "daily" | "backfill";
   mappedSkus: number;
   pricedSkus: number;
   unpricedSkus: number;
@@ -433,6 +470,19 @@ export interface PublicPriceStatusDto {
   source: "mtgjson-cardmarket" | null;
   updatedAt: string | null;
   freshness: "fresh" | "stale" | "unavailable";
+  /** I17B：服务端固定的数据源与资产性质说明；浏览器不得自行拼接或改写。 */
+  disclaimer: string;
+}
+
+/** I17B 一次性 AllPrices 历史回填运行结果；只追加缺失日期，不改写日常同步指针。 */
+export interface PriceSyncBackfillResultDto {
+  latestRun: PriceSyncRunDto | null;
+  /** 只追加的历史日期范围（UTC YYYY-MM-DD）；空表示尚未成功回填。 */
+  backfilledFromDate: string | null;
+  backfilledToDate: string | null;
+  insertedEntries: number;
+  skippedExistingEntries: number;
+  currentJob: JobDto | null;
 }
 
 export interface FeeDto {

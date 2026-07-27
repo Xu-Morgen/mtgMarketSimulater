@@ -15,5 +15,6 @@ export function PriceStatus({ status, tradable }: { status: PublicPriceStatusDto
     <div>{source}</div>
     <small>{status.updatedAt ? `更新时间：${date(status.updatedAt)}；${freshness}` : freshness}</small>
     <div><Tag color={tradable ? "green" : "red"}>{tradable ? "可新增交易" : "无有效参考价，暂不可新增交易"}</Tag></div>
+    <small className="price-disclaimer">{status.disclaimer}</small>
   </div>;
 }

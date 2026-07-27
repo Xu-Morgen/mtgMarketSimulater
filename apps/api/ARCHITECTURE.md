@@ -75,6 +75,13 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 - `modules/pricing/application/PriceSyncService` 以 AllPrintings 的 Scryfall ID、MTGJSON UUID 和工艺精确对应本地 SKU，并在一笔 SQLite 短事务中追加 `price_sync_runs`、`price_sku_mappings`、每 SKU 的 `price_snapshot_entries` 和物化 `card_skus.tradable`。无价、零价、币种不符、缺映射或歧义映射均追加明确不可用原因并暂停新增交易；成功运行才移动 `price_sync_state` 指针，失败不会替换旧快照。
 - `prices.sync` 在 task runner 注册到 pricing application；`/v1/admin/prices/sync` 仅管理员读写，写入以幂等键去重投递任务。仅当最近一次运行持久化为 `CHECKSUM_MISMATCH` 时，管理员可提交 `{ allowChecksumMismatch: true }` 的独立覆写任务；该任务写入专门审计事实，成功运行标为 `bypassed`，不影响普通严格校验路径。每次成功同步以成功运行 ID 唯一投递 `market.reprice`；它不改写库存估值或经济流水。
 
+## 价格历史、每日同步与历史回填（I17B）
+
+- 价格历史天然只追加：`price_sync_runs`/`price_snapshot_entries` 与 `market_quotes` 从不 UPDATE/DELETE，每次每日同步与重定价都产生新行。`MarketService.history`/`indexHistory` 按自然日（`substr(captured_at,1,10)`）采样，同日多次同步/重定价取该日最新值；任一价格缺失为 `null`，空历史返回空数组。历史查询是纯只读投影，不为历史另建存储表，避免与 append-only 设计漂移。
+- 每日同步由 `ensureDailyPriceSyncScheduled`（jobs application）在 `startTaskRunner` 的 5 分钟节流轮询中以 UTC 自然日唯一键调度。`price_sync_schedule_state` 单例独立于 `price_sync_state`（最近成功运行指针）：前者记录“已为该自然日投递过 `prices.sync`”，后者记录“最近一次成功的快照运行”。停机多日只补投一次而非逐日补投；`daily.rollover` 的发钱/赛事刷新延后至 I23B/I25B。
+- `prices.backfill` 是独立注册任务类型，下载独立的 `MTGJSON_ALLPRICES_ENDPOINT`（`AllPrices`）。`PriceBackfillService` 以每 SKU 最新成功映射为准，按 `(sku_id, 自然日)` 只追加缺失的历史快照：监督 run（`mapping_uri='supervisor'`，`run_kind='backfill'`）汇总统计与日期范围，每个历史日期独立子 run（`mapping_uri='sub-run'`）复用 `UNIQUE(sync_run_id, sku_id)`。它绝不更新 `price_sync_state`/`price_sync_schedule_state`、不为历史日投递 `market.reprice`；解析/校验/写入在一笔短事务内完成，失败整笔回滚。
+- `PriceSyncRunDto.runKind` 区分 `daily`/`backfill`；`PublicPriceStatusDto.disclaimer` 由服务端固定数据源与资产性质说明，浏览器只展示。
+
 ## 市场报价投影（I14B）
 
 - `modules/market/application/MarketService` 只读取 `price_snapshot_entries`、已结算 `fact_events` 和版本化市场配置，使用 `@mtg-market/rules` 的 `market/v1` 物化 `market_quotes`。它不是余额、库存或外部价的写入者；外部快照保持只追加，经济事实仅被聚合消费。

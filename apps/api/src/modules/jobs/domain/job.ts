@@ -4,6 +4,7 @@ export const registeredJobTypes = [
   "catalog.sync",
   "catalog.image-cache",
   "prices.sync",
+  "prices.backfill",
   "daily.rollover",
   "market.reprice",
   "tournament.settle",

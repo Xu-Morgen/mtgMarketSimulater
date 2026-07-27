@@ -1,10 +1,28 @@
 import type { JobDto } from "@mtg-market/contracts";
+import { withinTransaction } from "@mtg-market/database";
 import { errorSummary, retryDelayMs, registeredJobTypes, type JobHandler, type PersistedJob } from "../domain/job.js";
 import { SqliteJobRepository } from "../infrastructure/sqlite-job-repository.js";
 
 /** 业务模块经由 jobs application 投递重定价，不直接操作 jobs 表。 */
 export function enqueueMarketRepriceJob(database: ConstructorParameters<typeof SqliteJobRepository>[0], triggerKey: string, now: string, priceSyncRunId?: string): void {
   new SqliteJobRepository(database).enqueue({ type: "market.reprice", payload: { triggerKey, ...(priceSyncRunId ? { priceSyncRunId } : {}) }, uniqueKey: triggerKey, runAfter: now, maxAttempts: 3 }, now);
+}
+
+/**
+ * I17B 每日价格同步调度。以 UTC 自然日为唯一键：`last_scheduled_date` 落后于今日时
+ * 投递一次 `prices.sync`（uniqueKey=`prices.sync:daily:<date>`）。停机多日只补投一次
+ * 而非逐日补投——历史回填由独立的 `prices.backfill` 负责。条件 UPDATE + 任务唯一键
+ * 保证补跑至多投递一次；daily.rollover 的发钱/赛事刷新按 AT-10B 延后至 I23B/I25B。
+ */
+export function ensureDailyPriceSyncScheduled(database: ConstructorParameters<typeof SqliteJobRepository>[0], now: Date): void {
+  const iso = now.toISOString();
+  const today = iso.slice(0, 10);
+  withinTransaction(database, () => {
+    const state = database.prepare("SELECT last_scheduled_date FROM price_sync_schedule_state WHERE singleton = 1").get() as { last_scheduled_date: string } | undefined;
+    if (state && state.last_scheduled_date >= today) return;
+    new SqliteJobRepository(database).enqueue({ type: "prices.sync", payload: {}, uniqueKey: `prices.sync:daily:${today}`, runAfter: iso, maxAttempts: 3 }, iso);
+    database.prepare("UPDATE price_sync_schedule_state SET last_scheduled_date = ?, last_attempted_run_after = ?, updated_at = ? WHERE singleton = 1").run(today, iso, iso);
+  });
 }
 
 export class TaskRegistry {

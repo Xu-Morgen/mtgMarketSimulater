@@ -330,18 +330,27 @@ export const catalogSyncState = sqliteTable("catalog_sync_state", {
   updatedAt: text("updated_at").notNull()
 });
 
-/** I13B：外部价格同步只追加运行、映射与快照；state 仅指向最近完整成功版本。 */
+/** I13B：外部价格同步只追加运行、映射与快照；state 仅指向最近完整成功版本。I17B 追加 run_kind 区分日常同步与历史回填。 */
 export const priceSyncRuns = sqliteTable(
   "price_sync_runs",
   {
     id: text("id").primaryKey(), source: text("source").notNull(), sourceVersion: text("source_version").notNull(),
     pricesUri: text("prices_uri").notNull(), mappingUri: text("mapping_uri").notNull(), pricesChecksumSha256: text("prices_checksum_sha256").notNull(), mappingChecksumSha256: text("mapping_checksum_sha256").notNull(),
-    status: text("status").notNull(), checksumVerification: text("checksum_verification").notNull(), mappedSkus: integer("mapped_skus").notNull(), pricedSkus: integer("priced_skus").notNull(), unpricedSkus: integer("unpriced_skus").notNull(), mappingFailedSkus: integer("mapping_failed_skus").notNull(), failureCode: text("failure_code"), failureReason: text("failure_reason"), startedAt: text("started_at").notNull(), completedAt: text("completed_at")
+    status: text("status").notNull(), checksumVerification: text("checksum_verification").notNull(), mappedSkus: integer("mapped_skus").notNull(), pricedSkus: integer("priced_skus").notNull(), unpricedSkus: integer("unpriced_skus").notNull(), mappingFailedSkus: integer("mapping_failed_skus").notNull(), failureCode: text("failure_code"), failureReason: text("failure_reason"), startedAt: text("started_at").notNull(), completedAt: text("completed_at"),
+    runKind: text("run_kind").notNull()
   },
   (table) => [index("price_sync_runs_status_started_index").on(table.status, table.startedAt)]
 );
 
 export const priceSyncState = sqliteTable("price_sync_state", { singleton: integer("singleton").primaryKey(), latestSuccessfulRunId: text("latest_successful_run_id").references(() => priceSyncRuns.id), updatedAt: text("updated_at").notNull() });
+
+/** I17B：每日同步进度单例，与最近成功运行指针解耦；以自然日唯一键收敛补跑。 */
+export const priceSyncScheduleState = sqliteTable("price_sync_schedule_state", {
+  singleton: integer("singleton").primaryKey(),
+  lastScheduledDate: text("last_scheduled_date").notNull(),
+  lastAttemptedRunAfter: text("last_attempted_run_after").notNull(),
+  updatedAt: text("updated_at").notNull()
+});
 
 export const priceSkuMappings = sqliteTable("price_sku_mappings", { id: text("id").primaryKey(), syncRunId: text("sync_run_id").notNull().references(() => priceSyncRuns.id), skuId: text("sku_id").notNull().references(() => cardSkus.id), scryfallId: text("scryfall_id").notNull(), mtgjsonUuid: text("mtgjson_uuid").notNull(), finish: text("finish").notNull(), createdAt: text("created_at").notNull() }, (table) => [uniqueIndex("price_sku_mappings_run_sku_unique").on(table.syncRunId, table.skuId), uniqueIndex("price_sku_mappings_run_uuid_finish_unique").on(table.syncRunId, table.mtgjsonUuid, table.finish), index("price_sku_mappings_sku_index").on(table.skuId, table.createdAt)]);
 

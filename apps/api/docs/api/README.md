@@ -89,6 +89,14 @@
 - `POST /v1/npc-trades/sell/{skuId}` 要求有效玩家会话、格式正确的 `Idempotency-Key`，且请求体严格为 `{ quoteId, quoteVersion, quantity, minUnitPrice }`。`minUnitPrice` 是玩家确认的保护下限，服务端只读取 `quoteId` 指向的持久化 NPC 收购价和费用，并校验可交易、版本、有效期、最低价、可用库存及单笔/当日额度。
 - 成功以 `201` 返回成交、服务端余额与持仓；同键同参重放为 `200`，同键异参为 `409 IDEMPOTENCY_CONFLICT`。无报价、报价/最低价过期、可用库存不足与交易量限制分别使用 `PRICE_UNAVAILABLE`、`VERSION_STALE`、`INSUFFICIENT_INVENTORY`、`RULE_VIOLATION`；成交在一笔短事务同时追加 `npc_sell` credit 账本、库存流水、成交、事实/outbox、重定价任务与审计，未处理异常回滚经济写入和幂等占位。
 
+## I17B 价格历史、每日同步与 AllPrices 回填协议
+
+- `GET /v1/market/quotes/{skuId}/history?range=7d|30d|all` 与 `GET /v1/market/index/history?range=7d|30d|all` 要求有效会话，按自然日采样返回 `PriceHistoryDto`/`MarketIndexHistoryDto`。历史来自只追加的 `price_snapshot_entries`（reference）与 `market_quotes`（game），同日多次同步/重定价取该日最新值；任一价格缺失为 null，空历史返回空 `points` 数组而非 `404`，确保失败同步仍能展示旧价或空态。浏览器不得自行计算曲线或推断缺失值。
+- 每日同步由 task runner 内嵌日切轮询以 UTC 自然日唯一键（`prices.sync:daily:<date>` + `price_sync_schedule_state`）调度；停机多日只补投一次，同日重放不重复投递。成功后仍以快照运行 ID 投递 `market.reprice`；失败保留最近成功快照并告警。`daily.rollover` 的发钱/赛事刷新延后至 I23B/I25B。
+- `GET /v1/admin/prices/backfill` 仅管理员可读，返回 `PriceSyncBackfillResultDto`：最近一次 `prices.backfill` 监督运行的来源版本、SHA-256、校验状态、日期范围、插入/跳过统计、失败摘要与 `currentJob`。
+- `POST /v1/admin/prices/backfill` 仅管理员可投递，要求至少 8 位 `Idempotency-Key`。可选请求体为 `{ expectedPricesChecksumSha256?, allowChecksumMismatch?: true }`；同一键返回同一个任务。回填下载独立 `AllPrices` 端点，按每 SKU 最新成功映射只追加缺失的历史日期快照（`run_kind='backfill'`）；绝不覆盖已有每日同步快照、移动 `price_sync_state`/`price_sync_schedule_state` 指针或为历史日投递 `market.reprice`。
+- `PriceSyncRunDto.runKind` 区分 `daily`（日常 AllPricesToday 同步）与 `backfill`（一次性 AllPrices 历史回填）；`PublicPriceStatusDto.disclaimer` 由服务端固定为“外部参考价来自 MTGJSON / Cardmarket EUR 快照，游戏内价为虚拟货币 GAME_CREDIT；均为非实时、非真实资产”，不暴露版本/checksum/任务。
+
 ## I11B 补充包概率公示协议
 
 - `GET /v1/packs` 与 `GET /v1/packs/{packId}` 要求有效 Bearer 会话，返回 `PackDto` 列表或单个配置。每项包含整数最小货币单位价格、启用状态/停用原因、规则版本和卡位稀有度概率；每个卡位的 `probabilityBasisPoints` 总和固定为 10,000，数值由服务端版本化规则计算。

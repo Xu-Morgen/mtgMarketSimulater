@@ -57,7 +57,10 @@
 - 排障从只读、脱敏日志按请求 ID、操作者、用户、实体或任务关联追踪。日志页面和运维流程都不得显示密码哈希、令牌、Cookie、密钥或敏感 Provider 原文，也不得删除审计记录。
 - I30B 的 MTGJSON 系列/密封产品/补充包导入只能创建待审核草稿：先核对下载版本、SHA-256、Scryfall 系列/SKU 映射、缺失项和服务端预览，再以新的幂等键发布。虚拟币价格、启用范围和运营文案必须由管理员填写；不得把外部密封产品价格、原始 URL 或未审核卡表直接发布给玩家，亦不得通过数据库手工修改已发布规则。
 
-## I17B MTGJSON 历史价格回填（计划）
+## I17B 价格历史、每日同步与 AllPrices 回填
 
-- 该能力使用独立的管理员幂等意图读取 `AllPrices`，仅补齐本地缺失的历史日期；执行前核对来源版本、SHA-256 和预计日期范围，执行后核对插入/跳过/无价/映射失败统计及审计。它不替代每日 `prices.sync`、不移动最近成功同步指针，也不为每个历史日期重复执行市场重定价。
-- checksum、解析、映射或 SQLite 失败时，停止并保留原有快照与每日同步状态；待修复后以新幂等键重试。禁止手工写入或覆盖 `price_snapshot_entries` 来伪造历史价格。
+- 价格历史天然只追加：`price_snapshot_entries` 与 `market_quotes` 均只追加，每日同步/重定价都会产生新行。`GET /v1/market/quotes/{skuId}/history?range=7d|30d|all` 与 `GET /v1/market/index/history?range=...` 按自然日采样；排障时直接查询这两张只读表，禁止手工写入、删除或覆盖历史行来伪造价格曲线。
+- 每日同步调度：task runner 以 5 分钟节流轮询 UTC 自然日，落后时投递 `prices.sync:daily:<date>`；`price_sync_schedule_state.last_scheduled_date` 是唯一进度指针。停机多日只补投一次而非逐日补投；同日重放由 `(type, unique_key)` 唯一键收敛。若调度异常，检查 `price_sync_schedule_state`、`jobs` 与 `price_sync_runs`，不要手工改 `jobs` 状态。
+- 回填使用独立的服务端配置 `MTGJSON_ALLPRICES_ENDPOINT`（默认 `AllPrices.json.gz`）和 `prices.backfill` 任务。管理员以新 `Idempotency-Key` 调用 `POST /v1/admin/prices/backfill`，再通过 `GET /v1/admin/prices/backfill` 或 jobs API 观察运行。可选的 `expectedPricesChecksumSha256` 仅用于已获准的版本固定回填；`allowChecksumMismatch` 仅在 Provider checksum 不匹配时作为最后手段。
+- 回填监督运行（`price_sync_runs.run_kind='backfill'` 且 `mapping_uri='supervisor'`）记录来源版本、SHA-256、日期范围、插入/跳过统计与审计；每个历史日期独立子 run（`mapping_uri='sub-run'`）复用 `UNIQUE(sync_run_id, sku_id)` 约束。它只补齐本地缺失的 `(sku_id, 自然日)`，绝不覆盖每日同步写入、移动 `price_sync_state`/`price_sync_schedule_state` 指针，或为历史日投递 `market.reprice`。
+- checksum、解析、映射或事务失败时整笔回滚，只追加一条 `failed` 监督运行并保留原有快照与每日同步状态；待修复后以新幂等键重试。每次失败在结构化日志输出 `price_backfill.validation_failed`（校验阶段）或 `price_backfill.failed`（写入阶段），包含批次 ID、任务 ID/尝试、来源版本、校验文件与预期/实际 SHA-256。禁止手工写入或覆盖 `price_snapshot_entries` 伪造历史。

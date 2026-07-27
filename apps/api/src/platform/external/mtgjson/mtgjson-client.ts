@@ -6,7 +6,10 @@ export type MappedMtgjsonCard = { scryfallId: string; finish: "nonfoil" | "foil"
 export type ChecksumVerification = "verified" | "bypassed";
 export type MtgjsonPriceSource = { version: string; pricesUri: string; mappingUri: string; pricesChecksumSha256: string; mappingChecksumSha256: string; checksumVerification: ChecksumVerification; mappings: MappedMtgjsonCard[]; prices: Map<string, { priceType: "normal" | "foil" | "etched"; currency: string; amount: number | null }> };
 export type MtgjsonDownloadOptions = { allowChecksumMismatch?: boolean };
-export type MtgjsonChecksumFile = "AllPricesToday" | "AllPrintings";
+export type MtgjsonChecksumFile = "AllPricesToday" | "AllPrintings" | "AllPrices";
+/** I17B：AllPrices 历史价格项；同一 UUID+工艺可包含多个自然日正值。 */
+export type MtgjsonHistoricalPrice = { priceType: "normal" | "foil" | "etched"; currency: string; date: string; amount: number };
+export type MtgjsonAllPricesSource = { version: string; pricesUri: string; pricesChecksumSha256: string; checksumVerification: ChecksumVerification; prices: Map<string, MtgjsonHistoricalPrice[]> };
 
 /** 仅由 application 层映射为稳定失败码；消息不携带外部 URL 或原始响应。 */
 export class MtgjsonChecksumMismatchError extends Error {
@@ -93,6 +96,29 @@ function pricesFrom(value: UnknownRecord): Map<string, { priceType: "normal" | "
   return prices;
 }
 
+/** I17B：保留 AllPrices 中每个 UUID+工艺的全部自然日 EUR retail 正值，供回填只补缺失日期。 */
+function historicalPricesFrom(value: UnknownRecord): Map<string, MtgjsonHistoricalPrice[]> {
+  const data = record(value.data, "MTGJSON AllPrices 缺少 data"); const prices = new Map<string, MtgjsonHistoricalPrice[]>();
+  for (const [uuid, rawFormats] of Object.entries(data)) {
+    const formats = record(rawFormats, "MTGJSON price formats 无效"); const paper = record(formats.paper ?? {}, "MTGJSON paper prices 无效"); const cardmarket = paper.cardmarket;
+    if (!cardmarket || typeof cardmarket !== "object" || Array.isArray(cardmarket)) continue;
+    const list = cardmarket as UnknownRecord; const currency = string(list.currency) ?? ""; const retail = list.retail;
+    if (currency !== "EUR" || !retail || typeof retail !== "object" || Array.isArray(retail)) continue;
+    for (const [finish, priceType] of [["normal", "normal"], ["foil", "foil"], ["etched", "etched"]] as const) {
+      const byDate = (retail as UnknownRecord)[finish];
+      if (!byDate || typeof byDate !== "object" || Array.isArray(byDate)) continue;
+      const entries = Object.entries(byDate as UnknownRecord)
+        .filter(([date, amount]) => /^\d{4}-\d{2}-\d{2}$/.test(date) && typeof amount === "number" && Number.isFinite(amount) && amount > 0)
+        .map(([date, amount]) => ({ priceType, currency, date, amount: amount as number }));
+      if (entries.length > 0) {
+        const key = `${uuid}:${priceType}`;
+        prices.set(key, [...(prices.get(key) ?? []), ...entries]);
+      }
+    }
+  }
+  return prices;
+}
+
 async function download(url: string, userAgent: string, fetcher: typeof fetch): Promise<Buffer> {
   const response = await fetcher(url, { headers: { accept: "application/json", "user-agent": userAgent } });
   if (!response.ok) throw new Error(`MTGJSON 下载失败：HTTP ${response.status}`);
@@ -114,7 +140,13 @@ async function verifyChecksum(file: MtgjsonChecksumFile, url: string, bytes: Buf
 
 /** 外部适配器只产出经过形状、币种与 SHA-256 校验的最小映射/价格输入。 */
 export class MtgjsonClient {
-  constructor(private readonly pricesEndpoint: string, private readonly printingsEndpoint: string, private readonly userAgent: string, private readonly fetcher: typeof fetch = fetch) {}
+  constructor(
+    private readonly pricesEndpoint: string,
+    private readonly printingsEndpoint: string,
+    private readonly userAgent: string,
+    private readonly fetcher: typeof fetch = fetch,
+    private readonly allPricesEndpoint: string | null = null
+  ) {}
 
   async download(options: MtgjsonDownloadOptions = {}): Promise<MtgjsonPriceSource> {
     const [priceBytes, mappingBytes] = await Promise.all([download(this.pricesEndpoint, this.userAgent, this.fetcher), download(this.printingsEndpoint, this.userAgent, this.fetcher)]);
@@ -122,5 +154,15 @@ export class MtgjsonClient {
     const priceJson = parseJson(priceBytes, "MTGJSON AllPricesToday");
     const meta = record(priceJson.meta ?? {}, "MTGJSON AllPricesToday 缺少 meta"); const version = string(meta.date) ?? string(meta.version) ?? "unknown";
     return { version, pricesUri: this.pricesEndpoint, mappingUri: this.printingsEndpoint, pricesChecksumSha256: pricesCheck.checksum, mappingChecksumSha256: mappingCheck.checksum, checksumVerification: pricesCheck.verification === "verified" && mappingCheck.verification === "verified" ? "verified" : "bypassed", mappings: allPrintingsMappings(mappingBytes), prices: pricesFrom(priceJson) };
+  }
+
+  /** I17B：下载并校验完整历史 AllPrices，保留每个 UUID+工艺的全部自然日 EUR 正值；不与日常 AllPricesToday 共用指针。 */
+  async downloadAllPrices(options: MtgjsonDownloadOptions = {}): Promise<MtgjsonAllPricesSource> {
+    if (!this.allPricesEndpoint) throw new Error("未配置 MTGJSON AllPrices 历史端点");
+    const bytes = await download(this.allPricesEndpoint, this.userAgent, this.fetcher);
+    const check = await verifyChecksum("AllPrices", this.allPricesEndpoint, bytes, this.userAgent, this.fetcher, options);
+    const json = parseJson(bytes, "MTGJSON AllPrices");
+    const meta = record(json.meta ?? {}, "MTGJSON AllPrices 缺少 meta"); const version = string(meta.date) ?? string(meta.version) ?? "unknown";
+    return { version, pricesUri: this.allPricesEndpoint, pricesChecksumSha256: check.checksum, checksumVerification: check.verification, prices: historicalPricesFrom(json) };
   }
 }

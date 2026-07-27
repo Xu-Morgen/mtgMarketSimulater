@@ -8,7 +8,9 @@ export const publicApiPaths = [
   "/openapi.json",
   "/v1/market/quotes",
   "/v1/market/quotes/{skuId}",
+  "/v1/market/quotes/{skuId}/history",
   "/v1/market/index",
+  "/v1/market/index/history",
   "/v1/npc-trades/buy/{skuId}/preview",
   "/v1/npc-trades/buy/{skuId}",
   "/v1/npc-trades/sell/{skuId}/preview",
@@ -34,7 +36,8 @@ export const publicApiPaths = [
   "/v1/admin/jobs",
   "/v1/admin/jobs/{id}/retry",
   "/v1/admin/catalog/sync",
-  "/v1/admin/prices/sync"
+  "/v1/admin/prices/sync",
+  "/v1/admin/prices/backfill"
 ] as const;
 
 export const openApiDocument = {
@@ -64,6 +67,18 @@ export const openApiDocument = {
       }
     },
     "/v1/market/index": { get: { summary: "查询本服与外部市场指数", responses: { "200": { description: "市场指数" }, "401": { description: "认证无效或过期" } } } },
+    "/v1/market/quotes/{skuId}/history": {
+      get: {
+        summary: "按自然日采样查询单卡参考价与游戏内价历史（7d/30d/all）",
+        responses: { "200": { description: "单卡价格历史" }, "401": { description: "认证无效或过期" } }
+      }
+    },
+    "/v1/market/index/history": {
+      get: {
+        summary: "按自然日采样查询全服市场指数历史（7d/30d/all）",
+        responses: { "200": { description: "市场指数历史" }, "401": { description: "认证无效或过期" } }
+      }
+    },
     "/v1/npc-trades/buy/{skuId}/preview": {
       get: {
         summary: "取得服务端 NPC 买入预览、不可变报价标识和额度",
@@ -250,6 +265,10 @@ export const openApiDocument = {
     "/v1/admin/prices/sync": {
       get: { summary: "查询 MTGJSON Cardmarket 价格同步状态", responses: { "200": { description: "价格快照状态" }, "403": { description: "需要管理员权限" } } },
       post: { summary: "投递去重的 MTGJSON 价格同步任务，或在 checksum 失败后提交管理员覆写", responses: { "201": { description: "任务已投递或返回活跃任务" }, "400": { description: "缺少幂等键或参数无效" }, "403": { description: "需要管理员权限" }, "409": { description: "当前没有可覆写的 checksum 失败运行" } } }
+    },
+    "/v1/admin/prices/backfill": {
+      get: { summary: "查询最近一次 AllPrices 历史价格回填运行结果", responses: { "200": { description: "回填结果" }, "403": { description: "需要管理员权限" } } },
+      post: { summary: "投递一次性 AllPrices 历史价格回填任务，只补齐缺失日期", responses: { "201": { description: "任务已投递或返回活跃任务" }, "400": { description: "缺少幂等键或参数无效" }, "403": { description: "需要管理员权限" } } }
     },
     "/v1/admin/jobs": {
       get: { summary: "管理任务查询", responses: { "200": { description: "任务列表" } } },

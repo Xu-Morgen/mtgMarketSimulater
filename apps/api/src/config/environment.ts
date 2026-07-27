@@ -16,6 +16,7 @@ const environmentSchema = z.object({
   ,CATALOG_ENABLED_SET_CODES: z.string().trim().optional()
   ,MTGJSON_PRICES_ENDPOINT: z.string().url().default("https://mtgjson.com/api/v5/AllPricesToday.json.gz")
   ,MTGJSON_PRINTINGS_ENDPOINT: z.string().url().default("https://mtgjson.com/api/v5/AllPrintings.json.gz")
+  ,MTGJSON_ALLPRICES_ENDPOINT: z.string().url().default("https://mtgjson.com/api/v5/AllPrices.json.gz")
   ,MTGJSON_USER_AGENT: z.string().trim().min(1).max(256).default("MTG-Market-Simulator/0.1 (local deployment)")
 });
 

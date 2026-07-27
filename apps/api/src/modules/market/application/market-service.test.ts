@@ -54,3 +54,85 @@ describe("I14B market.reprice", () => {
     database.close();
   });
 });
+
+describe("I17B 价格历史按自然日采样", () => {
+  const pricesChecksum = "a".repeat(64);
+  const mappingChecksum = "b".repeat(64);
+  /** 写入一个历史快照：每个历史日使用独立 run（模拟每日同步），金额 amount 欧分。返回 entryId 供报价引用。 */
+  function seedSnapshot(database: ReturnType<typeof fixture>, capturedAt: string, amount: number, index: number): string {
+    const entryId = `41000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    const historyRunId = `91000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    database.prepare("INSERT INTO price_sync_runs (id, source, source_version, prices_uri, mapping_uri, prices_checksum_sha256, mapping_checksum_sha256, status, checksum_verification, started_at, completed_at) VALUES (?, 'mtgjson-cardmarket', 'fixture', 'private', 'private', ?, ?, 'succeeded', 'verified', ?, ?)").run(historyRunId, pricesChecksum, mappingChecksum, capturedAt, capturedAt);
+    database.prepare("INSERT INTO price_snapshot_entries (id, sync_run_id, sku_id, mapping_id, mtgjson_uuid, finish, price_type, currency, price_amount, availability, unavailable_reason, captured_at, created_at) VALUES (?, ?, ?, NULL, NULL, 'nonfoil', 'normal', 'EUR', ?, 'priced', NULL, ?, ?)").run(entryId, historyRunId, skuId, amount, capturedAt, capturedAt);
+    return entryId;
+  }
+  /** 写入一个历史报价：日期为 calculatedAt 当天，金额 amount 游戏币。 */
+  function seedQuote(database: ReturnType<typeof fixture>, calculatedAt: string, amount: number, index: number, snapshotEntryId: string) {
+    const id = `80000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    database.prepare("INSERT INTO market_quotes (id, sku_id, price_snapshot_entry_id, trigger_key, rule_version, reference_price_eur_cents, market_price_amount, npc_buy_price_amount, npc_sell_price_amount, npc_buy_fee_amount, npc_sell_fee_amount, parameters_json, reasons_json, calculated_at, valid_until) VALUES (?, ?, ?, ?, 'market/v1', 100, ?, 90, 110, 0, 0, '{}', '[]', ?, ?)").run(id, skuId, snapshotEntryId, `history:${index}`, amount, calculatedAt, calculatedAt);
+  }
+
+  /** 清除 fixture 预置的当日快照，使历史测试只包含显式 seed 的历史点。 */
+  function clearPresetSnapshot(database: ReturnType<typeof fixture>) {
+    database.prepare("DELETE FROM price_snapshot_entries WHERE id = ?").run(snapshotId);
+  }
+
+  it("单卡历史按自然日采样，同日多次同步取最新值", () => {
+    const database = fixture();
+    clearPresetSnapshot(database);
+    seedSnapshot(database, "2026-07-20T08:00:00.000Z", 90, 1);
+    seedSnapshot(database, "2026-07-20T20:00:00.000Z", 95, 2); // 同日较晚，应覆盖 90
+    const latestEntry = seedSnapshot(database, "2026-07-25T08:00:00.000Z", 110, 3);
+    seedQuote(database, "2026-07-25T08:00:00.000Z", 105, 1, latestEntry);
+    const market = new MarketService(database);
+    const history = market.history(skuId, "all", now);
+    expect(history.points).toEqual([
+      { date: "2026-07-20", referencePrice: { amount: 95, currency: "EUR" }, marketPrice: null },
+      { date: "2026-07-25", referencePrice: { amount: 110, currency: "EUR" }, marketPrice: { amount: 105, currency: "GAME_CREDIT" } }
+    ]);
+    expect(history.referenceSource).toBe("mtgjson-cardmarket");
+    database.close();
+  });
+
+  it("7d/30d 范围只返回窗口内日期", () => {
+    const database = fixture();
+    clearPresetSnapshot(database);
+    seedSnapshot(database, "2026-06-01T08:00:00.000Z", 80, 1);  // 30d 之外
+    seedSnapshot(database, "2026-07-15T08:00:00.000Z", 88, 2);  // 7d 之外、30d 之内
+    seedSnapshot(database, "2026-07-25T08:00:00.000Z", 110, 3); // 7d 之内
+    const market = new MarketService(database);
+    const sevenDays = market.history(skuId, "7d", now);
+    expect(sevenDays.points.map((point) => point.date)).toEqual(["2026-07-25"]);
+    const thirtyDays = market.history(skuId, "30d", now);
+    expect(thirtyDays.points.map((point) => point.date)).toEqual(["2026-07-15", "2026-07-25"]);
+    database.close();
+  });
+
+  it("无历史快照的 SKU 返回空 points 数组且 referenceSource 为 null", () => {
+    const database = fixture();
+    // 删除 fixture 预置的快照，模拟该 SKU 完全无历史。
+    database.prepare("DELETE FROM price_snapshot_entries WHERE sku_id = ?").run(skuId);
+    const market = new MarketService(database);
+    const history = market.history(skuId, "all", now);
+    expect(history.points).toEqual([]);
+    expect(history.referenceSource).toBe(null);
+    database.close();
+  });
+
+  it("市场指数历史按自然日聚合平均参考价与游戏内价", () => {
+    const database = fixture();
+    // 用另一个 SKU 制造同日两个快照以验证平均聚合。
+    const secondSku = "30000000-0000-4000-8000-000000000002";
+    database.prepare("INSERT INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, 'foil', 1, 'scryfall', ?, 0, ?, ?)").run(secondSku, printingId, printingId, now, now);
+    const foilRun = "50000000-0000-4000-8000-000000000002";
+    database.prepare("INSERT INTO price_sync_runs (id, source, source_version, prices_uri, mapping_uri, prices_checksum_sha256, mapping_checksum_sha256, status, checksum_verification, started_at, completed_at) VALUES (?, 'mtgjson-cardmarket', 'fixture', 'private', 'private', ?, ?, 'succeeded', 'verified', ?, ?)").run(foilRun, pricesChecksum, mappingChecksum, "2026-07-20T08:00:00.000Z", "2026-07-20T08:00:00.000Z");
+    database.prepare("INSERT INTO price_snapshot_entries (id, sync_run_id, sku_id, mapping_id, mtgjson_uuid, finish, price_type, currency, price_amount, availability, unavailable_reason, captured_at, created_at) VALUES (?, ?, ?, NULL, NULL, 'foil', 'foil', 'EUR', 200, 'priced', NULL, ?, ?)").run("40000000-0000-4000-8000-000000000099", foilRun, secondSku, "2026-07-20T08:00:00.000Z", "2026-07-20T08:00:00.000Z");
+    // 调整主 SKU 快照到 2026-07-20，金额 100（保持引用有效）。
+    database.prepare("UPDATE price_snapshot_entries SET captured_at = ?, created_at = ?, price_amount = 100 WHERE id = ?").run("2026-07-20T08:00:00.000Z", "2026-07-20T08:00:00.000Z", snapshotId);
+    seedQuote(database, "2026-07-20T08:00:00.000Z", 110, 1, snapshotId);
+    const market = new MarketService(database);
+    const history = market.indexHistory("all", now);
+    expect(history.points).toEqual([{ date: "2026-07-20", referenceIndex: 150, gameIndex: 110 }]);
+    database.close();
+  });
+});
