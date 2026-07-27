@@ -7,6 +7,7 @@ import { CatalogImageCacheService, type CatalogImageCacheRequest } from "./modul
 import { CatalogImageCache } from "./platform/external/scryfall/scryfall-bulk-client.js";
 import { createPriceSyncService } from "./modules/pricing/api/pricing-routes.js";
 import type { PriceSyncLogger } from "./modules/pricing/application/price-sync-service.js";
+import { MarketService } from "./modules/market/application/market-service.js";
 
 export interface TaskRunner {
   stop(): Promise<void>;
@@ -43,5 +44,7 @@ export function createTaskRegistry(config: ApiConfig, database: Database.Databas
   registry.register("catalog.image-cache", async (payload) => images.cache(payload as CatalogImageCacheRequest));
   const prices = createPriceSyncService(config, database, priceSyncLogger);
   registry.register("prices.sync", async (payload, context) => prices.synchronize((payload ?? {}) as { expectedPricesChecksumSha256?: string; expectedMappingChecksumSha256?: string; allowChecksumMismatch?: boolean }, context));
+  const market = new MarketService(database);
+  registry.register("market.reprice", async (payload) => { market.reprice((payload ?? {}) as { priceSyncRunId?: string; triggerKey?: string }); });
   return registry;
 }

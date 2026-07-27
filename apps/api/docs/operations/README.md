@@ -30,6 +30,12 @@
 - 若管理状态的 `checksumBypassAvailable` 为真，页面会要求管理员明确确认后提交 `{ "allowChecksumMismatch": true }`。这是上游文件与侧车 SHA-256 不一致时的最后手段：先保存失败运行与请求 ID，再确认审计中的操作者、任务 ID 和 `price_sync.checksum_bypass_requested` 事实。覆写成功会标记为 `bypassed`；不得用直接改库或普通任务绕过该确认条件。
 - 每次失败会在服务端结构化日志输出 `price_sync.validation_failed`（校验阶段）或 `price_sync.failed`（写入阶段），其中包含 `syncRunId`、任务 `jobId`/`attempt`、来源版本、校验文件及预期/实际 SHA-256；不输出下载 URL、Provider 原始响应、密钥或 Cookie。排障先以这些批次标识关联 `price_sync_runs`、`jobs` 与 `job_runs`，再决定是否重新投递或执行已受限的 checksum 覆写。
 
+## I14B 市场重定价
+
+- 成功 `prices.sync` 会以 `price-sync:<syncRunId>` 投递唯一 `market.reprice`；已结算开包等经济事实以 `fact-event:<eventId>` 投递唯一任务。用 `/v1/admin/jobs` 和 `job_runs` 按唯一键、运行 ID 和错误摘要追踪，禁止手工改 `market_quotes`、`market_events`、任务状态或外部快照。
+- 处理器只读取最近成功运行中的有效 EUR 快照、已结算事实、当前处于 UTC 生效区间的系列周期/关联/市场事件及版本化参数，写入带参数/原因 JSON 的报价投影。失败时旧报价保持可读；修复数据或代码后只重试原任务，勿通过复制或修改系数补偿。
+- 基础市场事件必须同时核对 scope（global/set/sku）、目标、UTC `starts_at`/`ends_at`、5,000–20,000 bp 上限和原因。到期事件自然退出后续重定价；I30B 才会提供受审计的发布/暂停/结束命令，在此之前不允许数据库手工运营。
+
 ## I30B 管理活动与玩家补偿（计划）
 
 以下是 I30B 实现时必须细化为可执行手册的边界；当前尚未实现，不授权通过数据库手工操作替代后台能力。

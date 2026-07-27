@@ -1,6 +1,11 @@
 import type { JobDto } from "@mtg-market/contracts";
 import { errorSummary, retryDelayMs, registeredJobTypes, type JobHandler, type PersistedJob } from "../domain/job.js";
-import type { SqliteJobRepository } from "../infrastructure/sqlite-job-repository.js";
+import { SqliteJobRepository } from "../infrastructure/sqlite-job-repository.js";
+
+/** 业务模块经由 jobs application 投递重定价，不直接操作 jobs 表。 */
+export function enqueueMarketRepriceJob(database: ConstructorParameters<typeof SqliteJobRepository>[0], triggerKey: string, now: string, priceSyncRunId?: string): void {
+  new SqliteJobRepository(database).enqueue({ type: "market.reprice", payload: { triggerKey, ...(priceSyncRunId ? { priceSyncRunId } : {}) }, uniqueKey: triggerKey, runAfter: now, maxAttempts: 3 }, now);
+}
 
 export class TaskRegistry {
   private readonly handlers = new Map<string, JobHandler>();

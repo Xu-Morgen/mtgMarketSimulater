@@ -66,6 +66,12 @@
 - `GET /v1/prices/status` 要求有效会话，返回 `PublicPriceStatusDto` 的公开来源、最近成功同步更新时间与服务端判定的 `fresh`、`stale` 或 `unavailable` 状态。最近一次同步失败但有成功快照时为 `stale`；没有成功快照时为 `unavailable`。
 - 此端点绝不返回版本、校验和、映射统计、任务、失败摘要、下载地址或 Provider 原始内容；这些管理详情继续只由 `/v1/admin/prices/sync` 返回并要求 admin。
 
+## I14B 市场报价协议
+
+- `GET /v1/market/quotes/{skuId}` 要求有效 Bearer 会话，仅读取已持久化的 `QuoteDto`：Cardmarket EUR 欧分锚点、游戏内中间价、NPC 买入/卖出价、规则版本、快照/计算时间。它不接受浏览器提供的兑换率、系数、价差或费用；没有来自有效外部快照的报价时返回 `404 PRICE_UNAVAILABLE`。
+- `GET /v1/market/index` 要求有效会话，返回最新每 SKU 报价投影的外部参考指数、游戏指数、已报价 SKU 数和最近计算时间。指数为展示用聚合，客户端不得根据它或单卡报价推导交易结算。
+- `market.reprice` 由成功 `prices.sync` 的运行 ID 或已结算经济事实 ID 唯一投递。每次报价保留规则版本、参数快照和原因摘要；重放相同触发键不会重复叠加事件或生成第二份报价。同步或重定价失败时保留最近成功报价，SKU 的新交易资格仍以价格快照的 `tradable` 状态为准。
+
 ## I11B 补充包概率公示协议
 
 - `GET /v1/packs` 与 `GET /v1/packs/{packId}` 要求有效 Bearer 会话，返回 `PackDto` 列表或单个配置。每项包含整数最小货币单位价格、启用状态/停用原因、规则版本和卡位稀有度概率；每个卡位的 `probabilityBasisPoints` 总和固定为 10,000，数值由服务端版本化规则计算。

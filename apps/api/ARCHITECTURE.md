@@ -73,7 +73,14 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 
 - `platform/external/mtgjson` 是唯一下载 `AllPricesToday` 与 `AllPrintings` 的适配器。它默认校验各文件同 URL 的 `.sha256` 侧车文件，只接受 Cardmarket `EUR` retail 的 latest-date `normal`/`foil`/`etched` 数值，记录两份下载的 SHA-256；`AllPrintings` 解压后按单张 `cards` 对象进行字节扫描与解析，绝不将整份文件转换为单一 JavaScript 字符串。Provider 原文、下载 URI 与 User-Agent 不通过 HTTP 输出。
 - `modules/pricing/application/PriceSyncService` 以 AllPrintings 的 Scryfall ID、MTGJSON UUID 和工艺精确对应本地 SKU，并在一笔 SQLite 短事务中追加 `price_sync_runs`、`price_sku_mappings`、每 SKU 的 `price_snapshot_entries` 和物化 `card_skus.tradable`。无价、零价、币种不符、缺映射或歧义映射均追加明确不可用原因并暂停新增交易；成功运行才移动 `price_sync_state` 指针，失败不会替换旧快照。
-- `prices.sync` 在 task runner 注册到 pricing application；`/v1/admin/prices/sync` 仅管理员读写，写入以幂等键去重投递任务。仅当最近一次运行持久化为 `CHECKSUM_MISMATCH` 时，管理员可提交 `{ allowChecksumMismatch: true }` 的独立覆写任务；该任务写入专门审计事实，成功运行标为 `bypassed`，不影响普通严格校验路径。I14B 前它不生成游戏内报价，也不改写库存估值或经济流水。
+- `prices.sync` 在 task runner 注册到 pricing application；`/v1/admin/prices/sync` 仅管理员读写，写入以幂等键去重投递任务。仅当最近一次运行持久化为 `CHECKSUM_MISMATCH` 时，管理员可提交 `{ allowChecksumMismatch: true }` 的独立覆写任务；该任务写入专门审计事实，成功运行标为 `bypassed`，不影响普通严格校验路径。每次成功同步以成功运行 ID 唯一投递 `market.reprice`；它不改写库存估值或经济流水。
+
+## 市场报价投影（I14B）
+
+- `modules/market/application/MarketService` 只读取 `price_snapshot_entries`、已结算 `fact_events` 和版本化市场配置，使用 `@mtg-market/rules` 的 `market/v1` 物化 `market_quotes`。它不是余额、库存或外部价的写入者；外部快照保持只追加，经济事实仅被聚合消费。
+- `market_parameters` 保存 EUR 欧分到游戏币的整数 bp 兑换、最低报价、NPC 买卖价差与费用；`market_series_cycles`、`market_card_relations` 与 `market_events` 分别表达系列周期、关联传播和有作用域/UTC 生效区间/上限的基础事件。数据库与规则包共同限制系数为 5,000–20,000 bp，过期事件不会进入新投影。
+- 同一 `(sku_id, trigger_key)` 的报价只可写入一次。价格同步以 `price-sync:<runId>`、开包事实以 `fact-event:<eventId>` 投递重定价，因此 worker 至少执行一次时仍不会重复累乘；失败任务保留最近成功报价，由 jobs 的退避与重试处置。
+- `GET /v1/market/quotes/{skuId}` 与 `GET /v1/market/index` 仅返回已持久化的服务端报价/指数，均要求已认证会话。无有效外部价或尚未完成投影的 SKU 返回 `PRICE_UNAVAILABLE`；浏览器不得提交系数、价格或报价参数。
 
 ## 补充包规则（I11B）
 

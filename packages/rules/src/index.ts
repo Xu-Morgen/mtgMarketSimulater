@@ -1,10 +1,3 @@
-export interface NpcQuoteInput {
-  referencePrice: number;
-  marketFactor: number;
-  buySpread: number;
-  sellSpread: number;
-}
-
 /** I11B：概率、候选池和种子均为显式输入，规则包不访问 CSPRNG、数据库或环境变量。 */
 export interface PackCandidate {
   skuId: string;
@@ -168,17 +161,103 @@ export function resolveInitialFunding(version: string): typeof INITIAL_FUNDING {
   return INITIAL_FUNDING;
 }
 
-export function calculateNpcQuote(input: NpcQuoteInput) {
-  const mid = roundCurrency(input.referencePrice * input.marketFactor);
+/** I14B：市场规则的所有金额与系数均为整数，避免浮点结算漂移。 */
+export const MARKET_RULE_VERSION = "market/v1" as const;
+export const MARKET_FACTOR_MIN_BPS = 5_000;
+export const MARKET_FACTOR_MAX_BPS = 20_000;
 
+export interface MarketFactorInput {
+  kind: "supply-demand" | "series-cycle" | "relation" | "event" | "liquidity";
+  /** 10_000 代表不影响报价；每项先校验，再在总和阶段统一截断。 */
+  factorBasisPoints: number;
+  reason: string;
+}
+
+export interface MarketQuoteRuleInput {
+  version: string;
+  /** Cardmarket EUR 最小单位（欧分）。 */
+  referencePriceEurCents: number;
+  /** 一欧分兑换的游戏币，使用 bp 表示；10_000 即 1:1。 */
+  eurCentToGameCreditBasisPoints: number;
+  minimumPrice: number;
+  npcBuySpreadBasisPoints: number;
+  npcSellSpreadBasisPoints: number;
+  npcFeeBasisPoints: number;
+  factors: MarketFactorInput[];
+}
+
+export interface MarketQuoteRuleResult {
+  ruleVersion: string;
+  referencePriceEurCents: number;
+  marketFactorBasisPoints: number;
+  marketPrice: number;
+  npcBuyPrice: number;
+  npcSellPrice: number;
+  npcBuyFee: number;
+  npcSellFee: number;
+  reasons: Array<{ kind: MarketFactorInput["kind"]; factorBasisPoints: number; reason: string }>;
+}
+
+function nonNegativeSafeInteger(value: number, label: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) throw new RangeError(`${label} 必须为非负安全整数`);
+}
+
+function basisPoints(value: number, label: string, minimum = 0, maximum = 100_000): void {
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw new RangeError(`${label} 必须在 ${minimum} 到 ${maximum} bp 之间`);
+}
+
+/** 非负整数的 half-up 除法；输入受安全整数边界保护。 */
+function divideHalfUp(numerator: number, denominator: number, label: string): number {
+  if (!Number.isSafeInteger(numerator) || numerator < 0 || !Number.isSafeInteger(denominator) || denominator <= 0) throw new RangeError(`${label} 计算输入无效`);
+  const result = Math.floor((numerator + Math.floor(denominator / 2)) / denominator);
+  if (!Number.isSafeInteger(result)) throw new RangeError(`${label} 超出安全整数范围`);
+  return result;
+}
+
+/**
+ * 纯、版本化且可重放的报价计算。先将 EUR 锚点转换为游戏币，再叠加受界因素；
+ * NPC 价差和费用只影响游戏内成交报价，绝不修改外部参考价。
+ */
+export function calculateMarketQuote(input: MarketQuoteRuleInput): MarketQuoteRuleResult {
+  if (input.version !== MARKET_RULE_VERSION) throw new RangeError(`不支持的市场规则版本：${input.version}`);
+  positiveInteger(input.referencePriceEurCents, "外部参考价");
+  basisPoints(input.eurCentToGameCreditBasisPoints, "EUR 兑换率", 1, 1_000_000);
+  nonNegativeSafeInteger(input.minimumPrice, "最低报价");
+  basisPoints(input.npcBuySpreadBasisPoints, "NPC 买入价差", 0, 9_999);
+  basisPoints(input.npcSellSpreadBasisPoints, "NPC 卖出价差", 0, 100_000);
+  basisPoints(input.npcFeeBasisPoints, "NPC 费用", 0, 100_000);
+  if (input.factors.length === 0) throw new RangeError("市场报价必须包含至少一个系数");
+
+  let rawFactor = 10_000;
+  for (const factor of input.factors) {
+    basisPoints(factor.factorBasisPoints, `${factor.kind} 系数`, MARKET_FACTOR_MIN_BPS, MARKET_FACTOR_MAX_BPS);
+    if (!factor.reason.trim()) throw new RangeError("市场系数必须记录计算原因");
+    rawFactor += factor.factorBasisPoints - 10_000;
+  }
+  const marketFactorBasisPoints = Math.min(MARKET_FACTOR_MAX_BPS, Math.max(MARKET_FACTOR_MIN_BPS, rawFactor));
+  const converted = divideHalfUp(input.referencePriceEurCents * input.eurCentToGameCreditBasisPoints, 10_000, "EUR 兑换");
+  const marketPrice = Math.max(input.minimumPrice, divideHalfUp(converted * marketFactorBasisPoints, 10_000, "游戏内中间价"));
+  const npcBuyFee = divideHalfUp(marketPrice * input.npcFeeBasisPoints, 10_000, "NPC 买入费用");
+  const npcSellFee = divideHalfUp(marketPrice * input.npcFeeBasisPoints, 10_000, "NPC 卖出费用");
+  const npcBuyPrice = Math.max(input.minimumPrice, Math.floor((marketPrice * (10_000 - input.npcBuySpreadBasisPoints)) / 10_000) - npcBuyFee);
+  const npcSellPrice = Math.max(input.minimumPrice, divideHalfUp(marketPrice * (10_000 + input.npcSellSpreadBasisPoints), 10_000, "NPC 卖出价") + npcSellFee);
   return {
-    referencePrice: input.referencePrice,
-    marketPrice: mid,
-    npcBuyPrice: roundCurrency(mid * (1 - input.buySpread)),
-    npcSellPrice: roundCurrency(mid * (1 + input.sellSpread))
+    ruleVersion: input.version,
+    referencePriceEurCents: input.referencePriceEurCents,
+    marketFactorBasisPoints,
+    marketPrice,
+    npcBuyPrice,
+    npcSellPrice,
+    npcBuyFee,
+    npcSellFee,
+    reasons: input.factors.map(({ kind, factorBasisPoints, reason }) => ({ kind, factorBasisPoints, reason }))
   };
 }
 
-function roundCurrency(value: number): number {
-  return Math.round(value * 100) / 100;
+/** 将已结算的源 SKU 压力按关联权重传播，输出仍是可受界的 bp 系数。 */
+export function propagateMarketPressure(sourcePressure: number, relationWeightBasisPoints: number): number {
+  if (!Number.isSafeInteger(sourcePressure)) throw new RangeError("关联压力必须为安全整数");
+  basisPoints(relationWeightBasisPoints, "关联权重", 0, 10_000);
+  const adjustment = Math.trunc((sourcePressure * relationWeightBasisPoints) / 10_000) * 25;
+  return Math.min(MARKET_FACTOR_MAX_BPS, Math.max(MARKET_FACTOR_MIN_BPS, 10_000 + adjustment));
 }

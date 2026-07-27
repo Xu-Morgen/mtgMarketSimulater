@@ -6,6 +6,7 @@ import { openSqliteDatabase } from "@mtg-market/database";
 import { createApiApp } from "./app.js";
 import { loadApiConfig } from "./config/environment.js";
 import { openApiDocument, publicApiPaths } from "./openapi.js";
+import { MarketService } from "./modules/market/application/market-service.js";
 
 const directories: string[] = [];
 afterEach(() => directories.splice(0).forEach((directory) => rmSync(directory, { recursive: true, force: true })));
@@ -43,7 +44,7 @@ describe("API cross-cutting HTTP boundary", () => {
 
   it("uses the standard failure envelope for query validation and unknown routes", async () => {
     const { app, database } = await createTestApp();
-    const invalid = await app.inject({ method: "GET", url: "/v1/market/quote-preview?buySpread=2" });
+    const invalid = await app.inject({ method: "POST", url: "/v1/auth/register", payload: {} });
     const missing = await app.inject({ method: "GET", url: "/does-not-exist" });
 
     expect(invalid.statusCode).toBe(400);
@@ -147,6 +148,27 @@ describe("API cross-cutting HTTP boundary", () => {
     expect(JSON.stringify(publicStatus.json())).not.toContain("mappedSkus");
     expect(adminStatus.statusCode).toBe(403);
     expect(adminStatus.json()).toMatchObject({ ok: false, error: { code: "AUTHORIZATION_DENIED" } });
+    await app.close(); database.close();
+  });
+
+  it("only returns persisted server market quotes and index to authenticated players", async () => {
+    const { app, database } = await createTestApp();
+    const registration = await app.inject({ method: "POST", url: "/v1/auth/register", payload: { email: "market-player@example.test", displayName: "市场玩家", password: "correct-horse-battery-staple" } });
+    const authorization = `Bearer ${registration.json().data.accessToken as string}`;
+    const now = "2026-07-27T00:00:00.000Z"; const setId = "10000000-0000-4000-8000-000000000010"; const printingId = "20000000-0000-4000-8000-000000000010"; const skuId = "30000000-0000-4000-8000-000000000010"; const runId = "40000000-0000-4000-8000-000000000010";
+    database.prepare("INSERT INTO card_sets (id, code, name, source, created_at) VALUES (?, 'MRK', '市场测试', 'scryfall', ?)").run(setId, now);
+    database.prepare("INSERT INTO card_printings (id, set_id, name, collector_number, scryfall_id, rarity, legalities_json, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, '市场测试卡', '1', ?, 'rare', '{}', 'scryfall', ?, 0, ?, ?)").run(printingId, setId, printingId, printingId, now, now);
+    database.prepare("INSERT INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, 'nonfoil', 1, 'scryfall', ?, 0, ?, ?)").run(skuId, printingId, printingId, now, now);
+    database.prepare("INSERT INTO price_sync_runs (id, source, source_version, prices_uri, mapping_uri, prices_checksum_sha256, mapping_checksum_sha256, status, checksum_verification, started_at, completed_at) VALUES (?, 'mtgjson-cardmarket', 'fixture', 'private', 'private', ?, ?, 'succeeded', 'verified', ?, ?)").run(runId, "a".repeat(64), "b".repeat(64), now, now);
+    database.prepare("INSERT INTO price_sync_state (singleton, latest_successful_run_id, updated_at) VALUES (1, ?, ?)").run(runId, now);
+    database.prepare("INSERT INTO price_snapshot_entries (id, sync_run_id, sku_id, mapping_id, mtgjson_uuid, finish, price_type, currency, price_amount, availability, unavailable_reason, captured_at, created_at) VALUES (?, ?, ?, NULL, NULL, 'nonfoil', 'normal', 'EUR', 123, 'priced', NULL, ?, ?)").run("50000000-0000-4000-8000-000000000010", runId, skuId, now, now);
+    new MarketService(database).reprice({ priceSyncRunId: runId, triggerKey: "route-fixture" }, now);
+    const quote = await app.inject({ method: "GET", url: `/v1/market/quotes/${skuId}`, headers: { authorization } });
+    const index = await app.inject({ method: "GET", url: "/v1/market/index", headers: { authorization } });
+    const anonymous = await app.inject({ method: "GET", url: `/v1/market/quotes/${skuId}` });
+    expect(quote.json()).toMatchObject({ ok: true, data: { quote: { skuId, referencePrice: { amount: 123, currency: "EUR" } } } });
+    expect(index.json()).toMatchObject({ ok: true, data: { quotedSkus: 1, referenceIndex: 123 } });
+    expect(anonymous.statusCode).toBe(401);
     await app.close(); database.close();
   });
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { withinTransaction } from "@mtg-market/database";
+import { enqueueMarketRepriceJob } from "../../jobs/application/task-service.js";
 import { MtgjsonChecksumMismatchError, type MtgjsonChecksumFile, type MtgjsonClient, type MtgjsonPriceSource } from "../../../platform/external/mtgjson/mtgjson-client.js";
 
 type SyncPayload = { expectedPricesChecksumSha256?: string; expectedMappingChecksumSha256?: string; allowChecksumMismatch?: boolean };
@@ -40,9 +41,13 @@ export class PriceSyncService {
       if (payload.expectedPricesChecksumSha256 && payload.expectedPricesChecksumSha256 !== source.pricesChecksumSha256) throw new ExpectedChecksumMismatchError("AllPricesToday", payload.expectedPricesChecksumSha256, source.pricesChecksumSha256);
       if (payload.expectedMappingChecksumSha256 && payload.expectedMappingChecksumSha256 !== source.mappingChecksumSha256) throw new ExpectedChecksumMismatchError("AllPrintings", payload.expectedMappingChecksumSha256, source.mappingChecksumSha256);
       stage = "persist";
-      const counts = withinTransaction(this.database, () => this.appendSnapshot(runId, source!, startedAt));
-      this.database.prepare("UPDATE price_sync_runs SET status = 'succeeded', mapped_skus = ?, priced_skus = ?, unpriced_skus = ?, mapping_failed_skus = ?, completed_at = ? WHERE id = ?").run(counts.mapped, counts.priced, counts.unpriced, counts.mappingFailed, new Date().toISOString(), runId);
-      this.database.prepare("INSERT INTO price_sync_state (singleton, latest_successful_run_id, updated_at) VALUES (1, ?, ?) ON CONFLICT(singleton) DO UPDATE SET latest_successful_run_id = excluded.latest_successful_run_id, updated_at = excluded.updated_at").run(runId, new Date().toISOString());
+      withinTransaction(this.database, () => {
+        const counts = this.appendSnapshot(runId, source!, startedAt);
+        const completedAt = new Date().toISOString();
+        this.database.prepare("UPDATE price_sync_runs SET status = 'succeeded', mapped_skus = ?, priced_skus = ?, unpriced_skus = ?, mapping_failed_skus = ?, completed_at = ? WHERE id = ?").run(counts.mapped, counts.priced, counts.unpriced, counts.mappingFailed, completedAt, runId);
+        this.database.prepare("INSERT INTO price_sync_state (singleton, latest_successful_run_id, updated_at) VALUES (1, ?, ?) ON CONFLICT(singleton) DO UPDATE SET latest_successful_run_id = excluded.latest_successful_run_id, updated_at = excluded.updated_at").run(runId, completedAt);
+        enqueueMarketRepriceJob(this.database, `price-sync:${runId}`, completedAt, runId);
+      });
     } catch (error) {
       const reason = (error instanceof Error ? error.message : String(error)).slice(0, 1000);
       const failureCode = error instanceof MtgjsonChecksumMismatchError ? error.code : null;

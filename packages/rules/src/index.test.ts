@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { INITIAL_FUNDING, INITIAL_FUNDING_RULE_VERSION, openPack, packSlotProbabilities, resolveInitialFunding, type PackRuleInput } from "./index.js";
+import { INITIAL_FUNDING, INITIAL_FUNDING_RULE_VERSION, MARKET_RULE_VERSION, calculateMarketQuote, openPack, packSlotProbabilities, propagateMarketPressure, resolveInitialFunding, type PackRuleInput } from "./index.js";
 
 const PACK_RULE: PackRuleInput = {
   version: "pack/v1",
@@ -36,5 +36,36 @@ describe("I11B 补充包规则", () => {
     expect(() => packSlotProbabilities({ ...PACK_RULE, slots: [{ ...PACK_RULE.slots[0]!, poolWeights: [{ poolId: "missing", weight: 1 }] }] })).toThrow("不存在的候选池");
     expect(() => packSlotProbabilities({ ...PACK_RULE, slots: [{ ...PACK_RULE.slots[0]!, poolWeights: [{ poolId: "common", weight: 0 }] }] })).toThrow("必须为正安全整数");
     expect(() => openPack({ ...PACK_RULE, randomSeed: "" })).toThrow("随机种子不能为空");
+  });
+});
+
+describe("I14B 市场报价规则", () => {
+  const input = {
+    version: MARKET_RULE_VERSION,
+    referencePriceEurCents: 101,
+    eurCentToGameCreditBasisPoints: 10_000,
+    minimumPrice: 1,
+    npcBuySpreadBasisPoints: 1_000,
+    npcSellSpreadBasisPoints: 1_000,
+    npcFeeBasisPoints: 100,
+    factors: [
+      { kind: "supply-demand" as const, factorBasisPoints: 10_100, reason: "需求略高" },
+      { kind: "liquidity" as const, factorBasisPoints: 9_950, reason: "流动性" }
+    ]
+  };
+
+  it("以整数欧分、明确 half-up 舍入和版本化因素产生确定报价", () => {
+    const first = calculateMarketQuote(input);
+    expect(calculateMarketQuote(input)).toEqual(first);
+    expect(first).toMatchObject({ ruleVersion: MARKET_RULE_VERSION, marketFactorBasisPoints: 10_050, marketPrice: 102, npcBuyPrice: 90, npcSellPrice: 113 });
+    expect(Number.isSafeInteger(first.marketPrice)).toBe(true);
+  });
+
+  it("限制总系数、关联传播和非法参数", () => {
+    expect(calculateMarketQuote({ ...input, factors: [{ kind: "event", factorBasisPoints: 20_000, reason: "上限" }, { kind: "event", factorBasisPoints: 20_000, reason: "仍然有界" }] }).marketFactorBasisPoints).toBe(20_000);
+    expect(propagateMarketPressure(10, 5_000)).toBe(10_125);
+    expect(() => calculateMarketQuote({ ...input, referencePriceEurCents: 0 })).toThrow("外部参考价");
+    expect(() => calculateMarketQuote({ ...input, npcBuySpreadBasisPoints: 10_000 })).toThrow("NPC 买入价差");
+    expect(() => calculateMarketQuote({ ...input, factors: [{ kind: "event", factorBasisPoints: 4_999, reason: "越界" }] })).toThrow("bp");
   });
 });

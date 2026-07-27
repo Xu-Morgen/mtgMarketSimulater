@@ -17,6 +17,7 @@ import {
 } from "../infrastructure/sqlite-pack-repository.js";
 import { InventoryService } from "../../inventory/application/inventory-service.js";
 import { UserService } from "../../users/application/user-service.js";
+import { enqueueMarketRepriceJob } from "../../jobs/application/task-service.js";
 import { failure, success } from "../../../shared/http/api-response.js";
 
 function toPackDto(pack: StoredPackConfiguration): PackDto {
@@ -270,6 +271,7 @@ export class PackService {
           "INSERT INTO outbox (id, event_id, destination, payload_json, status, created_at, dispatched_at) VALUES (?, ?, 'market.fact-event', ?, 'pending', ?, NULL)"
         )
         .run(randomUUID(), eventId, JSON.stringify(event), now);
+      enqueueMarketRepriceJob(this.database, `fact-event:${eventId}`, now);
       this.users.writeEconomicAudit(
         input.userId,
         "pack.opened",

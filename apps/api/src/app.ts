@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import Fastify, { type FastifyInstance } from "fastify";
 import { ZodError, z } from "zod";
-import { calculateNpcQuote } from "@mtg-market/rules";
 import type { ApiConfig } from "./config/environment.js";
 import { openApiDocument } from "./openapi.js";
 import { failure, success } from "./shared/http/api-response.js";
@@ -17,19 +16,13 @@ import { registerCatalogRoutes } from "./modules/catalog/api/catalog-routes.js";
 import { registerInventoryRoutes } from "./modules/inventory/api/inventory-routes.js";
 import { registerPackRoutes } from "./modules/packs/api/pack-routes.js";
 import { registerPricingRoutes } from "./modules/pricing/api/pricing-routes.js";
+import { registerMarketRoutes } from "./modules/market/api/market-routes.js";
 
 declare module "fastify" {
   interface FastifyRequest {
     requestId: string;
   }
 }
-
-const quotePreviewQuerySchema = z.object({
-  referencePrice: z.coerce.number().int().min(0).default(10),
-  marketFactor: z.coerce.number().min(0.1).max(10).default(1),
-  buySpread: z.coerce.number().min(0).max(1).default(0.1),
-  sellSpread: z.coerce.number().min(0).max(1).default(0.1)
-}).strict();
 
 const jobListQuerySchema = z.object({ status: z.enum(["pending", "running", "succeeded", "failed", "dead"]).optional(), limit: z.coerce.number().int().min(1).max(100).default(20) }).strict();
 const jobEnqueueBodySchema = z.object({ type: z.string().refine(isRegisteredJobType, "未知任务类型"), payload: z.unknown().default({}), uniqueKey: z.string().trim().min(1).max(200), runAfter: z.string().datetime().optional(), maxAttempts: z.number().int().min(1).max(20).default(3) }).strict();
@@ -110,6 +103,7 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
   await registerInventoryRoutes(app, database);
   await registerPackRoutes(app, database);
   await registerPricingRoutes(app, config, database);
+  await registerMarketRoutes(app, database);
 
   app.get("/health", async (request) => success(request.requestId, { status: "ok", database: databaseHealth(database) }));
 
@@ -123,11 +117,6 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
   });
 
   app.get("/openapi.json", async () => openApiDocument);
-
-  app.get("/v1/market/quote-preview", async (request) => {
-    const query = quotePreviewQuerySchema.parse(request.query);
-    return success(request.requestId, calculateNpcQuote(query));
-  });
 
   const jobs = new SqliteJobRepository(database);
 

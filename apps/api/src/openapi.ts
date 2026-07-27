@@ -6,7 +6,8 @@ export const publicApiPaths = [
   "/health",
   "/ready",
   "/openapi.json",
-  "/v1/market/quote-preview",
+  "/v1/market/quotes/{skuId}",
+  "/v1/market/index",
   "/v1/auth/register",
   "/v1/auth/login",
   "/v1/auth/refresh",
@@ -45,12 +46,13 @@ export const openApiDocument = {
     "/openapi.json": {
       get: { summary: "OpenAPI 3.1 文档", responses: { "200": { description: "API 协议文档" } } }
     },
-    "/v1/market/quote-preview": {
+    "/v1/market/quotes/{skuId}": {
       get: {
-        summary: "NPC 报价规则预览",
-        responses: { "200": { description: "报价预览" }, "400": { description: "参数校验失败" } }
+        summary: "查询某个 SKU 的服务端游戏内与 NPC 报价",
+        responses: { "200": { description: "报价" }, "401": { description: "认证无效或过期" }, "404": { description: "无有效报价" } }
       }
     },
+    "/v1/market/index": { get: { summary: "查询本服与外部市场指数", responses: { "200": { description: "市场指数" }, "401": { description: "认证无效或过期" } } } },
     "/v1/auth/register": {
       post: {
         summary: "注册玩家账户并创建会话",
