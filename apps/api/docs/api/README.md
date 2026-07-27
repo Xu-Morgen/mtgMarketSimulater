@@ -53,7 +53,7 @@
 ## I10B 库存查询协议
 
 - `GET /v1/inventory` 要求有效 Bearer 会话，仅返回当前玩家的库存总览。支持 `query`、`setCode`、`finish`、`locked=any|locked|available`、`sort=updatedAt|name|quantity|availableQuantity`、`direction`、`cursor`、`limit`，所有筛选、排序和分页均在服务端执行。
-- `GET /v1/inventory/{skuId}` 返回当前玩家该 SKU 的持有量、可用量、订单/比赛锁定量、移动平均成本、市值快照和本地展示卡牌资料；未持有返回 `404 RESOURCE_NOT_FOUND`。`marketValue: null` 时响应带 `marketValueUnavailableReason`，客户端不得自行估算市值。
+- `GET /v1/inventory/{skuId}` 返回当前玩家该 SKU 的持有量、可用量、订单/比赛锁定量、移动平均成本、服务端 `marketUnitPrice`、全部持有的 `marketValue`、`unrealizedProfitLoss` 和本地展示卡牌资料；三项估值字段均在 SQLite 查询中以整数产生，浏览器不得相乘、相减或用可用库存替代全部持有量。未持有返回 `404 RESOURCE_NOT_FOUND`。`marketValue: null` 时响应带 `marketValueUnavailableReason`，客户端不得自行估算市值。
 - `GET /v1/inventory/{skuId}/reconciliation` 返回服务端校验的数量恒等式和不可变 `inventory_entries` 分页流水，供排障与未来管理查询反查。上述路由均不提供改库存或解锁功能；锁定、释放、扣减仅能由开包、订单和比赛的服务端命令完成。
 
 ## I13B MTGJSON 价格同步协议

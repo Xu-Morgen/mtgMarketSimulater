@@ -1,6 +1,6 @@
 "use client";
 
-import type { AccountBalanceDto, InventoryHoldingDto, NpcBuyPreviewDto, NpcTradeDto } from "@mtg-market/contracts";
+import type { AccountBalanceDto, InventoryHoldingDto, NpcBuyPreviewDto, NpcSellPreviewDto, NpcTradeDto } from "@mtg-market/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { apiRequest } from "./client";
@@ -9,6 +9,8 @@ import { createIdempotencyKey } from "../utils/idempotency";
 
 export type NpcBuyResult = { trade: NpcTradeDto; balance: AccountBalanceDto; holding: InventoryHoldingDto };
 type BuyIntent = { key: string; skuId: string; quoteId: string; quoteVersion: string; quantity: number; maxUnitPrice: number };
+export type NpcSellResult = { trade: NpcTradeDto; balance: AccountBalanceDto; holding: InventoryHoldingDto };
+type SellIntent = { key: string; skuId: string; quoteId: string; quoteVersion: string; quantity: number; minUnitPrice: number };
 
 /** NPC 买入价格、费用和额度始终由服务端预览返回；浏览器只提交该预览的标识与玩家确认的单位限价。 */
 export const npcTradeApi = {
@@ -24,6 +26,20 @@ export const npcTradeApi = {
         quoteVersion: input.quoteVersion,
         quantity: input.quantity,
         maxUnitPrice: input.maxUnitPrice
+      }
+    }),
+  sellPreview: (accessToken: string, skuId: string, quantity: number | "all") =>
+    apiRequest<{ preview: NpcSellPreviewDto }>(`/v1/npc-trades/sell/${skuId}/preview?quantity=${quantity}`, { accessToken }),
+  sell: (accessToken: string, input: Omit<SellIntent, "key">, idempotencyKey: string) =>
+    apiRequest<NpcSellResult>(`/v1/npc-trades/sell/${input.skuId}`, {
+      method: "POST",
+      accessToken,
+      idempotencyKey,
+      body: {
+        quoteId: input.quoteId,
+        quoteVersion: input.quoteVersion,
+        quantity: input.quantity,
+        minUnitPrice: input.minUnitPrice
       }
     })
 };
@@ -80,4 +96,49 @@ export function useNpcBuyMutation() {
       mutation.reset();
     }
   };
+}
+
+/** `all` 仍由服务端解析为本次可用库存；浏览器不读取或扣减锁定量。 */
+export function useNpcSellPreviewQuery(skuId: string, quantity: number | "all", enabled: boolean) {
+  const { accessToken, user } = useSession();
+  return useQuery({
+    queryKey: ["npc-trades", "sell-preview", user?.id ?? "anonymous", skuId, quantity],
+    queryFn: () => npcTradeApi.sellPreview(accessToken!, skuId, quantity),
+    enabled: enabled && Boolean(accessToken && user && skuId && (quantity === "all" || quantity > 0)),
+    refetchOnMount: "always",
+    retry: false
+  });
+}
+
+/** 卖出成功后只让服务器真相失效；同一报价确认的网络重试复用同一个幂等键。 */
+export function useNpcSellMutation() {
+  const { accessToken, user } = useSession();
+  const queryClient = useQueryClient();
+  const intent = useRef<SellIntent | null>(null);
+  const mutation = useMutation({
+    mutationFn: async (input: Omit<SellIntent, "key">) => {
+      if (
+        !intent.current ||
+        intent.current.skuId !== input.skuId ||
+        intent.current.quoteId !== input.quoteId ||
+        intent.current.quoteVersion !== input.quoteVersion ||
+        intent.current.quantity !== input.quantity ||
+        intent.current.minUnitPrice !== input.minUnitPrice
+      ) intent.current = { key: createIdempotencyKey(), ...input };
+      return npcTradeApi.sell(accessToken!, input, intent.current.key);
+    },
+    onSuccess: () => {
+      if (user) {
+        void queryClient.invalidateQueries({ queryKey: ["archive", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["ledger", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["inventory", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["market", "quotes", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["market", "quote", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["market", "index", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["prices", "public-status", user.id] });
+      }
+      intent.current = null;
+    }
+  });
+  return { ...mutation, beginNewIntent: () => { intent.current = null; mutation.reset(); } };
 }

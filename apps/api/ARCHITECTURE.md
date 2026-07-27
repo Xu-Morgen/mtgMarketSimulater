@@ -95,6 +95,11 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 - 卖出预览支持正整数或 `quantity=all`；后者只在服务端解析当前 `availableQuantity`，再把解析后的正整数用于确认。锁定数量继续由订单/比赛所属模块持有，卖出命令不能释放、扣减或绕过任一 hold。
 - 确认包含 `minUnitPrice`，服务端拒绝低于确认下限的收购价。成功路径与买入同在一个短事务追加成交、账本、库存流水、事实/outbox、唯一重定价任务、审计和幂等响应；任一异常会回滚全部写入。
 
+## 库存卖出与估值投影（I16F）
+
+- `InventoryModule` 的只读 DTO 在 SQLite 查询中以当前持久化 `market_quotes` 投影服务端单张游戏内价、全部持有市值与未实现盈亏；计算只使用整数，市值按全部持有量（含订单/比赛锁定量）而非可用量展示。报价缺失时保留最近持仓估值，单张现价为 `null`；完全无估值时以明确不可用状态返回。
+- `/inventory` 的卖出入口只可提交数量或 `all` 意图给 Orders application。`all`、锁定量、费用、收入、最低价保护和最终库存全由 `NpcTradeService` 的预览/成交处理，浏览器不读取库存字段来扣减或计算盈亏。
+
 ## 补充包规则（I11B）
 
 - `modules/packs` 持有补充包商品、活动规则版本、卡位与候选池。`booster_pack_rules.definition_json` 是不可变完整规则快照；`booster_packs.active_rule_version` 仅选择其当前公示版本。MVP 数据模型与规则输入均不包含保底、计数器或跨包状态。

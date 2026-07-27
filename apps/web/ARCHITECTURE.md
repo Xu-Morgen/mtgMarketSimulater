@@ -88,6 +88,12 @@
 - `features/market/npc-buy-dialog.tsx` 仅收集数量并展示服务端 `NpcBuyPreviewDto`；它既不计算总价/费用/额度，也不接受浏览器传入的价格。确认期间的 UI 禁用与成功提示只反映 mutation 状态和 `NpcTradeDto`，随后使存档、库存、账本、市场与价格状态的 TanStack Query 缓存失效。
 - `tests/e2e/npc-buy.spec.ts` 覆盖桌面和窄屏的成交、重复点击、余额不足、额度、报价过期和重新预览；人工执行记录固定在 `tests/manual/I15F.md`。
 
+## I16F NPC 卖出与库存估值页面（2026-07-27）
+
+- `InventoryHoldingDto` 的 `marketUnitPrice`、`marketValue` 与 `unrealizedProfitLoss` 都来自服务端整数投影；`features/inventory/inventory-page.tsx` 只格式化显示单张现价、全部持仓市值和未实现盈亏，不在浏览器计算数量、成本或盈亏。锁定量仍分别展示，只有服务端标记可用的持仓才显示卖出入口。
+- `api/npc-trade-api.ts` 是卖出预览和成交的唯一前端入口。`all` 直接请求服务端预览，确认仅回传预览解析后的确切数量、报价标识、版本和最低单价；同一网络重试复用幂等键，重新预览才开始新意图。确认对话框另有同步锁，避免 React 禁用状态生效前的双击发送第二个 HTTP 请求。
+- `features/inventory/npc-sell-dialog.tsx` 显示服务端可用量、锁定说明、价格、费用、额度和错误语义；卖出成功仅使存档、账本、库存、市场和价格状态的 TanStack Query 缓存失效。`tests/e2e/npc-sell.spec.ts` 在桌面及窄屏覆盖 all/指定数量成交、锁定库存、数量不足、报价变化、重复点击和刷新；人工执行记录固定在 `tests/manual/I16F.md`。
+
 ## 不单独建层的内容
 
 - DTO、事件与 API 契约由共享 `packages/contracts` 提供，因此前端不建立会产生重复定义的 `types/` 层。

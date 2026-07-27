@@ -244,7 +244,12 @@ export interface InventoryDto {
   orderLockedQuantity: number;
   tournamentLockedQuantity: number;
   averageCost: Money;
+  /** 当前服务端报价投影的单张游戏内价；无可用报价时为 null。 */
+  marketUnitPrice: Money | null;
+  /** 当前服务端报价投影按全部持有量计算的市值；浏览器不得自行相乘。 */
   marketValue: Money | null;
+  /** 当前服务端市值减去全部持有成本的未实现盈亏；可为负数。 */
+  unrealizedProfitLoss: Money | null;
   updatedAt: string;
 }
 

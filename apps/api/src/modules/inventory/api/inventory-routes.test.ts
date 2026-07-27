@@ -20,6 +20,13 @@ function seed(database: ReturnType<typeof openSqliteDatabase>): void {
 }
 function testDatabase() { const directory = mkdtempSync(join(tmpdir(), "mtg-inventory-")); directories.push(directory); const database = openSqliteDatabase(join(directory, "test.db")); seed(database); return database; }
 
+function seedMarketQuote(database: ReturnType<typeof openSqliteDatabase>, skuId: string): void {
+  const now = "2026-07-27T00:00:00.000Z";
+  database.prepare("INSERT INTO price_sync_runs (id, source, source_version, prices_uri, mapping_uri, prices_checksum_sha256, mapping_checksum_sha256, status, mapped_skus, priced_skus, unpriced_skus, mapping_failed_skus, failure_reason, started_at, completed_at, checksum_verification, failure_code) VALUES ('run-1', 'mtgjson-cardmarket', 'fixture', 'https://example.test/prices', 'https://example.test/mapping', 'a', 'b', 'succeeded', 1, 1, 0, 0, NULL, ?, ?, 'verified', NULL)").run(now, now);
+  database.prepare("INSERT INTO price_snapshot_entries (id, sync_run_id, sku_id, mapping_id, mtgjson_uuid, finish, price_type, currency, price_amount, availability, unavailable_reason, captured_at, created_at) VALUES ('snapshot-1', 'run-1', ?, NULL, NULL, 'nonfoil', 'normal', 'EUR', 100, 'priced', NULL, ?, ?)").run(skuId, now, now);
+  database.prepare("INSERT INTO market_quotes (id, sku_id, price_snapshot_entry_id, trigger_key, rule_version, reference_price_eur_cents, market_price_amount, npc_buy_price_amount, npc_sell_price_amount, npc_buy_fee_amount, npc_sell_fee_amount, parameters_json, reasons_json, calculated_at, valid_until) VALUES ('quote-1', ?, 'snapshot-1', 'fixture', 'market/v1', 100, 150, 135, 165, 15, 15, '{}', '[]', ?, '2026-07-27T00:15:00.000Z')").run(skuId, now);
+}
+
 describe("I10B 库存、锁定与对账", () => {
   it("并发锁定、释放与扣减均不产生负数、超额锁定或幽灵库存", () => {
     const database = testDatabase(); const inventory = new InventoryService(database); const skuId = "11111111-1111-4111-8111-111111111111";
@@ -46,6 +53,18 @@ describe("I10B 库存、锁定与对账", () => {
     database.close();
   });
 
+  it("库存估值、单张现价和未实现盈亏均由服务端报价投影以整数返回", () => {
+    const database = testDatabase(); const inventory = new InventoryService(database); const skuId = "11111111-1111-4111-8111-111111111111";
+    inventory.acquire({ userId: "player-1", skuId, quantityDelta: 2, unitCostAmount: 100, reason: "fixture", correlationId: "fixture-valuation", now: "2026-07-27T00:01:00.000Z" });
+    seedMarketQuote(database, skuId);
+    expect(inventory.holding("player-1", skuId)).toMatchObject({
+      marketUnitPrice: { amount: 150, currency: "GAME_CREDIT" },
+      marketValue: { amount: 300, currency: "GAME_CREDIT" },
+      unrealizedProfitLoss: { amount: 100, currency: "GAME_CREDIT" }
+    });
+    database.close();
+  });
+
   it("库存总览、筛选、单卡持仓和对账 API 均只读取当前玩家数据", async () => {
     const database = testDatabase(); const skuId = "11111111-1111-4111-8111-111111111111";
     new InventoryService(database).acquire({ userId: "player-1", skuId, quantityDelta: 2, unitCostAmount: 100, reason: "fixture", correlationId: "fixture-1", now: "2026-07-24T00:01:00.000Z" });
@@ -61,7 +80,7 @@ describe("I10B 库存、锁定与对账", () => {
     expect(unauthorized.statusCode).toBe(401);
     expect(list.json()).toMatchObject({ ok: true, data: { page: { total: 1 } } });
     expect(list.json().data.items[0]).toMatchObject({ skuId, quantity: 2, availableQuantity: 2, averageCost: { amount: 100 } });
-    expect(detail.json()).toMatchObject({ ok: true, data: { holding: { skuId, marketValue: null, marketValueUnavailableReason: "no_snapshot" } } });
+    expect(detail.json()).toMatchObject({ ok: true, data: { holding: { skuId, marketUnitPrice: null, marketValue: null, unrealizedProfitLoss: null, marketValueUnavailableReason: "no_snapshot" } } });
     expect(reconciliation.json()).toMatchObject({ ok: true, data: { skuId, reconciled: true, entries: { items: [expect.objectContaining({ reason: "api_fixture" })] } } });
     await app.close(); database.close();
   });
