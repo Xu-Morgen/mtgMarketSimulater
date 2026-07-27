@@ -94,6 +94,14 @@
 - `api/npc-trade-api.ts` 是卖出预览和成交的唯一前端入口。`all` 直接请求服务端预览，确认仅回传预览解析后的确切数量、报价标识、版本和最低单价；同一网络重试复用幂等键，重新预览才开始新意图。确认对话框另有同步锁，避免 React 禁用状态生效前的双击发送第二个 HTTP 请求。
 - `features/inventory/npc-sell-dialog.tsx` 显示服务端可用量、锁定说明、价格、费用、额度和错误语义；卖出成功仅使存档、账本、库存、市场和价格状态的 TanStack Query 缓存失效。`tests/e2e/npc-sell.spec.ts` 在桌面及窄屏覆盖 all/指定数量成交、锁定库存、数量不足、报价变化、重复点击和刷新；人工执行记录固定在 `tests/manual/I16F.md`。
 
+## I17F 价格历史与市场曲线页面（2026-07-27）
+
+- 玩家导航新增 `/market/history`，`app/(player)/market/history/page.tsx` 仅组合 `features/market/price-history-page.tsx`，并用 Suspense 包裹 `useSearchParams`，避免整条路由退化为客户端渲染。
+- `api/market-api.ts` 新增 `usePriceHistoryQuery(skuId, range)` 与 `useMarketIndexHistoryQuery(range)`，只读本地 Fastify 的 `GET /v1/market/quotes/{skuId}/history` 与 `GET /v1/market/index/history`；TanStack Query key 按当前用户、skuId 与 `7d|30d|all` 隔离，`retry: false`。默认 30d 不强制写入 URL，仅当玩家切换时间范围或选中 SKU 时才把 `range`/`skuId` 写入 URL，刷新可恢复；不在浏览器插值、重算指数或汇率。
+- `components/market/price-history-chart.tsx` 是 ECharts（`echarts@^5.6.0`）canvas 双折线组件，`connectNulls: false` 让缺失参考价/游戏内价的自然日断线、不掩盖空态；`role="img"` 配合中文 `aria-label` 描述覆盖天数与两条货币轴。页面同时渲染同名只读降级表格，便于无障碍读屏与窄屏阅读。
+- 页面区分 Cardmarket EUR 参考价/指数（金色）与游戏内报价/指数（蓝色），并复用 `components/price-status.tsx` 的服务端来源、更新时间、过期状态与固定 disclaimer；`freshness=stale` 时显示“沿用最近成功快照；这不是实时 Cardmarket 价格。”，绝不渲染为空白或实时价格。空 points 显示“该 SKU/范围暂无历史快照”，查询失败显示错误重试。
+- `tests/e2e/price-history.spec.ts` 在桌面与 390 × 844 窄屏覆盖默认 30d、范围切换写 URL 与重查、单卡双曲线/降级表格/空历史、`stale` 旧价降级、查询失败重试与窄屏不阻断；人工执行记录固定在 `tests/manual/I17F.md`。
+
 ## 不单独建层的内容
 
 - DTO、事件与 API 契约由共享 `packages/contracts` 提供，因此前端不建立会产生重复定义的 `types/` 层。

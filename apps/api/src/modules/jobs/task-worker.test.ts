@@ -80,7 +80,7 @@ describe("I17B 每日价格同步调度", () => {
     const { database } = fixture();
     const day1 = new Date("2026-07-26T23:59:00.000Z");
     ensureDailyPriceSyncScheduled(database, day1);
-    let jobs = database.prepare("SELECT unique_key, type FROM jobs WHERE type = 'prices.sync'").all() as Array<{ unique_key: string; type: string }>;
+    const jobs = database.prepare("SELECT unique_key, type FROM jobs WHERE type = 'prices.sync'").all() as Array<{ unique_key: string; type: string }>;
     expect(jobs).toEqual([{ unique_key: "prices.sync:daily:2026-07-26", type: "prices.sync" }]);
     // 同日再次调用不应投递第二个任务。
     ensureDailyPriceSyncScheduled(database, new Date("2026-07-26T23:59:59.000Z"));

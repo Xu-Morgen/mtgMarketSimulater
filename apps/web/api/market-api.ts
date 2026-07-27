@@ -1,6 +1,6 @@
 "use client";
 
-import type { CardFinish, MarketQuoteListItemDto, Page, QuoteDto } from "@mtg-market/contracts";
+import type { CardFinish, MarketIndexHistoryDto, MarketQuoteListItemDto, Page, PriceHistoryDto, PriceHistoryRange, QuoteDto } from "@mtg-market/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "./client";
 import { useSession } from "../providers/session-provider";
@@ -27,7 +27,11 @@ function queryString(filters: MarketFilters): string {
 export const marketApi = {
   list: (accessToken: string, filters: MarketFilters) => apiRequest<Page<MarketQuoteListItemDto>>(`/v1/market/quotes?${queryString(filters)}`, { accessToken }),
   quote: (accessToken: string, skuId: string) => apiRequest<{ quote: QuoteDto }>(`/v1/market/quotes/${skuId}`, { accessToken }),
-  index: (accessToken: string) => apiRequest<MarketIndexDto>("/v1/market/index", { accessToken })
+  index: (accessToken: string) => apiRequest<MarketIndexDto>("/v1/market/index", { accessToken }),
+  /** I17F：按自然日采样的只追加历史；服务端决定 7d/30d/all 窗口与 null 缺失点，浏览器不插值。 */
+  history: (accessToken: string, skuId: string, range: PriceHistoryRange) => apiRequest<PriceHistoryDto>(`/v1/market/quotes/${skuId}/history?range=${range}`, { accessToken }),
+  /** I17F：全服指数历史；与单卡历史共用 range 语义。 */
+  indexHistory: (accessToken: string, range: PriceHistoryRange) => apiRequest<MarketIndexHistoryDto>(`/v1/market/index/history?range=${range}`, { accessToken })
 };
 
 export function useMarketQuotesQuery(filters: MarketFilters) {
@@ -57,6 +61,28 @@ export function useMarketQuoteQuery(skuId: string) {
     queryKey: ["market", "quote", user?.id ?? "anonymous", skuId],
     queryFn: () => marketApi.quote(accessToken!, skuId),
     enabled: Boolean(accessToken && user && skuId),
+    retry: false
+  });
+}
+
+/** I17F：单卡价格历史只读只追加的服务端按日采样；切换 SKU 或 range 才重新请求。 */
+export function usePriceHistoryQuery(skuId: string | null, range: PriceHistoryRange) {
+  const { accessToken, user } = useSession();
+  return useQuery({
+    queryKey: ["market", "price-history", user?.id ?? "anonymous", skuId, range],
+    queryFn: () => marketApi.history(accessToken!, skuId!, range),
+    enabled: Boolean(accessToken && user && skuId),
+    retry: false
+  });
+}
+
+/** I17F：市场指数历史；空 points 来自服务端“无历史”而非失败。 */
+export function useMarketIndexHistoryQuery(range: PriceHistoryRange) {
+  const { accessToken, user } = useSession();
+  return useQuery({
+    queryKey: ["market", "index-history", user?.id ?? "anonymous", range],
+    queryFn: () => marketApi.indexHistory(accessToken!, range),
+    enabled: Boolean(accessToken && user),
     retry: false
   });
 }
