@@ -1,3 +1,3 @@
-import { LoginPage } from "../../../pages/auth/login-page";
+import { LoginPage } from "../../../features/auth/login-page";
 
 export default function Page() { return <LoginPage />; }

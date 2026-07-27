@@ -1,4 +1,4 @@
-import { PackDetailPage } from "../../../../pages/packs/packs-page";
+import { PackDetailPage } from "../../../../features/packs/packs-page";
 
 export default async function PackDetailRoute({
   params

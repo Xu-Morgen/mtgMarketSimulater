@@ -1,3 +1,3 @@
-import { InventoryPage } from "../../../pages/inventory/inventory-page";
+import { InventoryPage } from "../../../features/inventory/inventory-page";
 
 export default function Page() { return <InventoryPage />; }

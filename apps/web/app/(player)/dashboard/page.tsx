@@ -1,3 +1,3 @@
-import { PlayerDashboardPage } from "../../../pages/dashboard/player-dashboard-page";
+import { PlayerDashboardPage } from "../../../features/dashboard/player-dashboard-page";
 
 export default function Page() { return <PlayerDashboardPage />; }

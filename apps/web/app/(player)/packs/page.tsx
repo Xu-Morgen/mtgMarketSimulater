@@ -1,4 +1,4 @@
-import { PacksPage } from "../../../pages/packs/packs-page";
+import { PacksPage } from "../../../features/packs/packs-page";
 
 export default function PacksRoute() {
   return <PacksPage />;

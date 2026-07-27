@@ -1,3 +1,3 @@
-import { CatalogSyncAdminPage } from "../../../pages/admin/catalog-sync-admin-page";
+import { CatalogSyncAdminPage } from "../../../features/admin/catalog-sync-admin-page";
 
 export default function Page() { return <CatalogSyncAdminPage />; }

@@ -1,4 +1,4 @@
-import { PackOpeningHistoryPage } from "../../../../pages/packs/packs-page";
+import { PackOpeningHistoryPage } from "../../../../features/packs/packs-page";
 
 export default function PackOpeningHistoryRoute() {
   return <PackOpeningHistoryPage />;

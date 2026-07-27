@@ -10,8 +10,8 @@ loadDotenv({ path: fileURLToPath(new URL("../.env", import.meta.url)) });
 const environment = loadApiConfig(process.env);
 
 const database = openDatabase(environment.SQLITE_PATH);
-const taskRunner = startTaskRunner(database, 1_000, createTaskRegistry(environment, database));
 const app = await createApiApp(environment, database);
+const taskRunner = startTaskRunner(database, 1_000, createTaskRegistry(environment, database, app.log));
 
 const close = async () => {
   await taskRunner.stop();

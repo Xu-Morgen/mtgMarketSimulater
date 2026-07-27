@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const password = "playwright-password-123";
 const now = "2026-07-24T08:00:00.000Z";
+const apiBaseUrl = process.env.PLAYWRIGHT_API_BASE_URL ?? "http://localhost:3001";
 const holding = {
   skuId: "30000000-0000-4000-8000-000000000081", quantity: 4, availableQuantity: 1, orderLockedQuantity: 2, tournamentLockedQuantity: 1,
   averageCost: { amount: 120 }, marketValue: null, updatedAt: now, marketValueUnavailableReason: "no_snapshot",
@@ -40,7 +41,7 @@ test("库存页显示服务端锁定量和无价原因，筛选排序分页均�
   await expect(page).toHaveURL(/sort=quantity/);
   await page.locator(".ant-pagination-item").filter({ hasText: "2" }).click();
   await expect(page).toHaveURL(/cursor=20/);
-  expect(urls.every((url) => url.startsWith("http://localhost:3001/v1/inventory?"))).toBe(true);
+  expect(urls.every((url) => url.startsWith(`${apiBaseUrl}/v1/inventory?`))).toBe(true);
 });
 
 test("库存空态、查询失败与刷新恢复均有明确反馈", async ({ page }) => {
@@ -53,7 +54,7 @@ test("库存空态、查询失败与刷新恢复均有明确反馈", async ({ pa
   await page.goto("/inventory");
   await expect(page.getByRole("heading", { name: "库存为空" })).toBeVisible({ timeout: 15_000 });
   response = "failed";
-  await page.getByRole("button", { name: "刷新" }).click();
+  await page.getByRole("button", { name: /刷\s*新/ }).click();
   await expect(page.getByRole("heading", { name: "库存加载失败" })).toBeVisible();
   response = "holding";
   await page.getByRole("button", { name: "重试" }).click();

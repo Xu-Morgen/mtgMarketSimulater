@@ -28,6 +28,7 @@
 - 管理员以新的 `Idempotency-Key` 调用 `POST /v1/admin/prices/sync`，再通过 `GET /v1/admin/prices/sync` 或通用 jobs API 观察运行。可选的两个 expected checksum 仅用于已获准的版本固定导入；不匹配、下载、gzip/JSON、映射或 SQLite 失败都会追加 `failed` 运行和任务错误摘要。
 - 成功运行会追加映射与每 SKU 快照，`price_sync_state` 才移动到该运行；无 Cardmarket EUR 正价、零价、缺失或歧义映射均明确标为不可新增交易。失败时不得删除 `price_snapshot_entries`、修改 state 指针、手工改 `tradable` 或把兜底价写成 Cardmarket 价；修复外部输入后重新投递任务。
 - 若管理状态的 `checksumBypassAvailable` 为真，页面会要求管理员明确确认后提交 `{ "allowChecksumMismatch": true }`。这是上游文件与侧车 SHA-256 不一致时的最后手段：先保存失败运行与请求 ID，再确认审计中的操作者、任务 ID 和 `price_sync.checksum_bypass_requested` 事实。覆写成功会标记为 `bypassed`；不得用直接改库或普通任务绕过该确认条件。
+- 每次失败会在服务端结构化日志输出 `price_sync.validation_failed`（校验阶段）或 `price_sync.failed`（写入阶段），其中包含 `syncRunId`、任务 `jobId`/`attempt`、来源版本、校验文件及预期/实际 SHA-256；不输出下载 URL、Provider 原始响应、密钥或 Cookie。排障先以这些批次标识关联 `price_sync_runs`、`jobs` 与 `job_runs`，再决定是否重新投递或执行已受限的 checksum 覆写。
 
 ## I30B 管理活动与玩家补偿（计划）
 
@@ -36,3 +37,9 @@
 - 发布活动前保存服务端预览结果，核对活动/预览版本、UTC 生效区间、作用范围、影响上限与冲突。发布、暂停、结束后记录请求 ID、活动版本、审计记录和关联 `market.reprice` 任务；失败或版本冲突时不得直接改活动表或外部价格快照。
 - 冻结/解冻玩家、撤销会话或执行余额/库存补偿前，核对用户 ID、当前状态和影响摘要。补偿必须保留原因、原记录关联、幂等键、新流水及审计；禁止设置最终余额/库存、删除旧流水或跨模块直接修表。
 - 排障从只读、脱敏日志按请求 ID、操作者、用户、实体或任务关联追踪。日志页面和运维流程都不得显示密码哈希、令牌、Cookie、密钥或敏感 Provider 原文，也不得删除审计记录。
+- I30B 的 MTGJSON 系列/密封产品/补充包导入只能创建待审核草稿：先核对下载版本、SHA-256、Scryfall 系列/SKU 映射、缺失项和服务端预览，再以新的幂等键发布。虚拟币价格、启用范围和运营文案必须由管理员填写；不得把外部密封产品价格、原始 URL 或未审核卡表直接发布给玩家，亦不得通过数据库手工修改已发布规则。
+
+## I17B MTGJSON 历史价格回填（计划）
+
+- 该能力使用独立的管理员幂等意图读取 `AllPrices`，仅补齐本地缺失的历史日期；执行前核对来源版本、SHA-256 和预计日期范围，执行后核对插入/跳过/无价/映射失败统计及审计。它不替代每日 `prices.sync`、不移动最近成功同步指针，也不为每个历史日期重复执行市场重定价。
+- checksum、解析、映射或 SQLite 失败时，停止并保留原有快照与每日同步状态；待修复后以新幂等键重试。禁止手工写入或覆盖 `price_snapshot_entries` 来伪造历史价格。

@@ -1,12 +1,12 @@
 # 前端项目架构
 
-`apps/web` 使用 Next.js App Router。`app/` 仅定义路由段、布局、加载/错误边界与页面入口；它不承载业务数据请求、界面状态或复杂展示逻辑。路由入口应组合 `pages/` 中的页面模块。
+`apps/web` 使用 Next.js App Router。`app/` 仅定义路由段、布局、加载/错误边界与页面入口；它不承载业务数据请求、界面状态或复杂展示逻辑。路由入口应组合 `features/` 中的页面模块。`features/` 不能命名为 `pages/`，避免被 Next 识别为旧 Pages Router。
 
 ## 分层目录
 
 | 目录 | 职责 | 依赖方向 |
 | --- | --- | --- |
-| `pages/` | 面向业务场景的页面编排与路由入口可复用的页面模块。 | 可依赖 `components`、`stores`、`api`、`constants`、`utils`。 |
+| `features/` | 面向业务场景的页面编排与路由入口可复用的页面模块。 | 可依赖 `components`、`stores`、`api`、`constants`、`utils`。 |
 | `components/` | 可复用的展示组件、React Hook Form + Zod 表单组件、业务组件与图表/动画封装。 | 可依赖 `stores`、`constants`、`utils`；服务端数据由页面注入，或由明确的查询组件读取。 |
 | `stores/` | Zustand 的瞬时 UI 状态，例如筛选、界面偏好、开包动画和未提交的卡组草稿。 | 只依赖 `constants`、`utils`；不得存放服务器真相。 |
 | `api/` | API 客户端、请求封装、TanStack Query 的 query/mutation 配置及共享 contracts 类型的适配。 | 可依赖 `constants`、`utils` 与共享 `contracts` 包。 |
@@ -25,7 +25,7 @@
 
 ## 计划中的页面模块
 
-`pages/` 将按业务域建立 `auth`、`dashboard`、`catalog`、`packs`、`inventory`、`market`、`orders`、`decks`、`tournaments` 与 `admin`。其中买单/卖单确认是独立页面流程，必须读取服务端预览并二次确认。
+`features/` 将按业务域建立 `auth`、`dashboard`、`catalog`、`packs`、`inventory`、`market`、`orders`、`decks`、`tournaments` 与 `admin`。其中买单/卖单确认是独立页面流程，必须读取服务端预览并二次确认。
 
 `app/` 使用公开、玩家和管理员路由组组合这些页面模块。`admin` 至少拆分为首页、活动、玩家、内容/参数、任务/Agent 和日志页面；管理员布局负责导航与无权限/会话过期体验，但所有 `/v1/admin/*` 请求仍由 API 复核 `admin` 角色。
 
@@ -49,12 +49,12 @@
 
 - `api/archive-api.ts` 集中定义存档、账本的 contracts 查询与创建 mutation；创建意图在完成前复用同一 `Idempotency-Key`，成功后以服务端存档响应更新查询缓存并失效账本缓存。
 - 存档、账本等用户私有查询的 TanStack Query key 必须包含 `userId`；登录、注册和退出会清空查询缓存，禁止跨会话展示玩家或管理端服务器数据。
-- `pages/dashboard/player-dashboard-page.tsx` 只格式化 API 返回的整数金额，展示存档摘要、总额/可用额/冻结额、净资产占位和服务端游标分页账本；未建档、加载、失败重试、空账本、创建中与窄屏表格状态均在页面覆盖。
+- `features/dashboard/player-dashboard-page.tsx` 只格式化 API 返回的整数金额，展示存档摘要、总额/可用额/冻结额、净资产占位和服务端游标分页账本；未建档、加载、失败重试、空账本、创建中与窄屏表格状态均在页面覆盖。
 
 ## I08F 卡牌目录与详情页面（2026-07-24）
 
 - `api/catalog-api.ts` 集中定义目录列表与详情的只读 TanStack Query；请求只面向本地 `/v1/catalog/*`，查询键按登录用户和完整 URL 筛选条件隔离。
-- `pages/catalog/catalog-page.tsx` 将名称、系列、稀有度、工艺和游标保存在 URL，使用服务端分页结果展示每个独立 SKU；详情页保留印刷、工艺、来源、合法性及本地图片缓存状态，缺图时文字降级而不访问外部 URL。
+- `features/catalog/catalog-page.tsx` 将名称、系列、稀有度、工艺和游标保存在 URL，使用服务端分页结果展示每个独立 SKU；详情页保留印刷、工艺、来源、合法性及本地图片缓存状态，缺图时文字降级而不访问外部 URL。
 - 玩家导航新增 `/catalog`。Playwright 夹具在隔离 SQLite 中提供同名不同印刷和工艺 SKU；I08F 用例覆盖目录分页、筛选恢复、无结果、接口失败与窄屏。
 
 ## I11F 补充包概率公示页面（2026-07-26）

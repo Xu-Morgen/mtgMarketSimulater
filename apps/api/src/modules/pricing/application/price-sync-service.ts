@@ -1,18 +1,29 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { withinTransaction } from "@mtg-market/database";
-import { MtgjsonChecksumMismatchError, type MtgjsonClient, type MtgjsonPriceSource } from "../../../platform/external/mtgjson/mtgjson-client.js";
+import { MtgjsonChecksumMismatchError, type MtgjsonChecksumFile, type MtgjsonClient, type MtgjsonPriceSource } from "../../../platform/external/mtgjson/mtgjson-client.js";
 
 type SyncPayload = { expectedPricesChecksumSha256?: string; expectedMappingChecksumSha256?: string; allowChecksumMismatch?: boolean };
 type SyncRow = { id: string; source_version: string; prices_checksum_sha256: string; mapping_checksum_sha256: string; status: "running" | "succeeded" | "failed"; checksum_verification: "verified" | "bypassed" | "not_verified"; mapped_skus: number; priced_skus: number; unpriced_skus: number; mapping_failed_skus: number; failure_code: "CHECKSUM_MISMATCH" | null; failure_reason: string | null; started_at: string; completed_at: string | null };
 type CatalogSku = { id: string; scryfall_id: string; finish: "nonfoil" | "foil" | "etched" };
 export type PriceSyncStatus = { latestSuccessful: SyncRow | null; current: SyncRow | null };
+export type PriceSyncExecutionContext = { jobId?: string; attempt?: number };
+export type PriceSyncLogger = { error: (bindings: Record<string, unknown>, message: string) => void };
+
+type PriceSyncStage = "download_or_parse" | "expected_checksum" | "persist";
+type PriceSyncFailureDetail = { stage: "provider_checksum" | "expected_checksum" | PriceSyncStage; file: MtgjsonChecksumFile | null; expectedChecksumSha256: string | null; actualChecksumSha256: string | null };
+
+class ExpectedChecksumMismatchError extends Error {
+  constructor(readonly file: MtgjsonChecksumFile, readonly expectedChecksumSha256: string, readonly actualChecksumSha256: string) { super(`MTGJSON ${file} checksum 与管理员指定版本不匹配`); this.name = "ExpectedChecksumMismatchError"; }
+}
+
+const silentLogger: PriceSyncLogger = { error: () => undefined };
 
 function cents(value: number): number { const result = Math.round((value + Number.EPSILON) * 100); if (!Number.isSafeInteger(result) || result <= 0) throw new Error("Cardmarket EUR 价格必须是正的安全欧分整数"); return result; }
 
 /** 价格导入不会修改既有快照：只有完整校验后的本次运行才在一笔事务中追加快照并物化可交易状态。 */
 export class PriceSyncService {
-  constructor(private readonly database: Database.Database, private readonly client: MtgjsonClient) {}
+  constructor(private readonly database: Database.Database, private readonly client: MtgjsonClient, private readonly logger: PriceSyncLogger = silentLogger) {}
 
   status(): PriceSyncStatus {
     const current = this.database.prepare("SELECT * FROM price_sync_runs ORDER BY started_at DESC, rowid DESC LIMIT 1").get() as SyncRow | undefined;
@@ -20,18 +31,32 @@ export class PriceSyncService {
     return { latestSuccessful: latest ?? null, current: current ?? null };
   }
 
-  async synchronize(payload: SyncPayload = {}): Promise<void> {
+  async synchronize(payload: SyncPayload = {}, context: PriceSyncExecutionContext = {}): Promise<void> {
     const startedAt = new Date().toISOString(); const runId = randomUUID(); let source: MtgjsonPriceSource | null = null;
+    let stage: PriceSyncStage = "download_or_parse";
     try {
       source = await this.client.download({ allowChecksumMismatch: payload.allowChecksumMismatch === true });
-      if (payload.expectedPricesChecksumSha256 && payload.expectedPricesChecksumSha256 !== source.pricesChecksumSha256) throw new Error("MTGJSON AllPricesToday checksum 不匹配");
-      if (payload.expectedMappingChecksumSha256 && payload.expectedMappingChecksumSha256 !== source.mappingChecksumSha256) throw new Error("MTGJSON AllPrintings checksum 不匹配");
+      stage = "expected_checksum";
+      if (payload.expectedPricesChecksumSha256 && payload.expectedPricesChecksumSha256 !== source.pricesChecksumSha256) throw new ExpectedChecksumMismatchError("AllPricesToday", payload.expectedPricesChecksumSha256, source.pricesChecksumSha256);
+      if (payload.expectedMappingChecksumSha256 && payload.expectedMappingChecksumSha256 !== source.mappingChecksumSha256) throw new ExpectedChecksumMismatchError("AllPrintings", payload.expectedMappingChecksumSha256, source.mappingChecksumSha256);
+      stage = "persist";
       const counts = withinTransaction(this.database, () => this.appendSnapshot(runId, source!, startedAt));
       this.database.prepare("UPDATE price_sync_runs SET status = 'succeeded', mapped_skus = ?, priced_skus = ?, unpriced_skus = ?, mapping_failed_skus = ?, completed_at = ? WHERE id = ?").run(counts.mapped, counts.priced, counts.unpriced, counts.mappingFailed, new Date().toISOString(), runId);
       this.database.prepare("INSERT INTO price_sync_state (singleton, latest_successful_run_id, updated_at) VALUES (1, ?, ?) ON CONFLICT(singleton) DO UPDATE SET latest_successful_run_id = excluded.latest_successful_run_id, updated_at = excluded.updated_at").run(runId, new Date().toISOString());
     } catch (error) {
       const reason = (error instanceof Error ? error.message : String(error)).slice(0, 1000);
       const failureCode = error instanceof MtgjsonChecksumMismatchError ? error.code : null;
+      const validation = failureDetail(error, stage);
+      this.logger.error({
+        event: validation.stage === "persist" ? "price_sync.failed" : "price_sync.validation_failed",
+        syncRunId: runId,
+        jobId: context.jobId ?? null,
+        attempt: context.attempt ?? null,
+        sourceVersion: source?.version ?? null,
+        validation,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        errorMessage: reason
+      }, "MTGJSON 价格同步失败");
       this.database.prepare("INSERT INTO price_sync_runs (id, source, source_version, prices_uri, mapping_uri, prices_checksum_sha256, mapping_checksum_sha256, status, checksum_verification, failure_code, failure_reason, started_at, completed_at) VALUES (?, 'mtgjson-cardmarket', ?, ?, ?, ?, ?, 'failed', 'not_verified', ?, ?, ?, ?)").run(runId, source?.version ?? "unavailable", source?.pricesUri ?? "unavailable", source?.mappingUri ?? "unavailable", source?.pricesChecksumSha256 ?? "unavailable", source?.mappingChecksumSha256 ?? "unavailable", failureCode, reason, startedAt, new Date().toISOString());
       throw error;
     }
@@ -55,4 +80,10 @@ export class PriceSyncService {
     }
     return { mapped, priced, unpriced, mappingFailed };
   }
+}
+
+function failureDetail(error: unknown, stage: PriceSyncStage): PriceSyncFailureDetail {
+  if (error instanceof MtgjsonChecksumMismatchError) return { stage: "provider_checksum", file: error.file, expectedChecksumSha256: error.expectedChecksumSha256, actualChecksumSha256: error.actualChecksumSha256 };
+  if (error instanceof ExpectedChecksumMismatchError) return { stage: "expected_checksum", file: error.file, expectedChecksumSha256: error.expectedChecksumSha256, actualChecksumSha256: error.actualChecksumSha256 };
+  return { stage, file: null, expectedChecksumSha256: null, actualChecksumSha256: null };
 }

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { openSqliteDatabase } from "@mtg-market/database";
 import { MtgjsonChecksumMismatchError, MtgjsonClient, type MtgjsonPriceSource } from "../../../platform/external/mtgjson/mtgjson-client.js";
-import { PriceSyncService } from "./price-sync-service.js";
+import { type PriceSyncLogger, PriceSyncService } from "./price-sync-service.js";
 
 const directories: string[] = [];
 afterEach(() => directories.splice(0).forEach((directory) => rmSync(directory, { recursive: true, force: true })));
@@ -24,7 +24,7 @@ function database() {
 function source(overrides: Partial<MtgjsonPriceSource> = {}): MtgjsonPriceSource {
   return { version: "5.3.0+fixture", pricesUri: "https://fixture.test/prices", mappingUri: "https://fixture.test/printings", pricesChecksumSha256: "a".repeat(64), mappingChecksumSha256: "b".repeat(64), checksumVerification: "verified", mappings: ["nonfoil", "foil", "etched"].map((finish) => ({ scryfallId, finish: finish as "nonfoil" | "foil" | "etched", mtgjsonUuid: uuid })), prices: new Map([[`${uuid}:normal`, { priceType: "normal" as const, currency: "EUR", amount: 1.23 }], [`${uuid}:foil`, { priceType: "foil" as const, currency: "EUR", amount: 4.56 }], [`${uuid}:etched`, { priceType: "etched" as const, currency: "EUR", amount: 7.89 }]]), ...overrides };
 }
-function service(db: ReturnType<typeof database>, current: MtgjsonPriceSource) { return new PriceSyncService(db, { download: async () => current } as unknown as MtgjsonClient); }
+function service(db: ReturnType<typeof database>, current: MtgjsonPriceSource, logger?: PriceSyncLogger) { return new PriceSyncService(db, { download: async () => current } as unknown as MtgjsonClient, logger); }
 
 describe("I13B MTGJSON Cardmarket 价格快照", () => {
   it("以版本固定夹具映射 normal/foil/etched，取最新日期的 EUR Trend retail 值并追加不可变快照", async () => {
@@ -52,6 +52,33 @@ describe("I13B MTGJSON Cardmarket 价格快照", () => {
     await expect(sync.synchronize({ expectedPricesChecksumSha256: "0".repeat(64) })).rejects.toThrow("checksum");
     db.exec("CREATE TRIGGER interrupt_price_snapshot BEFORE INSERT ON price_snapshot_entries BEGIN SELECT RAISE(ABORT, 'fixture interruption'); END;"); await expect(sync.synchronize()).rejects.toThrow("fixture interruption");
     expect(sync.status().latestSuccessful?.id).toBe(firstRun); expect(db.prepare("SELECT COUNT(*) AS count FROM price_snapshot_entries").get()).toEqual({ count: 3 }); expect(db.prepare("SELECT COUNT(*) AS count FROM price_sync_runs WHERE status = 'failed'").get()).toEqual({ count: 2 }); db.close();
+  });
+
+  it("在控制台记录校验失败的批次、任务、文件和预期/实际 checksum", async () => {
+    const db = database(); const events: Array<{ bindings: Record<string, unknown>; message: string }> = [];
+    const logger: PriceSyncLogger = { error: (bindings, message) => events.push({ bindings, message }) };
+    const client = { download: async () => { throw new MtgjsonChecksumMismatchError("AllPrintings", "a".repeat(64), "b".repeat(64)); } } as unknown as MtgjsonClient;
+    await expect(new PriceSyncService(db, client, logger).synchronize({}, { jobId: "50000000-0000-4000-8000-000000000001", attempt: 2 })).rejects.toThrow("checksum");
+    expect(events).toEqual([{
+      message: "MTGJSON 价格同步失败",
+      bindings: expect.objectContaining({
+        event: "price_sync.validation_failed", jobId: "50000000-0000-4000-8000-000000000001", attempt: 2, sourceVersion: null,
+        validation: { stage: "provider_checksum", file: "AllPrintings", expectedChecksumSha256: "a".repeat(64), actualChecksumSha256: "b".repeat(64) },
+        errorName: "MtgjsonChecksumMismatchError", errorMessage: "MTGJSON AllPrintings 文件 checksum 不匹配", syncRunId: expect.any(String)
+      })
+    }]);
+    db.close();
+  });
+
+  it("记录管理员指定 checksum 与下载批次实际值不一致的对应文件", async () => {
+    const db = database(); const events: Array<Record<string, unknown>> = [];
+    const logger: PriceSyncLogger = { error: (bindings) => events.push(bindings) };
+    await expect(service(db, source(), logger).synchronize({ expectedPricesChecksumSha256: "0".repeat(64) }, { jobId: "50000000-0000-4000-8000-000000000002", attempt: 1 })).rejects.toThrow("管理员指定版本");
+    expect(events[0]).toEqual(expect.objectContaining({
+      event: "price_sync.validation_failed", jobId: "50000000-0000-4000-8000-000000000002", attempt: 1, sourceVersion: "5.3.0+fixture",
+      validation: { stage: "expected_checksum", file: "AllPricesToday", expectedChecksumSha256: "0".repeat(64), actualChecksumSha256: "a".repeat(64) }
+    }));
+    db.close();
   });
 
   it("只有显式 checksum 覆写才接受未验证下载，并持久化 bypassed 审计状态", async () => {

@@ -6,6 +6,7 @@ import { createCatalogSyncService } from "./modules/catalog/api/catalog-routes.j
 import { CatalogImageCacheService, type CatalogImageCacheRequest } from "./modules/catalog/application/catalog-image-cache-service.js";
 import { CatalogImageCache } from "./platform/external/scryfall/scryfall-bulk-client.js";
 import { createPriceSyncService } from "./modules/pricing/api/pricing-routes.js";
+import type { PriceSyncLogger } from "./modules/pricing/application/price-sync-service.js";
 
 export interface TaskRunner {
   stop(): Promise<void>;
@@ -35,12 +36,12 @@ export function startTaskRunner(database: Database.Database, intervalMs = 1_000,
 }
 
 /** 业务处理器在应用层注册；jobs 模块只负责领取、重试与运行历史。 */
-export function createTaskRegistry(config: ApiConfig, database: Database.Database): TaskRegistry {
+export function createTaskRegistry(config: ApiConfig, database: Database.Database, priceSyncLogger?: PriceSyncLogger): TaskRegistry {
   const registry = new TaskRegistry(); const catalog = createCatalogSyncService(config, database);
   const images = new CatalogImageCacheService(database, new CatalogImageCache(config.CATALOG_DATA_DIR, config.SCRYFALL_USER_AGENT));
   registry.register("catalog.sync", async (payload) => catalog.synchronize((payload ?? {}) as { expectedChecksumSha256?: string }));
   registry.register("catalog.image-cache", async (payload) => images.cache(payload as CatalogImageCacheRequest));
-  const prices = createPriceSyncService(config, database);
-  registry.register("prices.sync", async (payload) => prices.synchronize((payload ?? {}) as { expectedPricesChecksumSha256?: string; expectedMappingChecksumSha256?: string }));
+  const prices = createPriceSyncService(config, database, priceSyncLogger);
+  registry.register("prices.sync", async (payload, context) => prices.synchronize((payload ?? {}) as { expectedPricesChecksumSha256?: string; expectedMappingChecksumSha256?: string; allowChecksumMismatch?: boolean }, context));
   return registry;
 }

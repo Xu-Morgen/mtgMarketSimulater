@@ -9,7 +9,7 @@ import { failure, success } from "../../../shared/http/api-response.js";
 import { requireRole } from "../../auth/api/auth-routes.js";
 import { toJobDto } from "../../jobs/application/task-service.js";
 import { SqliteJobRepository } from "../../jobs/infrastructure/sqlite-job-repository.js";
-import { PriceSyncService } from "../application/price-sync-service.js";
+import { type PriceSyncLogger, PriceSyncService } from "../application/price-sync-service.js";
 
 const syncBodySchema = z.object({ expectedPricesChecksumSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(), expectedMappingChecksumSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(), allowChecksumMismatch: z.literal(true).optional() }).strict();
 
@@ -26,7 +26,7 @@ function publicStatus(status: ReturnType<PriceSyncService["status"]>): PublicPri
 }
 function checksumBypassAvailable(status: ReturnType<PriceSyncService["status"]>): boolean { return status.current?.status === "failed" && status.current.failure_code === "CHECKSUM_MISMATCH"; }
 
-export function createPriceSyncService(config: ApiConfig, database: Database.Database): PriceSyncService { return new PriceSyncService(database, new MtgjsonClient(config.MTGJSON_PRICES_ENDPOINT, config.MTGJSON_PRINTINGS_ENDPOINT, config.MTGJSON_USER_AGENT)); }
+export function createPriceSyncService(config: ApiConfig, database: Database.Database, logger?: PriceSyncLogger): PriceSyncService { return new PriceSyncService(database, new MtgjsonClient(config.MTGJSON_PRICES_ENDPOINT, config.MTGJSON_PRINTINGS_ENDPOINT, config.MTGJSON_USER_AGENT), logger); }
 
 export async function registerPricingRoutes(app: FastifyInstance, config: ApiConfig, database: Database.Database): Promise<void> {
   const sync = createPriceSyncService(config, database);

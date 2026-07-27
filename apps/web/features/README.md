@@ -1,4 +1,4 @@
-# 页面层（pages）
+# 页面特性层（features）
 
 本层以用户可感知的业务场景组织页面模块：认证、仪表盘、卡牌目录、补充包、库存、市场、订单/双边委托确认、卡组、比赛和管理后台。每个模块负责页面布局、加载/空/错误/无权限/过期状态编排、权限入口体验和将查询数据传给组件。
 
@@ -12,6 +12,6 @@
 
 `packs/packs-page.tsx` 通过 `api/packs-api.ts` 读取 I11B 已发布的补充包配置，并在 `/packs` 与 `/packs/<packId>` 分别展示列表和卡位概率详情。I12F 在 `/packs` 读取服务端购买预览并只提交其规则版本，成功后以服务端 `PackOpeningDto` 显示可跳过动画和单次结果；`/packs/history` 只读取服务端已结算记录。页面只格式化服务端返回的价格、规则版本、启用/禁用状态和 basis points；不暴露候选池、种子、保底状态，也不抽卡或生成结果。
 
-Next.js 的 `app/` 路由文件只负责路由协议和框架边界，应从本层引入对应的页面模块。建议的后续目录为 `auth/`、`dashboard/`、`catalog/`、`packs/`、`inventory/`、`market/`、`orders/`、`decks/`、`tournaments/`、`admin/`。
+Next.js 的 `app/` 路由文件只负责路由协议和框架边界，应从本层引入对应的页面模块。本层不能使用 Next 保留目录名 `pages/`，以免被识别为旧 Pages Router。建议的后续目录为 `auth/`、`dashboard/`、`catalog/`、`packs/`、`inventory/`、`market/`、`orders/`、`decks/`、`tournaments/`、`admin/`。
 
 `admin/` 至少包含后台首页、活动、玩家、内容/参数、任务/Agent 和日志页面。管理页面只提交服务端预览和显式管理命令；不能直接编辑最终余额/库存、修改外部快照或删除日志。前端路由判断只改善体验，Fastify `/v1/admin/*` 的角色检查才是授权边界。
