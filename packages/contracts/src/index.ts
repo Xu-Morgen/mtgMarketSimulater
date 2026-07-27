@@ -533,6 +533,65 @@ export interface BilateralOrderDto {
   updatedAt: string;
 }
 
+/** P2P 委托限价有效范围；锚点为当前 market_quotes.market_price，浏览器不得自行重算。 */
+export interface BilateralOrderLimitBandDto {
+  /** 锚点市场中间价，整数最小货币单位。 */
+  marketPrice: Money;
+  min: Money;
+  max: Money;
+  /** 服务端配置的限价带宽度（bp）；10_000 = 1:1。 */
+  limitPriceBandBasisPoints: number;
+}
+
+/** I18B 下双边委托的服务端预览；客户端不可编造费用、保证金或限价带。 */
+export interface BilateralOrderPreviewDto {
+  skuId: string;
+  side: OrderSide;
+  quantity: number;
+  /** 仅卖单填充：当前可用于挂卖单的可用库存（不含订单/比赛锁定）。 */
+  availableQuantity?: number;
+  quoteId: string;
+  quoteVersion: string;
+  /** 服务端规则在该预览中实际采用的费用拆分；买单 order_fee 已计入 reservedFunds，卖单只预占 fulfillment_deposit。 */
+  fees: FeeDto[];
+  /** 买单：数量*限价+order_fee；卖单：fulfillment_deposit。 */
+  reservedFunds: Money;
+  /** 买单：预计支出；卖单：按限价计算的预计到手（未扣 order_fee，后者在 I19B/I20B 履约时结算）。 */
+  estimatedAmount: Money;
+  limitBand: BilateralOrderLimitBandDto;
+  /** 服务端计算的预览版本；创建必须回传未过期的该值，且与 quoteVersion 一致。 */
+  previewVersion: string;
+  validUntil: string;
+  limit: {
+    maxQuantityPerOrder: number;
+    maxQuantityPerUserSkuDay: number;
+    remainingQuantityToday: number;
+    ttlSeconds: number;
+  };
+  canPlace: boolean;
+  unavailableReason:
+    | "archive_required"
+    | "insufficient_balance"
+    | "insufficient_inventory"
+    | "trade_limit_reached"
+    | null;
+}
+
+/** I18B 只读订单簿条目；价格-时间优先顺序由服务端返回，不含用户身份。 */
+export interface BilateralOrderBookLevelDto {
+  limitPrice: Money;
+  remainingQuantity: number;
+  orderCount: number;
+}
+
+export interface BilateralOrderBookDto {
+  skuId: string;
+  bids: BilateralOrderBookLevelDto[];
+  asks: BilateralOrderBookLevelDto[];
+  /** 订单簿数据截至时间；连接失败时浏览器应提示可能过期。 */
+  capturedAt: string;
+}
+
 export interface TournamentResult {
   tournamentId: string;
   playerId: string;

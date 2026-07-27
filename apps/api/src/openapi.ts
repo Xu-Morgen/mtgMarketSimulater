@@ -15,6 +15,14 @@ export const publicApiPaths = [
   "/v1/npc-trades/buy/{skuId}",
   "/v1/npc-trades/sell/{skuId}/preview",
   "/v1/npc-trades/sell/{skuId}",
+  "/v1/orders/buy/{skuId}/preview",
+  "/v1/orders/sell/{skuId}/preview",
+  "/v1/orders/buy/{skuId}",
+  "/v1/orders/sell/{skuId}",
+  "/v1/orders",
+  "/v1/orders/{orderId}",
+  "/v1/orders/{orderId}/cancel",
+  "/v1/orders/book/{skuId}",
   "/v1/auth/register",
   "/v1/auth/login",
   "/v1/auth/refresh",
@@ -101,6 +109,54 @@ export const openApiDocument = {
       post: {
         summary: "以最低可接受价和幂等键确认 NPC 卖出",
         responses: { "201": { description: "成交已结算" }, "200": { description: "幂等重放" }, "400": { description: "请求无效或缺少幂等键" }, "404": { description: "无可结算报价" }, "409": { description: "报价过期、库存不足、额度或幂等冲突" } }
+      }
+    },
+    "/v1/orders/buy/{skuId}/preview": {
+      get: {
+        summary: "取得服务端双边买单预览、限价带、费用、预计支出与预览版本",
+        responses: { "200": { description: "买单预览" }, "404": { description: "无可结算报价" }, "409": { description: "报价已过期" } }
+      }
+    },
+    "/v1/orders/sell/{skuId}/preview": {
+      get: {
+        summary: "取得服务端双边卖单预览、可用库存、保证金、预计到手与预览版本",
+        responses: { "200": { description: "卖单预览" }, "404": { description: "无可结算报价" }, "409": { description: "报价已过期" } }
+      }
+    },
+    "/v1/orders/buy/{skuId}": {
+      post: {
+        summary: "以未过期预览版本、限价和幂等键创建买单并原子预占资金",
+        responses: { "201": { description: "委托已创建" }, "200": { description: "幂等重放" }, "400": { description: "请求无效或缺少幂等键" }, "404": { description: "无可结算报价" }, "409": { description: "预览/报价过期、余额不足、额度、限价越界或幂等冲突" } }
+      }
+    },
+    "/v1/orders/sell/{skuId}": {
+      post: {
+        summary: "以未过期预览版本、限价和幂等键创建卖单并锁定库存、预占保证金",
+        responses: { "201": { description: "委托已创建" }, "200": { description: "幂等重放" }, "400": { description: "请求无效或缺少幂等键" }, "404": { description: "无可结算报价" }, "409": { description: "预览/报价过期、库存不足、额度、限价越界或幂等冲突" } }
+      }
+    },
+    "/v1/orders": {
+      get: {
+        summary: "分页查询当前玩家的双边委托",
+        responses: { "200": { description: "委托分页" }, "401": { description: "认证无效或过期" } }
+      }
+    },
+    "/v1/orders/{orderId}": {
+      get: {
+        summary: "查询当前玩家的某个双边委托详情",
+        responses: { "200": { description: "委托详情" }, "404": { description: "未找到该委托" } }
+      }
+    },
+    "/v1/orders/{orderId}/cancel": {
+      post: {
+        summary: "以幂等键撤单并释放未成交资金、库存与保证金预占",
+        responses: { "200": { description: "已撤单或幂等重放" }, "400": { description: "缺少幂等键" }, "404": { description: "未找到该委托" }, "409": { description: "状态不可撤或幂等冲突" } }
+      }
+    },
+    "/v1/orders/book/{skuId}": {
+      get: {
+        summary: "查询某个 SKU 的只读双边订单簿",
+        responses: { "200": { description: "订单簿" }, "401": { description: "认证无效或过期" } }
       }
     },
     "/v1/auth/register": {

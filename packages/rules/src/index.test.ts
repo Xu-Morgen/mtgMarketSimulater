@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { INITIAL_FUNDING, INITIAL_FUNDING_RULE_VERSION, MARKET_RULE_VERSION, calculateMarketQuote, marketQuoteValidUntil, openPack, packSlotProbabilities, propagateMarketPressure, resolveInitialFunding, type PackRuleInput } from "./index.js";
+import { INITIAL_FUNDING, INITIAL_FUNDING_RULE_VERSION, MARKET_RULE_VERSION, ORDER_PREVIEW_VERSION, ORDER_RULE_VERSION, calculateMarketQuote, calculateOrderFees, isWithinOrderLimitBand, marketQuoteValidUntil, openPack, packSlotProbabilities, propagateMarketPressure, resolveInitialFunding, resolveOrderLimitBand, validateOrderCancellation, type PackRuleInput } from "./index.js";
 
 const PACK_RULE: PackRuleInput = {
   version: "pack/v1",
@@ -72,5 +72,58 @@ describe("I14B 市场报价规则", () => {
   it("以固定窗口生成可重放报价有效期，并拒绝非 UTC 时间", () => {
     expect(marketQuoteValidUntil(MARKET_RULE_VERSION, "2026-07-27T00:00:00.000Z")).toBe("2026-07-27T00:15:00.000Z");
     expect(() => marketQuoteValidUntil(MARKET_RULE_VERSION, "2026-07-27")).toThrow("UTC ISO 8601");
+  });
+});
+
+describe("I18B 双边委托规则", () => {
+  it("以市场中间价 ± 限价带计算对称且受最低价保护的范围", () => {
+    const band = resolveOrderLimitBand({ marketPrice: 200, minimumPrice: 1, limitPriceBandBasisPoints: 5_000 });
+    expect(band).toMatchObject({ ruleVersion: ORDER_RULE_VERSION, marketPrice: 200, min: 100, max: 300 });
+    expect(resolveOrderLimitBand({ marketPrice: 200, minimumPrice: 1, limitPriceBandBasisPoints: 5_000 })).toEqual(band);
+  });
+
+  it("最低价兜底，避免低价 SKU 因带宽度出现 0 或负值下限", () => {
+    expect(resolveOrderLimitBand({ marketPrice: 1, minimumPrice: 1, limitPriceBandBasisPoints: 5_000 }).min).toBe(1);
+    expect(() => resolveOrderLimitBand({ marketPrice: 200, minimumPrice: 1, limitPriceBandBasisPoints: 100_001 })).toThrow("bp");
+  });
+
+  it("校验限价落在带内，越界或非整数返回 false", () => {
+    const band = resolveOrderLimitBand({ marketPrice: 200, minimumPrice: 1, limitPriceBandBasisPoints: 5_000 });
+    expect(isWithinOrderLimitBand(200, band)).toBe(true);
+    expect(isWithinOrderLimitBand(100, band)).toBe(true);
+    expect(isWithinOrderLimitBand(300, band)).toBe(true);
+    expect(isWithinOrderLimitBand(99, band)).toBe(false);
+    expect(isWithinOrderLimitBand(301, band)).toBe(false);
+    expect(isWithinOrderLimitBand(1.5, band)).toBe(false);
+  });
+
+  it("买单预占 = 数量*限价 + 全量手续费；卖单只预占保证金，order_fee 不预占", () => {
+    const buy = calculateOrderFees({ side: "buy", quantity: 3, limitPrice: 200, marketPrice: 200, orderFeeBasisPoints: 200, fulfillmentDepositBasisPoints: 1_000, minimumPrice: 1 });
+    expect(buy).toMatchObject({ ruleVersion: ORDER_RULE_VERSION, unitFee: 4, unitFulfillmentDeposit: 20, orderFee: 12, fulfillmentDeposit: 60, reservedFunds: 612, estimatedAmount: 600 });
+    const sell = calculateOrderFees({ side: "sell", quantity: 3, limitPrice: 200, marketPrice: 200, orderFeeBasisPoints: 200, fulfillmentDepositBasisPoints: 1_000, minimumPrice: 1 });
+    expect(sell).toMatchObject({ unitFee: 4, unitFulfillmentDeposit: 20, orderFee: 12, fulfillmentDeposit: 60, reservedFunds: 60, estimatedAmount: 600 });
+  });
+
+  it("手续费与保证金以 half-up 舍入、最低价兜底", () => {
+    expect(calculateOrderFees({ side: "buy", quantity: 1, limitPrice: 1, marketPrice: 3, orderFeeBasisPoints: 333, fulfillmentDepositBasisPoints: 1_111, minimumPrice: 1 })).toMatchObject({ unitFee: 1, unitFulfillmentDeposit: 1, reservedFunds: 2 });
+    expect(calculateOrderFees({ side: "buy", quantity: 1, limitPrice: 1, marketPrice: 1, orderFeeBasisPoints: 333, fulfillmentDepositBasisPoints: 1_111, minimumPrice: 1 }).reservedFunds).toBe(2);
+  });
+
+  it("拒绝非法数量、负价、越界系数与不安全乘积", () => {
+    expect(() => calculateOrderFees({ side: "buy", quantity: 0, limitPrice: 200, marketPrice: 200, orderFeeBasisPoints: 200, fulfillmentDepositBasisPoints: 1_000, minimumPrice: 1 })).toThrow("委托数量");
+    expect(() => calculateOrderFees({ side: "buy", quantity: 1, limitPrice: -1, marketPrice: 200, orderFeeBasisPoints: 200, fulfillmentDepositBasisPoints: 1_000, minimumPrice: 1 })).toThrow("限价");
+    expect(() => calculateOrderFees({ side: "buy", quantity: 1, limitPrice: 200, marketPrice: 200, orderFeeBasisPoints: 100_001, fulfillmentDepositBasisPoints: 1_000, minimumPrice: 1 })).toThrow("bp");
+  });
+
+  it("取消校验只允许 open/partially_filled，其余状态显式拒绝", () => {
+    expect(validateOrderCancellation("open")).toEqual({ ok: true, currentStatus: "open" });
+    expect(validateOrderCancellation("partially_filled")).toEqual({ ok: true, currentStatus: "partially_filled" });
+    expect(validateOrderCancellation("fulfilled")).toEqual({ ok: false, reason: "not_cancellable" });
+    expect(validateOrderCancellation("cancelled")).toEqual({ ok: false, reason: "not_cancellable" });
+  });
+
+  it("规则版本与预览版本固定且可追溯", () => {
+    expect(ORDER_RULE_VERSION).toBe("order/v1");
+    expect(ORDER_PREVIEW_VERSION).toBe("order-preview/v1");
   });
 });

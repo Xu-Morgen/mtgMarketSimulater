@@ -48,6 +48,13 @@
 - 按请求 ID、幂等键或 `npc_trades.id` 关联 `idempotency_requests`、`ledger_entries(reason=npc_sell)`、`inventory_entries(reason=npc_sell)`、`fact_events(npc.trade.settled)`、outbox 与审计记录。任何缺失均按故障处理，不得手补流水、余额、库存、成交或事件。
 - 收购价低于玩家确认下限、报价失效、库存锁定/不足或额度不足时，要求重新预览或等待正常库存状态变化；禁止手工修改 `market_quotes`、`npc_trade_limits`、账户、库存或历史成交来绕过校验。
 
+## I18B P2P 双边委托排障
+
+- 玩家先请求 `/v1/orders/buy|sell/{skuId}/preview?quantity=`，再用返回的 `quoteId`/`quoteVersion`/`previewVersion`、玩家确认的 `limitPrice` 和新的 `Idempotency-Key` 调用创建端点。预览的限价带、费用、保证金与 `previewVersion` 完全由服务端计算；客户端回传过期 `previewVersion`/`quoteVersion` 会返回 `409 VERSION_STALE`，需重新预览。
+- 创建买单预占 数量*限价+order_fee（`fund_holds`，`entity_type='bilateral_order'`、`reason='order_buy'`）；创建卖单锁定库存（`inventory_holds`，`reason='order'`）并预占保证金（`fund_holds`，`reason='order_fulfillment_deposit'`）。order_fee 不在卖单预占，留到 I19B/I20B 撮合/履约时扣除。
+- 按请求 ID、幂等键或 `bilateral_orders.id` 关联 `idempotency_requests`、`fund_holds`/`inventory_holds`/`inventory_entries` 与审计记录。撤单以幂等键 + 状态版本条件 UPDATE 推进状态机 `open|partially_filled → cancelled`，释放对应预占；重复撤单返回 `409 RESOURCE_CONFLICT`。
+- 异常定位遵循“禁止直接修数”：余额、库存、保证金、委托状态或预占的任何缺失或漂移，必须由所属模块的补偿命令在同事务写新流水与原因，禁止直接覆盖 `bilateral_orders`、`fund_holds`、`inventory_holdings` 或账户最终值。撮合、模拟履约、`p2p.trade.settled` 与 `order.expire` 定时回收延后至 I19B/I20B/I22B。
+
 ## I30B 管理活动与玩家补偿（计划）
 
 以下是 I30B 实现时必须细化为可执行手册的边界；当前尚未实现，不授权通过数据库手工操作替代后台能力。

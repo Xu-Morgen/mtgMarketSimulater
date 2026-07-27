@@ -89,6 +89,13 @@
 - `POST /v1/npc-trades/sell/{skuId}` 要求有效玩家会话、格式正确的 `Idempotency-Key`，且请求体严格为 `{ quoteId, quoteVersion, quantity, minUnitPrice }`。`minUnitPrice` 是玩家确认的保护下限，服务端只读取 `quoteId` 指向的持久化 NPC 收购价和费用，并校验可交易、版本、有效期、最低价、可用库存及单笔/当日额度。
 - 成功以 `201` 返回成交、服务端余额与持仓；同键同参重放为 `200`，同键异参为 `409 IDEMPOTENCY_CONFLICT`。无报价、报价/最低价过期、可用库存不足与交易量限制分别使用 `PRICE_UNAVAILABLE`、`VERSION_STALE`、`INSUFFICIENT_INVENTORY`、`RULE_VIOLATION`；成交在一笔短事务同时追加 `npc_sell` credit 账本、库存流水、成交、事实/outbox、重定价任务与审计，未处理异常回滚经济写入和幂等占位。
 
+## I18B P2P 双边委托预览与创建协议
+
+- `GET /v1/orders/buy|sell/{skuId}/preview?quantity=` 要求有效玩家会话，返回 `BilateralOrderPreviewDto`：以当前 `market_quotes.market_price` 为锚点的限价带 `limitBand{min,max}`、服务端 `fees[order_fee, fulfillment_deposit]`、`reservedFunds`、`estimatedAmount`、可用资金/库存、`previewVersion` 与有效期。没有可交易报价返回 `404 PRICE_UNAVAILABLE`，报价过期返回 `409 VERSION_STALE`。
+- `POST /v1/orders/buy|sell/{skuId}` 要求有效玩家会话及格式正确的 `Idempotency-Key`；请求体严格为 `{ quoteId, quoteVersion, previewVersion, quantity, limitPrice }`。服务端校验预览版本未过期、报价/快照 ID 与版本一致、限价落在带内、单笔/单日额度、余额（买单）或可用库存（卖单）。买单原子预占 数量*限价+order_fee；卖单锁定库存并只预占 fulfillment_deposit（order_fee 在 I19B/I20B 履约时扣除）。客户端不得自报费用或保证金。
+- 成功以 `201` 返回 `BilateralOrderDto`；同键同参重放为 `200`，同键异参为 `409 IDEMPOTENCY_CONFLICT`。余额不足、库存不足/被锁定、额度超限、限价越界分别使用 `INSUFFICIENT_BALANCE`/`INSUFFICIENT_INVENTORY`/`INVENTORY_LOCKED`/`RULE_VIOLATION`；预览或报价过期使用 `VERSION_STALE`。创建与预占/锁定在同一短事务完成，未处理异常回滚委托、资金/库存预占和幂等占位。
+- `GET /v1/orders?status=&side=&cursor=&limit=`、`GET /v1/orders/{orderId}` 只返回当前玩家的委托；`POST /v1/orders/{orderId}/cancel` 以幂等键撤单，释放未成交资金（买单）或库存+保证金（卖单），重复撤单返回 `409 RESOURCE_CONFLICT`。`GET /v1/orders/book/{skuId}` 返回只读订单簿（买单按价格降序、卖单按价格升序聚合），不含用户身份。
+
 ## I17B 价格历史、每日同步与 AllPrices 回填协议
 
 - `GET /v1/market/quotes/{skuId}/history?range=7d|30d|all` 与 `GET /v1/market/index/history?range=7d|30d|all` 要求有效会话，按自然日采样返回 `PriceHistoryDto`/`MarketIndexHistoryDto`。历史来自只追加的 `price_snapshot_entries`（reference）与 `market_quotes`（game），同日多次同步/重定价取该日最新值；任一价格缺失为 null，空历史返回空 `points` 数组而非 `404`，确保失败同步仍能展示旧价或空态。浏览器不得自行计算曲线或推断缺失值。

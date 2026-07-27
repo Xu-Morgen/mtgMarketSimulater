@@ -6,6 +6,7 @@ import {
   type GameArchiveSummaryDto
 } from "@mtg-market/contracts";
 import { INITIAL_FUNDING_RULE_VERSION, resolveInitialFunding } from "@mtg-market/rules";
+import type { FundHoldTarget } from "../domain/funds.js";
 import { withinTransaction } from "@mtg-market/database";
 import { SqliteUserRepository } from "../infrastructure/sqlite-user-repository.js";
 import { success } from "../../../shared/http/api-response.js";
@@ -113,6 +114,14 @@ export class UserService {
   /** NPC 卖出的命名收入入口；账本仍只由 users 模块写入。 */
   creditForNpcSell(userId: string, amount: number, now: string, correlationId: string) {
     return this.users.creditAvailableFunds(userId, amount, now, correlationId, "npc_sell");
+  }
+  /** I18B 双边委托的资金预占入口；必须在 OrderService 经济短事务回调内调用。 */
+  reserveOrderFunds(userId: string, amount: number, target: FundHoldTarget, now: string) {
+    return this.users.reserveFunds(userId, amount, target, now);
+  }
+  /** I18B 双边委托撤单的资金释放入口；仅在 OrderService 经济短事务回调内调用。 */
+  releaseOrderFunds(userId: string, holdId: string, now: string) {
+    return this.users.releaseFunds(userId, holdId, now);
   }
   writeEconomicAudit(
     actorId: string,

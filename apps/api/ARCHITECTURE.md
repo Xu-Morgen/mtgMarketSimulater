@@ -102,6 +102,13 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 - 卖出预览支持正整数或 `quantity=all`；后者只在服务端解析当前 `availableQuantity`，再把解析后的正整数用于确认。锁定数量继续由订单/比赛所属模块持有，卖出命令不能释放、扣减或绕过任一 hold。
 - 确认包含 `minUnitPrice`，服务端拒绝低于确认下限的收购价。成功路径与买入同在一个短事务追加成交、账本、库存流水、事实/outbox、唯一重定价任务、审计和幂等响应；任一异常会回滚全部写入。
 
+## P2P 双边委托预览与创建（I18B）
+
+- `modules/orders/application/OrderService` 是玩家双边委托的唯一命令入口。它经 `MarketService.quote` 读取 `market_quotes.market_price` 作为限价锚点，经 users application 预占/释放资金（`fund_holds`、`entity_type='bilateral_order'`），经 inventory application 锁定/释放库存（`inventory_holds`、`reason='order'`）；Orders 模块不跨界写市场、账户或库存表。
+- 预览由 `@mtg-market/rules` 的 `order/v1` 计算限价带（`market_price ± limit_price_band_bps`，下限不低于 `minimum_price`）、order_fee 与 fulfillment_deposit，并派生 `previewVersion`（报价 ID+版本+方向+数量+带+预占金额）。买单预占 数量*限价+order_fee；卖单锁定库存并只预占 fulfillment_deposit，order_fee 留到 I19B/I20B 撮合/履约时扣除。
+- 创建、预占与锁定共享 `InventoryService.withLedgerTransaction` 一个短事务，回滚不留半完成委托、资金/库存预占或幂等占位。撤单以幂等键 + 状态版本条件 UPDATE 推进 `open|partially_filled → cancelled` 并释放对应预占；重复撤单返回 `RESOURCE_CONFLICT`。订单簿只读，买单按价格降序、卖单按价格升序聚合，不含用户身份。
+- 撮合（价格-时间优先、成交价、部分成交）、模拟履约、`p2p.trade.settled` 事实事件与 `order.expire` 定时回收延后至 I19B/I20B/I22B；本期委托只处于 `open` 状态。
+
 ## 库存卖出与估值投影（I16F）
 
 - `InventoryModule` 的只读 DTO 在 SQLite 查询中以当前持久化 `market_quotes` 投影服务端单张游戏内价、全部持有市值与未实现盈亏；计算只使用整数，市值按全部持有量（含订单/比赛锁定量）而非可用量展示。报价缺失时保留最近持仓估值，单张现价为 `null`；完全无估值时以明确不可用状态返回。

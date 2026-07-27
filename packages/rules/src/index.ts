@@ -272,3 +272,121 @@ export function marketQuoteValidUntil(version: string, calculatedAt: string): st
     throw new RangeError("报价计算时间必须是 UTC ISO 8601");
   return new Date(timestamp + MARKET_QUOTE_VALIDITY_MS).toISOString();
 }
+
+/**
+ * I18B：双边委托限价范围、费用与保证金的纯规则。所有金额均为整数最小货币单位，
+ * 系数以 bp 表达；买单预占 数量*限价+order_fee，卖单只预占 fulfillment_deposit，
+ * order_fee 留到 I19B/I20B 撮合/履约时从卖方收入扣除（与 NPC 卖出一致）。
+ */
+export const ORDER_RULE_VERSION = "order/v1" as const;
+/** 委托预览与报价版本变化绑定；版本不一致必须重新预览，浏览器不得长期持有旧值。 */
+export const ORDER_PREVIEW_VERSION = "order-preview/v1" as const;
+
+export interface OrderLimitBandInput {
+  marketPrice: number;
+  minimumPrice: number;
+  /** 10_000 = 1:1，5000 = ±50%。 */
+  limitPriceBandBasisPoints: number;
+}
+
+export interface OrderLimitBand {
+  ruleVersion: string;
+  marketPrice: number;
+  min: number;
+  max: number;
+}
+
+export interface OrderFeeInput {
+  side: "buy" | "sell";
+  quantity: number;
+  /** 玩家确认的单位限价。 */
+  limitPrice: number;
+  /** 锚点市场中间价；仅用于按 bp 计算 order_fee 与 fulfillment_deposit。 */
+  marketPrice: number;
+  orderFeeBasisPoints: number;
+  fulfillmentDepositBasisPoints: number;
+  minimumPrice: number;
+}
+
+export interface OrderFeeResult {
+  ruleVersion: string;
+  /** 单位手续费（按市场价计算），整数最小货币单位。 */
+  unitFee: number;
+  /** 单位模拟履约保证金（按市场价计算），整数最小货币单位。 */
+  unitFulfillmentDeposit: number;
+  /** 全部数量的手续费；买单会预占，卖单仅在 I19B/I20B 履约时扣除。 */
+  orderFee: number;
+  /** 全部数量的保证金；卖单创建时全额预占。 */
+  fulfillmentDeposit: number;
+  /**
+   * 委托阶段实际预占的资金：买单=数量*限价+order_fee；卖单=fulfillmentDeposit。
+   * 不接受客户端自报该值。
+   */
+  reservedFunds: number;
+  /** 买单=数量*限价（预计支出）；卖单=数量*限价（预计到手，未扣 order_fee）。 */
+  estimatedAmount: number;
+}
+
+/** 校验限价是否落在服务端计算的有效带内；返回显式结果，绝不静默回退。 */
+export function resolveOrderLimitBand(input: OrderLimitBandInput): OrderLimitBand {
+  nonNegativeSafeInteger(input.marketPrice, "市场中间价");
+  nonNegativeSafeInteger(input.minimumPrice, "最低报价");
+  basisPoints(input.limitPriceBandBasisPoints, "限价带宽度", 0, 100_000);
+  const min = Math.max(input.minimumPrice, divideHalfUp(input.marketPrice * (10_000 - input.limitPriceBandBasisPoints), 10_000, "限价下限"));
+  const max = divideHalfUp(input.marketPrice * (10_000 + input.limitPriceBandBasisPoints), 10_000, "限价上限");
+  if (min > max) throw new RangeError("限价带宽度配置导致下限大于上限");
+  return { ruleVersion: ORDER_RULE_VERSION, marketPrice: input.marketPrice, min, max };
+}
+
+/** 校验限价是否落在有效带内；越界返回 false 而不抛错，由调用方决定错误语义。 */
+export function isWithinOrderLimitBand(limitPrice: number, band: OrderLimitBand): boolean {
+  if (!Number.isSafeInteger(limitPrice) || limitPrice < 0) return false;
+  return limitPrice >= band.min && limitPrice <= band.max;
+}
+
+/** 按 bp 与数量计算费用与预占资金；reservedFunds 与 estimatedAmount 均由服务端计算，不接受客户端自报。 */
+export function calculateOrderFees(input: OrderFeeInput): OrderFeeResult {
+  positiveInteger(input.quantity, "委托数量");
+  nonNegativeSafeInteger(input.limitPrice, "限价");
+  nonNegativeSafeInteger(input.marketPrice, "市场中间价");
+  nonNegativeSafeInteger(input.minimumPrice, "最低报价");
+  basisPoints(input.orderFeeBasisPoints, "订单手续费率", 0, 100_000);
+  basisPoints(input.fulfillmentDepositBasisPoints, "模拟履约保证金率", 0, 100_000);
+  const unitFee = Math.max(input.minimumPrice, divideHalfUp(input.marketPrice * input.orderFeeBasisPoints, 10_000, "单位手续费"));
+  const unitFulfillmentDeposit = Math.max(input.minimumPrice, divideHalfUp(input.marketPrice * input.fulfillmentDepositBasisPoints, 10_000, "单位保证金"));
+  const orderFee = multiplySafe(unitFee, input.quantity, "订单手续费");
+  const fulfillmentDeposit = multiplySafe(unitFulfillmentDeposit, input.quantity, "模拟履约保证金");
+  const estimatedAmount = multiplySafe(input.limitPrice, input.quantity, "委托金额");
+  const reservedFunds = input.side === "buy" ? addSafe(estimatedAmount, orderFee, "买单预占资金") : fulfillmentDeposit;
+  return {
+    ruleVersion: ORDER_RULE_VERSION,
+    unitFee,
+    unitFulfillmentDeposit,
+    orderFee,
+    fulfillmentDeposit,
+    reservedFunds,
+    estimatedAmount
+  };
+}
+
+/** 校验取消条件：仅 open/partially_filled 可撤；其余状态返回显式错误。 */
+export type OrderCancelResult = { ok: true; currentStatus: "open" | "partially_filled" } | { ok: false; reason: "not_cancellable" };
+
+export function validateOrderCancellation(currentStatus: string): OrderCancelResult {
+  if (currentStatus === "open" || currentStatus === "partially_filled") return { ok: true, currentStatus };
+  return { ok: false, reason: "not_cancellable" };
+}
+
+function multiplySafe(left: number, right: number, label: string): number {
+  if (!Number.isSafeInteger(left) || !Number.isSafeInteger(right) || left < 0 || right < 0) throw new RangeError(`${label} 输入必须是非负安全整数`);
+  const result = left * right;
+  if (!Number.isSafeInteger(result)) throw new RangeError(`${label} 超出安全整数范围`);
+  return result;
+}
+
+function addSafe(left: number, right: number, label: string): number {
+  if (!Number.isSafeInteger(left) || !Number.isSafeInteger(right) || left < 0 || right < 0) throw new RangeError(`${label} 输入必须是非负安全整数`);
+  const result = left + right;
+  if (!Number.isSafeInteger(result)) throw new RangeError(`${label} 超出安全整数范围`);
+  return result;
+}
