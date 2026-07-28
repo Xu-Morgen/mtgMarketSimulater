@@ -25,7 +25,8 @@ import {
   type MatchResultDto,
   type OrderSide,
   type OrderStatus,
-  type Page
+  type Page,
+  type PlayerBilateralTradeDto
 } from "@mtg-market/contracts";
 import { InventoryService } from "../../inventory/application/inventory-service.js";
 import { MarketService } from "../../market/application/market-service.js";
@@ -103,6 +104,9 @@ type TradeRow = {
   created_at: string;
   updated_at: string;
 };
+
+/** I19F 玩家成交只读查询行；比 TradeRow 多读卖方待履约库存数量与单位保证金（用于推导已成交保证金）。 */
+type PlayerTradeRow = TradeRow & { seller_inventory_quantity: number; sell_unit_fulfillment_deposit_amount: number };
 
 export type OrderPreviewResult = BilateralOrderPreviewDto | "quote-unavailable" | "quote-stale" | "insufficient-quantity";
 
@@ -355,6 +359,25 @@ export class OrderService {
     return { skuId, bids: aggregate("buy"), asks: aggregate("sell"), capturedAt: now };
   }
 
+  /**
+   * I19F 玩家视角成交只读查询。从 `bilateral_trades` 读取当前玩家作为买方或卖方的成交，
+   * 投影为脱敏的 `PlayerBilateralTradeDto`：只返回当前玩家自己的委托 ID、角色与已转入待履约的
+   * 资金/库存；对手 userId、对手 orderId 与所有 holdId 一律不返回。纯读、不写事务、不调幂等键。
+   */
+  listPlayerTrades(userId: string, filters: { skuId?: string; cursor?: string; limit: number }): Page<PlayerBilateralTradeDto> {
+    const where = ["(t.buyer_user_id = ? OR t.seller_user_id = ?)"]; const values: unknown[] = [userId, userId];
+    if (filters.skuId) { where.push("t.sku_id = ?"); values.push(filters.skuId); }
+    const offset = filters.cursor ? Number.parseInt(filters.cursor, 10) : 0;
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new RangeError("成交分页游标无效");
+    const clause = `WHERE ${where.join(" AND ")}`;
+    const total = (this.database.prepare(`SELECT COUNT(*) AS count FROM bilateral_trades t ${clause}`).get(...values) as { count: number }).count;
+    const rows = this.database.prepare(
+      `${this.selectPlayerTradeSql()} ${clause} ORDER BY t.created_at DESC, t.id DESC LIMIT ? OFFSET ?`
+    ).all(...values, filters.limit + 1, offset) as PlayerTradeRow[];
+    const hasMore = rows.length > filters.limit;
+    return { items: rows.slice(0, filters.limit).map((row) => this.toPlayerTradeDto(row, userId)), page: { total, hasMore, nextCursor: hasMore ? String(offset + filters.limit) : null } };
+  }
+
   private buildPreview(userId: string, side: OrderSide, quantity: number, quote: QuoteRow, now: string): BilateralOrderPreviewDto {
     const limits = this.limits();
     const minimum = this.minimumPrice();
@@ -558,6 +581,35 @@ export class OrderService {
       sellerFee: money(row.seller_fee_amount),
       ruleVersion: row.rule_version,
       status: row.status as BilateralTradeDto["status"],
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  }
+
+  /** I19F 玩家成交查询读取卖方待履约库存数量与卖方单位保证金；不读取 holdId（不返回给浏览器）。 */
+  private selectPlayerTradeSql(): string {
+    return "SELECT t.id, t.sku_id, t.buy_order_id, t.sell_order_id, t.buyer_user_id, t.seller_user_id, t.quantity, t.execution_price_amount, t.buyer_fee_amount, t.seller_fee_amount, t.seller_inventory_quantity, t.rule_version, t.status, t.created_at, t.updated_at, s.unit_fulfillment_deposit_amount AS sell_unit_fulfillment_deposit_amount FROM bilateral_trades t JOIN bilateral_orders s ON s.id = t.sell_order_id";
+  }
+
+  /** 把成交行投影为玩家视角 DTO：只返回当前玩家自己的委托 ID、角色与待履约资产，脱敏对手。 */
+  private toPlayerTradeDto(row: PlayerTradeRow, userId: string): PlayerBilateralTradeDto {
+    const isBuyer = row.buyer_user_id === userId;
+    // 买方待履约资金 = 数量×成交价 + 买方已成交 order_fee；卖方待履约资金 = 已成交保证金（单位保证金×数量）。
+    const pendingFundsAmount = isBuyer
+      ? row.quantity * row.execution_price_amount + row.buyer_fee_amount
+      : row.sell_unit_fulfillment_deposit_amount * row.quantity;
+    return {
+      id: row.id,
+      skuId: row.sku_id,
+      role: isBuyer ? "buyer" : "seller",
+      myOrderId: isBuyer ? row.buy_order_id : row.sell_order_id,
+      quantity: row.quantity,
+      executionPrice: money(row.execution_price_amount),
+      fee: money(isBuyer ? row.buyer_fee_amount : row.seller_fee_amount),
+      pendingFunds: money(pendingFundsAmount),
+      pendingInventoryQuantity: isBuyer ? null : row.seller_inventory_quantity,
+      ruleVersion: row.rule_version,
+      status: row.status as PlayerBilateralTradeDto["status"],
       createdAt: row.created_at,
       updatedAt: row.updated_at
     };

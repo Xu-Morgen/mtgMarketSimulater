@@ -417,3 +417,105 @@ describe("I19B 撮合规则与服务端成交", () => {
     await app.close(); database.close();
   });
 });
+
+describe("I19F 玩家成交只读视图", () => {
+  // 给卖方先 NPC 买入 seedQuantity 张再挂卖单；返回卖方鉴权。
+  async function seedSellerAndSell(app: Awaited<ReturnType<typeof createTestApp>>["app"], database: ReturnType<typeof openSqliteDatabase>, email: string, seedQuantity: number, sellQuantity: number, sellPrice: number, sellKey: string) {
+    const authorization = await player(app, email, "卖方");
+    expect((await app.inject({ method: "POST", url: `/v1/npc-trades/buy/${ids.sku}`, headers: { authorization, "idempotency-key": `${sellKey}-seed` }, payload: { quoteId: ids.quote, quoteVersion: "market/v1", quantity: seedQuantity, maxUnitPrice: 250 } })).statusCode).toBe(201);
+    const preview = await previewSell(app, authorization, sellQuantity);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/sell/${ids.sku}`, headers: { authorization, "idempotency-key": sellKey }, payload: createBody(preview.data.preview, sellPrice, sellQuantity) })).statusCode).toBe(201);
+    return authorization;
+  }
+
+  it("全量撮合后买卖双方各自看到自己的成交、待履约资产与角色，且脱敏对手身份", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    // 卖单先入订单簿（maker），成交价取卖限价 200。
+    const sellAuth = await seedSellerAndSell(app, database, `f-sell-${Math.random()}@example.test`, 2, 2, 200, "full-sell-trades");
+    const buyAuth = await player(app, `f-buy-${Math.random()}@example.test`, "买方");
+    const buyPreview = await previewBuy(app, buyAuth, 2);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization: buyAuth, "idempotency-key": "full-buy-trades" }, payload: createBody(buyPreview.data.preview, 210, 2) })).statusCode).toBe(201);
+
+    const buyerView = (await app.inject({ method: "GET", url: "/v1/orders/trades", headers: { authorization: buyAuth } })).json().data;
+    expect(buyerView.items).toHaveLength(1);
+    expect(buyerView.items[0]).toMatchObject({ skuId: ids.sku, role: "buyer", quantity: 2, executionPrice: { amount: 200 }, status: "matched_pending_fulfillment", ruleVersion: "order-matching/v1" });
+    // 买方待履约资金 = 数量×成交价 + 买方已成交 order_fee（200*2 + 4*2 = 408）。
+    expect(buyerView.items[0]).toMatchObject({ fee: { amount: 8 }, pendingFunds: { amount: 408 }, pendingInventoryQuantity: null });
+    // 脱敏：不含对手 userId、对手 orderId 与任何 holdId。
+    const buyerTrade = buyerView.items[0] as Record<string, unknown>;
+    expect(buyerTrade).not.toHaveProperty("buyerUserId");
+    expect(buyerTrade).not.toHaveProperty("sellerUserId");
+    expect(buyerTrade).not.toHaveProperty("buyOrderId");
+    expect(buyerTrade).not.toHaveProperty("sellOrderId");
+    expect(buyerTrade).not.toHaveProperty("buyerFundsHoldId");
+    expect(buyerTrade).not.toHaveProperty("sellerInventoryHoldId");
+    expect(buyerTrade).not.toHaveProperty("sellerDepositHoldId");
+
+    const sellerView = (await app.inject({ method: "GET", url: "/v1/orders/trades", headers: { authorization: sellAuth } })).json().data;
+    expect(sellerView.items).toHaveLength(1);
+    expect(sellerView.items[0]).toMatchObject({ role: "seller", quantity: 2, executionPrice: { amount: 200 } });
+    // 卖方待履约资金 = 已成交保证金（单位保证金 20×2 = 40），待履约库存 = 已成交 2。
+    expect(sellerView.items[0]).toMatchObject({ fee: { amount: 8 }, pendingFunds: { amount: 40 }, pendingInventoryQuantity: 2 });
+    await app.close(); database.close();
+  });
+
+  it("部分撮合：买方全成交、卖方部分成交，双方各自看到自己的成交行与切分资产", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    const sellAuth = await seedSellerAndSell(app, database, `p-sell-${Math.random()}@example.test`, 5, 5, 200, "part-sell-trades");
+    const buyAuth = await player(app, `p-buy-${Math.random()}@example.test`, "买方");
+    const buyPreview = await previewBuy(app, buyAuth, 2);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization: buyAuth, "idempotency-key": "part-buy-trades" }, payload: createBody(buyPreview.data.preview, 210, 2) })).statusCode).toBe(201);
+
+    const buyerView = (await app.inject({ method: "GET", url: "/v1/orders/trades", headers: { authorization: buyAuth } })).json().data;
+    expect(buyerView.items[0]).toMatchObject({ role: "buyer", quantity: 2, pendingFunds: { amount: 408 }, pendingInventoryQuantity: null });
+    const sellerView = (await app.inject({ method: "GET", url: "/v1/orders/trades", headers: { authorization: sellAuth } })).json().data;
+    // 卖方 5 张挂单，成交 2 张：成交行 quantity=2、待履约库存 2。
+    expect(sellerView.items[0]).toMatchObject({ role: "seller", quantity: 2, pendingFunds: { amount: 40 }, pendingInventoryQuantity: 2 });
+    await app.close(); database.close();
+  });
+
+  it("无关玩家看不到他人成交；skuId 过滤与分页只返回自己的成交", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    const sellAuth = await seedSellerAndSell(app, database, `o-sell-${Math.random()}@example.test`, 2, 2, 200, "oth-sell-trades");
+    const buyAuth = await player(app, `o-buy-${Math.random()}@example.test`, "买方");
+    const buyPreview = await previewBuy(app, buyAuth, 2);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization: buyAuth, "idempotency-key": "oth-buy-trades" }, payload: createBody(buyPreview.data.preview, 210, 2) })).statusCode).toBe(201);
+
+    // 无关第三方看到空成交列表。
+    const observer = await player(app, `observer-${Math.random()}@example.test`, "旁观者");
+    const observerView = (await app.inject({ method: "GET", url: "/v1/orders/trades", headers: { authorization: observer } })).json().data;
+    expect(observerView.items).toEqual([]);
+    expect(observerView.page).toMatchObject({ total: 0, hasMore: false, nextCursor: null });
+
+    // skuId 过滤：匹配的 SKU 返回成交，不匹配的 SKU 返回空。
+    const otherSkuId = "30000000-0000-4000-8000-000000000999";
+    const filteredMiss = (await app.inject({ method: "GET", url: `/v1/orders/trades?skuId=${otherSkuId}`, headers: { authorization: buyAuth } })).json().data;
+    expect(filteredMiss.items).toEqual([]);
+    const filteredHit = (await app.inject({ method: "GET", url: `/v1/orders/trades?skuId=${ids.sku}`, headers: { authorization: sellAuth } })).json().data;
+    expect(filteredHit.items).toHaveLength(1);
+
+    // 分页：limit=1 + cursor 翻第二页（此处只有 1 笔，第二页为空）。
+    const firstPage = (await app.inject({ method: "GET", url: "/v1/orders/trades?limit=1", headers: { authorization: buyAuth } })).json().data;
+    expect(firstPage.items).toHaveLength(1);
+    expect(firstPage.page).toMatchObject({ total: 1, hasMore: false });
+    await app.close(); database.close();
+  });
+
+  it("自成交场景无成交记录，列表为空", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    const authorization = await player(app, `self-trades-${Math.random()}@example.test`, "自成交者");
+    expect((await app.inject({ method: "POST", url: `/v1/npc-trades/buy/${ids.sku}`, headers: { authorization, "idempotency-key": "self-trades-seed" }, payload: { quoteId: ids.quote, quoteVersion: "market/v1", quantity: 2, maxUnitPrice: 250 } })).statusCode).toBe(201);
+    const sellPreview = await previewSell(app, authorization, 2);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/sell/${ids.sku}`, headers: { authorization, "idempotency-key": "self-trades-sell" }, payload: createBody(sellPreview.data.preview, 200, 2) })).statusCode).toBe(201);
+    const buyPreview = await previewBuy(app, authorization, 2);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization, "idempotency-key": "self-trades-buy" }, payload: createBody(buyPreview.data.preview, 210, 2) })).statusCode).toBe(201);
+    const view = (await app.inject({ method: "GET", url: "/v1/orders/trades", headers: { authorization } })).json().data;
+    expect(view.items).toEqual([]);
+    await app.close(); database.close();
+  });
+});
+

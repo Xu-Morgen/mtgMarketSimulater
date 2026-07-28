@@ -9,6 +9,11 @@ import { orderCancelRequestFingerprint, orderCreateRequestFingerprint, OrderServ
 const skuParams = z.object({ skuId: z.string().uuid() }).strict();
 const previewQuery = z.object({ quantity: z.coerce.number().int().min(1).max(1000) }).strict();
 const orderIdParams = z.object({ orderId: z.string().uuid() }).strict();
+const tradesListQuery = z.object({
+  skuId: z.string().uuid().optional(),
+  cursor: z.string().regex(/^\d+$/).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20)
+}).strict();
 const createBody = z.object({
   quoteId: z.string().uuid(),
   quoteVersion: z.string().trim().min(1).max(120),
@@ -65,6 +70,14 @@ export async function registerOrderRoutes(app: FastifyInstance, database: Databa
     if (query.side) filters.side = query.side;
     if (query.cursor) filters.cursor = query.cursor;
     return success(request.requestId, orders.list(request.actor!.id, filters));
+  });
+  // I19F 玩家视角成交只读查询；脱敏对手身份，附玩家角色与待履约资产。纯读、无幂等键、无审计。
+  app.get("/v1/orders/trades", { preHandler: requireRole("player") }, async (request) => {
+    const query = tradesListQuery.parse(request.query);
+    const filters: Parameters<OrderService["listPlayerTrades"]>[1] = { limit: query.limit };
+    if (query.skuId) filters.skuId = query.skuId;
+    if (query.cursor) filters.cursor = query.cursor;
+    return success(request.requestId, orders.listPlayerTrades(request.actor!.id, filters));
   });
   app.get("/v1/orders/:orderId", { preHandler: requireRole("player") }, async (request, reply) => {
     const order = orders.find(request.actor!.id, orderIdParams.parse(request.params).orderId);

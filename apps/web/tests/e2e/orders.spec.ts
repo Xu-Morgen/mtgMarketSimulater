@@ -44,7 +44,7 @@ function sellPreview(quantity: number, unavailableReason: "archive_required" | "
   };
 }
 
-function order(side: "buy" | "sell", quantity: number, limitPrice: number, status: "open" | "cancelled" = "open", version = 1): Record<string, unknown> {
+function order(side: "buy" | "sell", quantity: number, limitPrice: number, status: "open" | "cancelled" | "partially_filled" = "open", version = 1): Record<string, unknown> {
   return {
     id: orderId, userId, skuId, side, status, originalQuantity: quantity, remainingQuantity: quantity,
     limitPrice: { amount: limitPrice, currency: "GAME_CREDIT" },
@@ -263,4 +263,155 @@ test.describe("P2P 委托窄屏（390 × 844）", () => {
     await page.getByRole("link", { name: "我的委托" }).click();
     await expect(page.getByRole("heading", { name: "我的委托" })).toBeVisible();
   });
+});
+
+test.describe("P2P 订单簿与撮合状态（I19F）", () => {
+  const buyerUserId = "10000000-0000-4000-8000-0000000001b1";
+  const sellerUserId = "10000000-0000-4000-8000-0000000001b2";
+
+  async function mockOrderBook(page: Page, bids: Array<{ price: number; qty: number; orders: number }>, asks: Array<{ price: number; qty: number; orders: number }>) {
+    await page.route(`**/v1/orders/book/${skuId}`, async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(envelope({ book: { skuId, bids: bids.map((row) => ({ limitPrice: { amount: row.price, currency: "GAME_CREDIT" }, remainingQuantity: row.qty, orderCount: row.orders })), asks: asks.map((row) => ({ limitPrice: { amount: row.price, currency: "GAME_CREDIT" }, remainingQuantity: row.qty, orderCount: row.orders })), capturedAt: now } }))
+    }));
+  }
+
+  async function mockArchive(page: Page, userId: string, frozenAmount = 408) {
+    await page.route("**/v1/archive", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ archive: { id: "archive-1", userId, initialFundingRuleVersion: "initial-funding/v1", createdAt: now, balance: { total: { amount: 10000, currency: "GAME_CREDIT" }, available: { amount: 10000 - frozenAmount, currency: "GAME_CREDIT" }, frozen: { amount: frozenAmount, currency: "GAME_CREDIT" }, updatedAt: now } } })) }));
+    await page.route("**/v1/ledger?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+  }
+
+  /** 为指定会话恢复玩家身份并按 userId 返回该玩家的成交视角。 */
+  async function recoverSessionAs(page: Page, userId: string, accessToken: string) {
+    await page.context().addCookies([{ name: "mtg_csrf", value: `i19f-${userId}`, url: webBaseUrl }]);
+    await page.route("**/v1/auth/refresh", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ accessToken, user: { id: userId, email: `i19f-${userId}@example.test`, displayName: userId === buyerUserId ? "买方玩家" : "卖方玩家", role: "player", createdAt: now } })) }));
+  }
+
+  /** 买方视角成交：role=buyer、待履约资金、无待履约库存；脱敏对手身份。 */
+  function buyerTrade(quantity = 2) {
+    return {
+      id: "trade-buyer-1", skuId, role: "buyer", myOrderId: "order-buyer-1",
+      quantity, executionPrice: { amount: 200, currency: "GAME_CREDIT" },
+      fee: { amount: quantity * 4, currency: "GAME_CREDIT" },
+      pendingFunds: { amount: quantity * 204, currency: "GAME_CREDIT" },
+      pendingInventoryQuantity: null, ruleVersion: "order-matching/v1", status: "matched_pending_fulfillment",
+      createdAt: now, updatedAt: now
+    };
+  }
+  /** 卖方视角成交：role=seller、待履约资金=保证金、待履约库存=已成交数量。 */
+  function sellerTrade(quantity = 2) {
+    return {
+      id: "trade-seller-1", skuId, role: "seller", myOrderId: "order-seller-1",
+      quantity, executionPrice: { amount: 200, currency: "GAME_CREDIT" },
+      fee: { amount: quantity * 4, currency: "GAME_CREDIT" },
+      pendingFunds: { amount: quantity * 20, currency: "GAME_CREDIT" },
+      pendingInventoryQuantity: quantity, ruleVersion: "order-matching/v1", status: "matched_pending_fulfillment",
+      createdAt: now, updatedAt: now
+    };
+  }
+
+  test("部分成交后双方订单簿一致、各自成交角色与待履约资产正确且脱敏对手", async ({ browser }) => {
+    const buyerCtx = await browser.newContext();
+    const sellerCtx = await browser.newContext();
+    const buyerPage = await buyerCtx.newPage();
+    const sellerPage = await sellerCtx.newPage();
+
+    await mockMarket(buyerPage);
+    await mockArchive(buyerPage, buyerUserId, 408);
+    await mockOrderBook(buyerPage, [{ price: 210, qty: 2, orders: 1 }], [{ price: 220, qty: 3, orders: 1 }]);
+    await buyerPage.route("**/v1/orders?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+    await buyerPage.route("**/v1/orders/trades?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [buyerTrade(2)], page: { total: 1, hasMore: false, nextCursor: null } })) }));
+    await recoverSessionAs(buyerPage, buyerUserId, "buyer-token-i19f");
+
+    await mockMarket(sellerPage);
+    await mockArchive(sellerPage, sellerUserId, 40);
+    await mockOrderBook(sellerPage, [{ price: 210, qty: 2, orders: 1 }], [{ price: 220, qty: 3, orders: 1 }]);
+    await sellerPage.route("**/v1/orders?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+    await sellerPage.route("**/v1/orders/trades?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [sellerTrade(2)], page: { total: 1, hasMore: false, nextCursor: null } })) }));
+    await recoverSessionAs(sellerPage, sellerUserId, "seller-token-i19f");
+
+    // 买方：订单簿、成交角色与待履约资产。
+    await buyerPage.goto("/orders");
+    await expect(buyerPage.getByRole("heading", { name: "双边订单簿" })).toBeVisible();
+    await expect(buyerPage.locator("text=210 游戏币").first()).toBeVisible();
+    await expect(buyerPage.locator("text=220 游戏币").first()).toBeVisible();
+    await expect(buyerPage.getByText("9,592 游戏币").first()).toBeVisible();
+    await buyerPage.getByRole("heading", { name: "我的成交与待履约资产" }).scrollIntoViewIfNeeded();
+    await expect(buyerPage.locator("table").getByText("买方")).toBeVisible();
+    await expect(buyerPage.locator("table").getByText("408 游戏币")).toBeVisible();
+    await expect(buyerPage.getByText("待履约资金 408 游戏币")).toBeVisible();
+
+    // 卖方：成交角色为卖方、待履约资金为保证金、待履约库存为成交数量。
+    await sellerPage.goto("/orders");
+    await sellerPage.getByRole("heading", { name: "我的成交与待履约资产" }).scrollIntoViewIfNeeded();
+    await expect(sellerPage.locator("table").getByText("卖方")).toBeVisible();
+    await expect(sellerPage.locator("table").getByText("40 游戏币")).toBeVisible();
+    await expect(sellerPage.getByText("待履约库存 2 张")).toBeVisible();
+
+    await buyerCtx.close();
+    await sellerCtx.close();
+  });
+
+  test("成交查询失败时提示数据可能过期，恢复后只接受服务端最新状态", async ({ page }) => {
+    let failing = true;
+    await mockMarket(page);
+    await mockArchive(page, userId);
+    await mockOrderBook(page, [{ price: 210, qty: 2, orders: 1 }], []);
+    await page.route("**/v1/orders?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+    await page.route("**/v1/orders/trades?*", async (route) => {
+      if (failing) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ ok: false, error: { code: "INTERNAL_ERROR", message: "成交暂不可用" }, meta: { requestId: "i19f-fail" } }) });
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [buyerTrade(1)], page: { total: 1, hasMore: false, nextCursor: null } })) });
+    });
+    await recoverSessionAs(page, userId, "buyer-token-i19f");
+    await page.goto("/orders");
+    await expect(page.getByText("成交数据可能过期，连接失败，正在重试")).toBeVisible();
+    // 恢复后点击立即刷新；页面只展示服务端最新成交，不伪造空态或最新状态。
+    failing = false;
+    await page.getByRole("button", { name: "立即刷新" }).click();
+    await expect(page.locator("table").getByText("买方")).toBeVisible();
+    await expect(page.locator("table").getByText("204 游戏币")).toBeVisible();
+  });
+
+  test("空成交显示空态而非伪造数据", async ({ page }) => {
+    await mockMarket(page);
+    await mockArchive(page, userId, 0);
+    await page.route("**/v1/orders?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+    await page.route("**/v1/orders/trades?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+    await recoverSessionAs(page, userId, "buyer-token-i19f");
+    await page.goto("/orders");
+    await expect(page.getByRole("heading", { name: "没有成交记录" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "尚未选择订单簿 SKU" })).toBeVisible();
+  });
+});
+
+test.describe("P2P 订单簿与撮合状态窄屏（390 × 844）", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+  test("窄屏订单簿、成交与待履约摘要不阻断", async ({ page }) => {
+    await mockMarket(page);
+    const sellerUserIdNarrow = "10000000-0000-4000-8000-0000000001b3";
+    await page.route("**/v1/archive", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ archive: { id: "archive-1", userId: sellerUserIdNarrow, initialFundingRuleVersion: "initial-funding/v1", createdAt: now, balance: { total: { amount: 9500, currency: "GAME_CREDIT" }, available: { amount: 9460, currency: "GAME_CREDIT" }, frozen: { amount: 40, currency: "GAME_CREDIT" }, updatedAt: now } } })) }));
+    await page.route("**/v1/ledger?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+    await mockOrderBookNarrow(page, [{ price: 210, qty: 2, orders: 1 }], [{ price: 220, qty: 3, orders: 1 }]);
+    await page.route("**/v1/orders?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [{ ...order("sell", 3, 200, "partially_filled", 2), id: orderId, remainingQuantity: 1 }], page: { total: 1, hasMore: false, nextCursor: null } })) }));
+    await page.route("**/v1/orders/trades?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [{
+      id: "trade-narrow-1", skuId, role: "seller", myOrderId: orderId, quantity: 2, executionPrice: { amount: 200, currency: "GAME_CREDIT" },
+      fee: { amount: 8, currency: "GAME_CREDIT" }, pendingFunds: { amount: 40, currency: "GAME_CREDIT" }, pendingInventoryQuantity: 2, ruleVersion: "order-matching/v1", status: "matched_pending_fulfillment", createdAt: now, updatedAt: now
+    }], page: { total: 1, hasMore: false, nextCursor: null } })) }));
+    await recoverSessionAsNarrow(page, sellerUserIdNarrow, "seller-token-narrow");
+    await page.goto("/orders");
+    await expect(page.getByRole("heading", { name: "双边订单簿" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "我的成交与待履约资产" })).toBeVisible();
+    await expect(page.getByText("待履约库存 2 张")).toBeVisible();
+  });
+
+  async function mockOrderBookNarrow(page: Page, bids: Array<{ price: number; qty: number; orders: number }>, asks: Array<{ price: number; qty: number; orders: number }>) {
+    await page.route(`**/v1/orders/book/${skuId}`, async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(envelope({ book: { skuId, bids: bids.map((row) => ({ limitPrice: { amount: row.price, currency: "GAME_CREDIT" }, remainingQuantity: row.qty, orderCount: row.orders })), asks: asks.map((row) => ({ limitPrice: { amount: row.price, currency: "GAME_CREDIT" }, remainingQuantity: row.qty, orderCount: row.orders })), capturedAt: now } }))
+    }));
+  }
+  async function recoverSessionAsNarrow(page: Page, userId: string, accessToken: string) {
+    await page.context().addCookies([{ name: "mtg_csrf", value: `i19f-${userId}`, url: webBaseUrl }]);
+    await page.route("**/v1/auth/refresh", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ accessToken, user: { id: userId, email: `i19f-${userId}@example.test`, displayName: "窄屏卖方", role: "player", createdAt: now } })) }));
+  }
 });

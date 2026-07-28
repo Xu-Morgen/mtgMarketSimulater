@@ -19,3 +19,26 @@
 .disabledEntry { background: #f4e4e4; border: 1px solid #9b2226; border-radius: 6px; color: #9b2226; cursor: not-allowed; font-weight: 700; padding: 5px 8px; }
 .orderDialog { max-width: 560px; }
 @media (max-width: 700px) { .orderDialog { max-width: 100%; } }
+
+/* I19F：余额、订单簿、成交与待履约状态区块。 */
+.sectionCard { background: #fff; border: 1px solid #d8d6c5; border-radius: 12px; margin-top: 18px; padding: 16px; }
+.sectionCard h2 { margin-bottom: 10px; }
+.balanceGrid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.balanceGrid article { background: #f3f2e8; border: 1px solid #d8d6c5; border-radius: 8px; padding: 12px; }
+.balanceGrid article span { color: #596153; display: block; font-size: .82rem; }
+.balanceGrid article strong { font-size: 1.1rem; }
+.bookSelector { align-items: end; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.bookSelector label { display: grid; font-size: .9rem; font-weight: 700; gap: 5px; }
+.bookSelector select { border: 1px solid #9b9a8e; border-radius: 7px; min-height: 40px; padding: 7px 9px; min-width: 260px; }
+.bookGrid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bookSide { background: #f8f7ef; border: 1px solid #e3e1d2; border-radius: 8px; padding: 10px; }
+.bookSide h3 { font-size: .95rem; margin-bottom: 8px; }
+.bookSide table { border-collapse: collapse; width: 100%; }
+.bookSide th, .bookSide td { border-bottom: 1px solid #eceadf; padding: 5px 6px; text-align: right; }
+.bookSide th:first-child, .bookSide td:first-child { text-align: left; }
+.bookMeta { color: #596153; font-size: .82rem; margin-top: 10px; }
+.pendingSummary { background: #f3f2e8; border: 1px solid #d8d6c5; border-radius: 8px; margin-top: 12px; padding: 12px; }
+.pendingSummary p { margin: 6px 0; }
+.staleHint { background: #fff7e6; border: 1px solid #ffd591; border-radius: 8px; color: #874d00; margin-top: 12px; padding: 10px 12px; }
+@media (max-width: 700px) { .balanceGrid { grid-template-columns: 1fr; } .bookGrid { grid-template-columns: 1fr; } }
+

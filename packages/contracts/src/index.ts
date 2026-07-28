@@ -625,6 +625,36 @@ export interface MatchResultDto {
   capturedAt: string;
 }
 
+/**
+ * I19F 玩家视角的单笔 P2P 成交。从 `bilateral_trades` 投影，对手身份（userId、orderId、holdId）
+ * 一律脱敏不返回；附当前玩家在本笔成交中的角色与已转入待履约的资产。浏览器不得推导或缓存为真相。
+ */
+export interface PlayerBilateralTradeDto {
+  id: string;
+  skuId: string;
+  /** 当前玩家在本笔成交中的角色。 */
+  role: "buyer" | "seller";
+  /** 当前玩家自己的委托 ID；对手委托 ID 不暴露。 */
+  myOrderId: string;
+  quantity: number;
+  /** 取 maker（先入订单簿一方）限价的成交价，整数最小货币单位。 */
+  executionPrice: Money;
+  /** 当前玩家本笔已成交 order_fee（买方/卖方各自的单位费用×数量）。 */
+  fee: Money;
+  /**
+   * 当前玩家本笔待履约资金：买方=数量×成交价+order_fee，卖方=已成交保证金。
+   * 撮合只把预占转为待履约持有，最终所有权转移与结算在 I20B 履约时发生。
+   */
+  pendingFunds: Money | null;
+  /** 仅卖方填充：本笔已离开持有的待履约库存数量；买方为 null。 */
+  pendingInventoryQuantity: number | null;
+  /** 撮合规则版本，可追溯价格—时间优先与成交价取 maker 的语义。 */
+  ruleVersion: string;
+  status: BilateralTradeStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface TournamentResult {
   tournamentId: string;
   playerId: string;

@@ -62,6 +62,11 @@
 - 并发与幂等：逐 leg 以条件 UPDATE（`WHERE version=? AND remaining_quantity>=?`）扣减双方剩余；`bilateral_trades UNIQUE(buy_order_id, sell_order_id, execution_price_amount)` 保证同一对委托在相同成交价下至多一行成交。并发撮合不会超卖、超扣或重复成交；任一 leg 写入异常整笔回滚。
 - 按请求 ID、`bilateral_trades.id` 或 `bilateral_orders.id` 关联 `bilateral_trades`、`fund_holds`（reason=`order_fulfillment`/`order_fulfillment_deposit`）、`inventory_holds`（status=`captured`/`active`）与审计记录（`bilateral_order.matched`）。异常定位遵循“禁止直接修数”：成交、待履约 hold 或委托状态的任何缺失或漂移，必须由补偿命令在同事务写新流水与原因，禁止直接覆盖 `bilateral_trades`、`bilateral_orders`、`fund_holds`、`inventory_holdings` 或账户最终值。模拟履约、`p2p.trade.settled`、取消履约与 `order.expire` 定时回收延后至 I20B/I22B。
 
+## I19F P2P 撮合状态玩家只读视图排障
+
+- `GET /v1/orders/trades`（player 角色）是玩家查看自己成交与待履约资产的唯一入口；服务端以 `OrderService.listPlayerTrades` 从 `bilateral_trades` 投影，脱敏对手 userId、对手 orderId 与所有 holdId。若玩家反馈看不到成交，先按 `bilateral_trades.buyer_user_id/seller_user_id` 核对成交归属，再核对前端是否因连接失败展示「数据可能过期」而非伪造空态。
+- 该接口纯读、不写事务、不引幂等键、不写审计；任何缺失或漂移不得通过直接修改 `bilateral_trades` 或前端缓存解决，必须回到撮合/履约（I19B/I20B）与审计链路定位。履约确认/取消（I20B/I20F）与 `order.expire`（I22B）未上线前，待履约资产只可展示、不可操作。
+
 ## I30B 管理活动与玩家补偿（计划）
 
 以下是 I30B 实现时必须细化为可执行手册的边界；当前尚未实现，不授权通过数据库手工操作替代后台能力。

@@ -6,7 +6,8 @@ import type {
   BilateralOrderPreviewDto,
   OrderSide,
   OrderStatus,
-  Page
+  Page,
+  PlayerBilateralTradeDto
 } from "@mtg-market/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
@@ -17,6 +18,13 @@ import { createIdempotencyKey } from "../utils/idempotency";
 export type OrdersFilters = {
   status?: OrderStatus | undefined;
   side?: OrderSide | undefined;
+  cursor?: string | undefined;
+  limit?: number | undefined;
+};
+
+/** 玩家成交只读过滤；skuId 可选，cursor/limit 控制分页。 */
+export type PlayerTradesFilters = {
+  skuId?: string | undefined;
   cursor?: string | undefined;
   limit?: number | undefined;
 };
@@ -70,8 +78,17 @@ export const bilateralOrderApi = {
   cancel: (accessToken: string, orderId: string, idempotencyKey: string) =>
     apiRequest<{ order: BilateralOrderDto }>(`/v1/orders/${orderId}/cancel`, { method: "POST", accessToken, idempotencyKey }),
   book: (accessToken: string, skuId: string) =>
-    apiRequest<{ book: BilateralOrderBookDto }>(`/v1/orders/book/${skuId}`, { accessToken })
+    apiRequest<{ book: BilateralOrderBookDto }>(`/v1/orders/book/${skuId}`, { accessToken }),
+  trades: (accessToken: string, filters: PlayerTradesFilters) =>
+    apiRequest<Page<PlayerBilateralTradeDto>>(`/v1/orders/trades?${tradesQueryString(filters)}`, { accessToken })
 };
+
+function tradesQueryString(filters: PlayerTradesFilters): string {
+  const parameters = new URLSearchParams({ limit: String(filters.limit ?? 20) });
+  if (filters.skuId) parameters.set("skuId", filters.skuId);
+  if (filters.cursor) parameters.set("cursor", filters.cursor);
+  return parameters.toString();
+}
 
 /** 每次数量或方向变化都强制重新读取当前服务端预览，不能复用旧报价版本或限价带。 */
 export function useOrderPreviewQuery(skuId: string, side: OrderSide, quantity: number, enabled: boolean) {
@@ -112,6 +129,7 @@ export function useCreateOrderMutation(side: OrderSide) {
         void queryClient.invalidateQueries({ queryKey: ["orders", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["orders", "preview", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["orders", "book", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["orders", "trades", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["archive", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["ledger", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["inventory", user.id] });
@@ -143,14 +161,37 @@ export function useOrdersQuery(filters: OrdersFilters) {
   });
 }
 
-/** 订单簿为只读服务端聚合；价格-时间优先顺序由服务端返回，不含用户身份。 */
+/**
+ * 订单簿为只读服务端聚合；价格-时间优先顺序由服务端返回，不含用户身份。
+ * I19F：玩家在线时低频轮询刷新（10s），切到后台不轮询；查询失败时不轮询以避免风暴，
+ * 由组件根据 isError/isStale 提示「数据可能过期」。
+ */
 export function useOrderBookQuery(skuId: string | null) {
   const { accessToken, user } = useSession();
   return useQuery({
     queryKey: ["orders", "book", user?.id ?? "anonymous", skuId],
     queryFn: () => bilateralOrderApi.book(accessToken!, skuId!),
     enabled: Boolean(accessToken && user && skuId),
-    retry: false
+    retry: false,
+    refetchInterval: (query) => (query.state.error ? false : 10_000),
+    refetchIntervalInBackground: false
+  });
+}
+
+/**
+ * 玩家视角成交只读查询；按当前用户隔离，只返回自己的成交（脱敏对手）。
+ * I19F：轮询语义与订单簿一致——玩家在线时 10s 刷新、后台不轮询、失败不轮询；
+ * 组件层据此展示「数据可能过期」而非伪造最新状态。
+ */
+export function usePlayerTradesQuery(filters: PlayerTradesFilters) {
+  const { accessToken, user } = useSession();
+  return useQuery({
+    queryKey: ["orders", "trades", user?.id ?? "anonymous", filters],
+    queryFn: () => bilateralOrderApi.trades(accessToken!, filters),
+    enabled: Boolean(accessToken && user),
+    retry: false,
+    refetchInterval: (query) => (query.state.error ? false : 10_000),
+    refetchIntervalInBackground: false
   });
 }
 
@@ -167,6 +208,8 @@ export function useCancelOrderMutation() {
     onSuccess: () => {
       if (user) {
         void queryClient.invalidateQueries({ queryKey: ["orders", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["orders", "book", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["orders", "trades", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["archive", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["ledger", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["inventory", user.id] });

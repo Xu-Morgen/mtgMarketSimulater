@@ -104,6 +104,12 @@
 - 成交落库与待履约持有：每条成交写一行 `bilateral_trades`（status=`matched_pending_fulfillment`），买方已成交资金（数量*限价+已成交 order_fee）从 `order_buy` 预占转 `order_fulfillment` 待履约 hold，卖方已成交库存部分捕获离开持有（`inventory_holds` 收缩到剩余），卖方保证金按已成交/剩余切分；剩余委托保持 `partially_filled`，全成交则双方推进为 `matched_pending_fulfillment`。本期不转移最终所有权、不写 `p2p.trade.settled`、不结算卖方收入/保证金（留 I20B）。
 - 并发与幂等：撮合在 `InventoryService.withLedgerTransaction` 短事务内串行执行，逐 leg 以条件 UPDATE（`WHERE version=? AND remaining_quantity>=?`）扣减双方剩余；`bilateral_trades UNIQUE(buy_order_id, sell_order_id, execution_price_amount)` 保证同一对委托在相同成交价下至多一行成交。并发撮合不会超卖、超扣或重复成交；任一 leg 写入异常整笔回滚，不留半完成成交、状态或 hold。
 
+## I19F P2P 撮合状态玩家只读视图协议
+
+- `GET /v1/orders/trades?skuId=&cursor=&limit=`（player 角色）分页返回当前玩家作为买方或卖方的成交 `PlayerBilateralTradeDto{skuId, role, myOrderId, quantity, executionPrice, fee, pendingFunds, pendingInventoryQuantity, ruleVersion, status, createdAt, updatedAt}`。纯读、无写、无幂等键、无审计；浏览器不得推导或缓存为真相，连接失败时提示数据可能过期。
+- 脱敏对手身份：响应只含当前玩家自己的 `myOrderId`、`role`（buyer/seller）与已转入待履约的资产；对手 userId、对手 orderId 与所有 holdId 一律不返回。买方 `pendingFunds = 数量×成交价+order_fee`、`pendingInventoryQuantity = null`；卖方 `pendingFunds = 已成交保证金`（卖单单位保证金×数量）、`pendingInventoryQuantity = 已离开持有的成交数量`。
+- 撮合顺序、成交价与部分成交语义仍由 `order-matching/v1` 决定；订单簿 `GET /v1/orders/book/{skuId}` 只读聚合、不含用户身份。履约确认/取消（I20B/I20F）、`order.expire` 定时回收（I22B）不在本期；玩家页面只展示服务端状态。
+
 ## I17B 价格历史、每日同步与 AllPrices 回填协议
 
 - `GET /v1/market/quotes/{skuId}/history?range=7d|30d|all` 与 `GET /v1/market/index/history?range=7d|30d|all` 要求有效会话，按自然日采样返回 `PriceHistoryDto`/`MarketIndexHistoryDto`。历史来自只追加的 `price_snapshot_entries`（reference）与 `market_quotes`（game），同日多次同步/重定价取该日最新值；任一价格缺失为 null，空历史返回空 `points` 数组而非 `404`，确保失败同步仍能展示旧价或空态。浏览器不得自行计算曲线或推断缺失值。

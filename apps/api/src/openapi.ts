@@ -20,6 +20,7 @@ export const publicApiPaths = [
   "/v1/orders/buy/{skuId}",
   "/v1/orders/sell/{skuId}",
   "/v1/orders",
+  "/v1/orders/trades",
   "/v1/orders/{orderId}",
     "/v1/orders/{orderId}/cancel",
     "/v1/orders/book/{skuId}",
@@ -140,6 +141,12 @@ export const openApiDocument = {
       get: {
         summary: "分页查询当前玩家的双边委托",
         responses: { "200": { description: "委托分页" }, "401": { description: "认证无效或过期" } }
+      }
+    },
+    "/v1/orders/trades": {
+      get: {
+        summary: "分页查询当前玩家作为买方或卖方的成交（脱敏对手身份，附待履约资产）",
+        responses: { "200": { description: "玩家成交分页" }, "401": { description: "认证无效或过期" } }
       }
     },
     "/v1/orders/{orderId}": {

@@ -46,10 +46,10 @@ function PreviewDetails({ preview, side, limitPrice, limitError }: { preview: Bi
     {limitError ? <p className={styles.tradeError} role="alert">{limitError}</p> : null}
     <p>预计{side === "buy" ? "支出" : "到手（未扣履约时 order_fee）"}：<strong>{formatMoney(preview.estimatedAmount)}</strong></p>
     <p>服务端费用拆分：order_fee {formatMoney({ amount: orderFee, currency: "GAME_CREDIT" })}；fulfillment_deposit {formatMoney({ amount: fulfillmentDeposit, currency: "GAME_CREDIT" })}。</p>
-    <p>本次预占：{side === "buy" ? `买单资金 ${formatMoney(preview.reservedFunds)}（数量×限价 + order_fee）` : `履约保证金 ${formatMoney(preview.reservedFunds)}（库存按服务端锁定，order_fee 留待 I19B/I20B 履约时扣除）`}。</p>
+    <p>本次预占：{side === "buy" ? `买单资金 ${formatMoney(preview.reservedFunds)}（数量×限价 + order_fee）` : `履约保证金 ${formatMoney(preview.reservedFunds)}（库存按服务端锁定，order_fee 在 I19B 撮合时确认、I20B 履约时从卖方收入扣除）`}。</p>
     <p>报价有效至：{formatDate(preview.validUntil)}（委托有效期 {preview.limit.ttlSeconds / 3600} 小时）。</p>
     <p>服务端额度：单笔最多 {preview.limit.maxQuantityPerOrder} 张；今日剩余 {preview.limit.remainingQuantityToday} / {preview.limit.maxQuantityPerUserSkuDay} 张。</p>
-    <p className={styles.secondary}>撮合、模拟履约与到期回收延后至 I19B/I20B/I22B；本委托只会进入 open 状态。</p>
+    <p className={styles.secondary}>挂单成功后服务端会自动撮合（I19B 已上线），委托可能经部分成交推进到待履约；模拟履约与到期回收在 I20B/I22B 上线。</p>
     {unavailable ? <p className={styles.tradeError}>{unavailable}</p> : <p className={styles.tradeReady}>可确认挂单；最终余额、库存、保证金与委托状态以服务端创建响应为准。</p>}
   </section>;
 }

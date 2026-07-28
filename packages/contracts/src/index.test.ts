@@ -6,7 +6,8 @@ import {
   isValidRequestFingerprint,
   isValidRequestId,
   type ApiResponse,
-  type EconomicFactEvent
+  type EconomicFactEvent,
+  type PlayerBilateralTradeDto
 } from "./index.js";
 
 describe("共享契约", () => {
@@ -59,5 +60,43 @@ describe("共享契约", () => {
       error: { code: "IDEMPOTENCY_CONFLICT" }
     });
     expect(JSON.parse(JSON.stringify(event))).toMatchObject({ type: "pack.opened", version: 1 });
+  });
+
+  it("I19F 玩家视角成交 DTO 脱敏对手身份并保留待履约资产字段", () => {
+    const buyerView: PlayerBilateralTradeDto = {
+      id: "trade-1",
+      skuId: "sku-1",
+      role: "buyer",
+      myOrderId: "my-buy-order",
+      quantity: 2,
+      executionPrice: { amount: 200, currency: "GAME_CREDIT" },
+      fee: { amount: 8, currency: "GAME_CREDIT" },
+      pendingFunds: { amount: 408, currency: "GAME_CREDIT" },
+      pendingInventoryQuantity: null,
+      ruleVersion: "order-matching/v1",
+      status: "matched_pending_fulfillment",
+      createdAt: "2026-07-28T00:00:00.000Z",
+      updatedAt: "2026-07-28T00:00:00.000Z"
+    };
+    const sellerView: PlayerBilateralTradeDto = {
+      ...buyerView,
+      role: "seller",
+      myOrderId: "my-sell-order",
+      fee: { amount: 8, currency: "GAME_CREDIT" },
+      pendingFunds: { amount: 40, currency: "GAME_CREDIT" },
+      pendingInventoryQuantity: 2
+    };
+    const serializedBuyer = JSON.parse(JSON.stringify(buyerView)) as Record<string, unknown>;
+    const serializedSeller = JSON.parse(JSON.stringify(sellerView)) as Record<string, unknown>;
+    // 不含对手身份或内部 hold 字段。
+    expect(serializedBuyer).not.toHaveProperty("buyerUserId");
+    expect(serializedBuyer).not.toHaveProperty("sellerUserId");
+    expect(serializedBuyer).not.toHaveProperty("buyOrderId");
+    expect(serializedBuyer).not.toHaveProperty("sellOrderId");
+    expect(serializedBuyer).not.toHaveProperty("buyerFundsHoldId");
+    expect(serializedBuyer).not.toHaveProperty("sellerInventoryHoldId");
+    expect(serializedBuyer).not.toHaveProperty("sellerDepositHoldId");
+    expect(serializedBuyer).toMatchObject({ role: "buyer", myOrderId: "my-buy-order", pendingInventoryQuantity: null });
+    expect(serializedSeller).toMatchObject({ role: "seller", pendingInventoryQuantity: 2 });
   });
 });
