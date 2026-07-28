@@ -65,7 +65,15 @@
 ## I19F P2P 撮合状态玩家只读视图排障
 
 - `GET /v1/orders/trades`（player 角色）是玩家查看自己成交与待履约资产的唯一入口；服务端以 `OrderService.listPlayerTrades` 从 `bilateral_trades` 投影，脱敏对手 userId、对手 orderId 与所有 holdId。若玩家反馈看不到成交，先按 `bilateral_trades.buyer_user_id/seller_user_id` 核对成交归属，再核对前端是否因连接失败展示「数据可能过期」而非伪造空态。
-- 该接口纯读、不写事务、不引幂等键、不写审计；任何缺失或漂移不得通过直接修改 `bilateral_trades` 或前端缓存解决，必须回到撮合/履约（I19B/I20B）与审计链路定位。履约确认/取消（I20B/I20F）与 `order.expire`（I22B）未上线前，待履约资产只可展示、不可操作。
+- 该接口纯读、不写事务、不引幂等键、不写审计；任何缺失或漂移不得通过直接修改 `bilateral_trades` 或前端缓存解决，必须回到撮合/履约（I19B/I20B）与审计链路定位。
+
+## I20B 模拟履约、取消与到期排障
+
+- 履约（`POST /v1/orders/trades/{tradeId}/fulfill`）与取消履约（`/cancel`）由 `OrderService.fulfill`/`cancelTrade` 在单 `InventoryService.withLedgerTransaction` 短事务内结算，买卖任一方均可发起，请求体为空、需 `Idempotency-Key`、指纹仅依赖路径。`POST /v1/orders/trades/{tradeId}/expire`（admin）显式触发成交到期回收，普通玩家 `403`。
+- **正常履约**的资金/库存规则：买方按成交价结算——先 `releaseOrderFunds` 释放撮合时按买单限价预占的全量 `order_fulfillment` hold，再按 数量×成交价+order_fee 扣款，限价（>= 成交价）的差额退回买方 available；库存以成交价为成本转入买方；卖方 `releaseOrderFunds` 返还保证金、`creditAvailableFunds` 收入（数量×成交价-order_fee）；追加 `p2p.trade.settled`（fact_events + outbox('market.fact-event') + market.reprice 任务，market-service 按 liquidity 消费一次 quantity）。**取消履约**：`releaseOrderFunds` 退回买方全量待履约资金、`captureFunds` 扣除卖方保证金（账本 reason 取 hold.reason=`order_fulfillment_deposit`，correlation=`p2p-deposit-forfeited:{tradeId}`）、`restorePartial` 恢复卖方库存；**不写 `p2p.trade.settled`**。
+- 到期回收：`order.expire` 任务由建单/撮合时投递（`uniqueKey=order-expire:{orderId}` / `trade-expire:{tradeId}`，`runAfter=expires_at`/`fulfillment_deadline`），`(type, unique_key)` 唯一索引去重。`OrderService.expireByPayload({kind,id})` 到期把委托转 `expired`（释放剩余预占）或成交转取消履约；状态机条件 UPDATE 保证已 fulfilled/cancelled 不重复迁移。履约期限沿用 `bilateral_order_limits.ttl_seconds`，由 `order-fulfillment/v1`（`resolveFulfillmentDeadline`）派生，写入 `bilateral_trades.fulfillment_deadline`。
+- 并发与幂等：履约/取消在短事务内串行，条件 UPDATE（`WHERE status='matched_pending_fulfillment'`）保证至多一次业务结果；同键同参重放返回首次响应，异参 `IDEMPOTENCY_CONFLICT`。事务回滚测试（`fail_trade_update` 触发器）验证写入异常时无半完成状态、资金/库存/保证金守恒。
+- 按 `bilateral_trades.id` 关联 `fund_holds`（`buyer_funds_hold_id`=`order_fulfillment`、`seller_deposit_hold_id`=`order_fulfillment_deposit`）、`inventory_holds`（卖方 `seller_inventory_hold_id`）、`ledger_entries`（`p2p_buy`/`p2p_sell`/`order_fulfillment_deposit`）、`fact_events`（`p2p.trade.settled`）与审计（`bilateral_trade.fulfilled`/`.cancelled`/`.expired`）。异常定位遵循“禁止直接修数”：任何缺失或漂移必须由补偿命令在同事务写新流水与原因，禁止直接覆盖 `bilateral_trades`、`fund_holds`、`inventory_holdings`、`accounts` 最终值或删除流水/审计。撮合风控（价格边界/频率/自成交标记）延后至 I21B；端到端一致性恢复回归属 I22B。
 
 ## I30B 管理活动与玩家补偿（计划）
 

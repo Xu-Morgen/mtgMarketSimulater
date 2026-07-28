@@ -120,7 +120,15 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 
 - `GET /v1/orders/trades`（player 角色）以 `OrderService.listPlayerTrades` 从 `bilateral_trades` 投影当前玩家作为买方或卖方的成交。纯读、不写事务、不引幂等键、不写审计；浏览器不得推导或缓存为真相，只能展示服务端结果。
 - 响应 `PlayerBilateralTradeDto` 脱敏对手身份：只返回当前玩家自己的 `myOrderId`、`role`（buyer/seller）、成交价（取 maker）、本方已成交 order_fee 与已转入待履约的资产（买方待履约资金 = 数量×成交价+order_fee，卖方待履约资金 = 已成交保证金、待履约库存数量）。对手 userId、对手 orderId 与所有 holdId 一律不返回；`skuId` 可选过滤，`cursor/limit` 整型分页。
-- 撮合顺序、成交价与部分成交语义全部由 `order-matching/v1` 决定；订单簿 `GET /v1/orders/book/{skuId}` 只读聚合、不含用户身份。履约确认/取消（I20B/I20F）、`order.expire` 定时回收（I22B）不在本期；玩家页面只展示服务端状态，连接失败时提示数据可能过期。
+- 撮合顺序、成交价与部分成交语义全部由 `order-matching/v1` 决定；订单簿 `GET /v1/orders/book/{skuId}` 只读聚合、不含用户身份。玩家页面只展示服务端状态，连接失败时提示数据可能过期。
+
+## P2P 模拟履约、取消与到期回收（I20B）
+
+- `modules/orders/application/OrderService` 的 `fulfill`/`cancelTrade` 是模拟履约状态机的唯一结算入口；`expireOrder`/`expireTrade`/`expireByPayload` 供 `order.expire` 任务到期回收。所有路径都在同一个 `InventoryService.withLedgerTransaction` 短事务内，经 users/inventory application 接口协作，不跨界写 `accounts`/`fund_holds`/`inventory_holdings`。
+- **确认履约**（`POST /v1/orders/trades/{tradeId}/fulfill`，player，请求体为空，需 `Idempotency-Key`，买卖任一方均可发起）：买方按成交价结算——先 `releaseOrderFunds` 释放撮合时按买单限价预占的全量 `order_fulfillment` hold（限价 >= 成交价时的差额退回 available），再 `spendAvailableFunds` 扣除 数量×成交价+order_fee；库存以成交价为成本 `acquireInLedgerTransaction` 转入买方；卖方 `releaseOrderFunds` 返还 `order_fulfillment_deposit` 保证金、`creditAvailableFunds` 数量×成交价-order_fee 收入；成交推进为 `fulfilled`；追加 `p2p.trade.settled` 事实事件 + outbox + `market.reprice` 任务（market-service 按 `liquidity` 消费一次 quantity）；写买卖各一条 `bilateral_trade.fulfilled` 审计。
+- **取消履约**（`POST /v1/orders/trades/{tradeId}/cancel`，player，同上）：`applyTradeCancellation` 退回买方全量待履约资金（`releaseOrderFunds`）、`captureFunds` 扣除卖方已冻结保证金（总额下降）、`restorePartialInLedgerTransaction` 把撮合时已 capture 离开持有的数量加回卖方 quantity/available；成交推进为 `cancelled`；**不写 `p2p.trade.settled`**；写买卖各一条 `bilateral_trade.cancelled` 审计。到期回收（`expireTrade`）复用本路径，写 `bilateral_trade.expired` 审计。
+- **到期回收**（`order.expire` 任务，由 `expireByPayload({kind,id})` 派发）：创建委托与撮合成交时分别投递 `runAfter=expires_at`/`fulfillment_deadline`、`uniqueKey=order-expire:{id}`/`trade-expire:{id}` 的 `order.expire` 任务（`(type, unique_key)` 唯一索引保证重复投递不产生多行 job）；到期把 `open/partially_filled` 委托转 `expired`（释放剩余资金/库存/保证金预占）或把 `matched_pending_fulfillment` 成交转取消履约。状态机条件 UPDATE 保证已 fulfilled/cancelled 的实体不重复迁移。
+- 履约期限沿用委托有效期 `bilateral_order_limits.ttl_seconds`，由 `@mtg-market/rules` 的 `order-fulfillment/v1`（`resolveFulfillmentDeadline`）从撮合时刻派生，写入 `bilateral_trades.fulfillment_deadline`。并发与幂等由 SQLite 短事务串行 + 条件 UPDATE（`WHERE status='matched_pending_fulfillment'`）保证至多产生一次业务结果；同键同参重放返回首次响应，异参返回 `IDEMPOTENCY_CONFLICT`。`p2p.trade.settled` 是结算事实，市场只消费、绝不由前端或 AI 触发；不引入实体物流状态。
 
 ## 库存卖出与估值投影（I16F）
 

@@ -108,7 +108,14 @@
 
 - `GET /v1/orders/trades?skuId=&cursor=&limit=`（player 角色）分页返回当前玩家作为买方或卖方的成交 `PlayerBilateralTradeDto{skuId, role, myOrderId, quantity, executionPrice, fee, pendingFunds, pendingInventoryQuantity, ruleVersion, status, createdAt, updatedAt}`。纯读、无写、无幂等键、无审计；浏览器不得推导或缓存为真相，连接失败时提示数据可能过期。
 - 脱敏对手身份：响应只含当前玩家自己的 `myOrderId`、`role`（buyer/seller）与已转入待履约的资产；对手 userId、对手 orderId 与所有 holdId 一律不返回。买方 `pendingFunds = 数量×成交价+order_fee`、`pendingInventoryQuantity = null`；卖方 `pendingFunds = 已成交保证金`（卖单单位保证金×数量）、`pendingInventoryQuantity = 已离开持有的成交数量`。
-- 撮合顺序、成交价与部分成交语义仍由 `order-matching/v1` 决定；订单簿 `GET /v1/orders/book/{skuId}` 只读聚合、不含用户身份。履约确认/取消（I20B/I20F）、`order.expire` 定时回收（I22B）不在本期；玩家页面只展示服务端状态。
+- 撮合顺序、成交价与部分成交语义仍由 `order-matching/v1` 决定；订单簿 `GET /v1/orders/book/{skuId}` 只读聚合、不含用户身份。玩家页面只展示服务端状态。
+
+## I20B 模拟履约、取消与到期协议
+
+- `POST /v1/orders/trades/{tradeId}/fulfill`（player，请求体为空，需 `Idempotency-Key`，买卖任一方均可发起）确认模拟履约：服务端在单短事务内按成交价结算买方扣款（先释放撮合时按买单限价预占的全量 `order_fulfillment` hold，再按 数量×成交价+order_fee 扣款，限价与成交价的差额退回买方 available）、把库存以成交价为成本转入买方、`releaseOrderFunds` 返还卖方保证金、`creditAvailableFunds` 卖方收入（数量×成交价-order_fee），成交推进为 `fulfilled`，并追加 `p2p.trade.settled` 事实事件 + outbox + `market.reprice` 任务；响应 `{trade: BilateralTradeDto, balance}`，`balance` 取请求者视角。已 `fulfilled`/`cancelled` 的成交返回 `409 RESOURCE_CONFLICT`；无关玩家对他人成交返回 `404 RESOURCE_NOT_FOUND`（不泄露存在性）。
+- `POST /v1/orders/trades/{tradeId}/cancel`（player，同上）取消模拟履约：退回买方全量待履约资金、`captureFunds` 扣除卖方已冻结保证金、`restorePartial` 恢复卖方库存（已成交数量加回 quantity/available），成交推进为 `cancelled`，**不产生 `p2p.trade.settled`**；写买卖各一条 `bilateral_trade.cancelled` 审计。
+- 到期回收：创建委托与撮合成交时分别投递 `runAfter=expires_at`/`fulfillment_deadline`、`uniqueKey=order-expire:{id}`/`trade-expire:{id}` 的 `order.expire` 任务（`(type, unique_key)` 唯一索引去重）。`order.expire` handler（`OrderService.expireByPayload({kind,id})`）到期把 `open/partially_filled` 委托转 `expired`（释放剩余预占）或 `matched_pending_fulfillment` 成交转取消履约；`POST /v1/orders/trades/{tradeId}/expire`（admin）供运维/测试显式触发成交到期回收，普通玩家 `403`。状态机条件 UPDATE 保证已终态实体不重复迁移。
+- 履约期限沿用 `bilateral_order_limits.ttl_seconds`，由 `@mtg-market/rules` 的 `order-fulfillment/v1`（`resolveFulfillmentDeadline`）从撮合时刻派生，写入 `bilateral_trades.fulfillment_deadline`，并随 `BilateralTradeDto`/`PlayerBilateralTradeDto.fulfillmentDeadline` 返回。并发与幂等由 SQLite 短事务串行 + 条件 UPDATE 保证至多一次业务结果；同键同参重放返回首次响应，异参 `IDEMPOTENCY_CONFLICT`。本期单一模拟履约类型，不引入实体物流状态。
 
 ## I17B 价格历史、每日同步与 AllPrices 回填协议
 

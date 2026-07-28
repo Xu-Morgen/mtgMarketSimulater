@@ -519,3 +519,228 @@ describe("I19F 玩家成交只读视图", () => {
   });
 });
 
+describe("I20B 模拟履约、取消与到期", () => {
+  // 给卖方先 NPC 买入 seedQuantity 张再挂卖单；返回卖方鉴权。
+  async function seedSellerAndSell(app: Awaited<ReturnType<typeof createTestApp>>["app"], database: ReturnType<typeof openSqliteDatabase>, email: string, seedQuantity: number, sellQuantity: number, sellPrice: number, sellKey: string) {
+    const authorization = await player(app, email, "卖方");
+    expect((await app.inject({ method: "POST", url: `/v1/npc-trades/buy/${ids.sku}`, headers: { authorization, "idempotency-key": `${sellKey}-seed` }, payload: { quoteId: ids.quote, quoteVersion: "market/v1", quantity: seedQuantity, maxUnitPrice: 250 } })).statusCode).toBe(201);
+    const preview = await previewSell(app, authorization, sellQuantity);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/sell/${ids.sku}`, headers: { authorization, "idempotency-key": sellKey }, payload: createBody(preview.data.preview, sellPrice, sellQuantity) })).statusCode).toBe(201);
+    return authorization;
+  }
+
+  // 买方以 buyPrice 挂买单触发撮合；返回 { buyerAuth, tradeId }。
+  async function matchATrade(app: Awaited<ReturnType<typeof createTestApp>>["app"], database: ReturnType<typeof openSqliteDatabase>, buyerEmail: string, buyPrice: number, buyQuantity: number, buyKey: string) {
+    const buyerAuth = await player(app, buyerEmail, "买方");
+    const buyPreview = await previewBuy(app, buyerAuth, buyQuantity);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization: buyerAuth, "idempotency-key": buyKey }, payload: createBody(buyPreview.data.preview, buyPrice, buyQuantity) })).statusCode).toBe(201);
+    const trade = database.prepare("SELECT id, buyer_user_id, seller_user_id, quantity, execution_price_amount, buyer_fee_amount, seller_fee_amount, buyer_funds_hold_id, seller_deposit_hold_id, status, fulfillment_deadline FROM bilateral_trades").get() as { id: string; buyer_user_id: string; seller_user_id: string; quantity: number; execution_price_amount: number; buyer_fee_amount: number; seller_fee_amount: number; buyer_funds_hold_id: string; seller_deposit_hold_id: string; status: string; fulfillment_deadline: string };
+    return { buyerAuth, trade };
+  }
+
+  it("正常履约：扣买方资金、库存转买方、卖方收入到账+保证金返还、写 p2p.trade.settled 与审计", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    await seedSellerAndSell(app, database, `f-sell-${Math.random()}@example.test`, 2, 2, 200, "i20b-fullfill-sell");
+    const { buyerAuth, trade } = await matchATrade(app, database, `f-buy-${Math.random()}@example.test`, 210, 2, "i20b-fullfill-buy");
+    // 成交价取 maker（卖方先入）= 200；买方按买单限价 210 预占待履约资金 2*210+2*4=428；
+    // 履约按成交价结算：买方实欠 2*200+2*4=408，差额 20 退回买方 available。
+    const buyerBefore = (database.prepare("SELECT total_amount, available_amount, frozen_amount FROM accounts WHERE user_id = ?").get(trade.buyer_user_id) as { total_amount: number; available_amount: number; frozen_amount: number });
+    const sellerBefore = (database.prepare("SELECT total_amount, available_amount, frozen_amount FROM accounts WHERE user_id = ?").get(trade.seller_user_id) as { total_amount: number; available_amount: number; frozen_amount: number });
+
+    const res = await app.inject({ method: "POST", url: `/v1/orders/trades/${trade.id}/fulfill`, headers: { authorization: buyerAuth, "idempotency-key": "i20b-fulfill-01" } });
+    expect(res.statusCode).toBe(200);
+    const fulfilled = (database.prepare("SELECT status FROM bilateral_trades WHERE id = ?").get(trade.id) as { status: string }).status;
+    expect(fulfilled).toBe("fulfilled");
+
+    // 买方：total 扣 408（按成交价结算），frozen 扣 428（全量待履约释放），available 加 20（限价溢价退回）。
+    const buyerAfter = (database.prepare("SELECT total_amount, available_amount, frozen_amount FROM accounts WHERE user_id = ?").get(trade.buyer_user_id) as { total_amount: number; available_amount: number; frozen_amount: number });
+    expect(buyerAfter.total_amount).toBe(buyerBefore.total_amount - 408);
+    expect(buyerAfter.frozen_amount).toBe(buyerBefore.frozen_amount - 428);
+    expect(buyerAfter.available_amount).toBe(buyerBefore.available_amount + 20);
+    // 买方库存 +2，成本 = 成交价 200。
+    const buyerHolding = database.prepare("SELECT quantity, available_quantity, average_cost_amount FROM inventory_holdings WHERE user_id = ?").get(trade.buyer_user_id) as { quantity: number; available_quantity: number; average_cost_amount: number };
+    expect(buyerHolding).toMatchObject({ quantity: 2, available_quantity: 2, average_cost_amount: 200 });
+
+    // 卖方：保证金 40 返还（frozen 扣 40、available 加 40）；收入 = 2*200 - 2*4 = 392 到 available。
+    const sellerAfter = (database.prepare("SELECT total_amount, available_amount, frozen_amount FROM accounts WHERE user_id = ?").get(trade.seller_user_id) as { total_amount: number; available_amount: number; frozen_amount: number });
+    expect(sellerAfter.frozen_amount).toBe(sellerBefore.frozen_amount - 40);
+    expect(sellerAfter.available_amount).toBe(sellerBefore.available_amount + 40 + 392);
+    // 卖方库存：原 2 张已成交离开持有，履约后仍为 0（库存已转给买方）。
+    const sellerHolding = database.prepare("SELECT quantity, available_quantity, order_locked_quantity FROM inventory_holdings WHERE user_id = ?").get(trade.seller_user_id) as { quantity: number; available_quantity: number; order_locked_quantity: number };
+    expect(sellerHolding).toMatchObject({ quantity: 0, available_quantity: 0, order_locked_quantity: 0 });
+
+    // 写入 p2p.trade.settled 事实事件与 outbox/reprice 任务（NPC 种子买入此前各写一份，故断言增量）。
+    expect((database.prepare("SELECT COUNT(*) AS count FROM fact_events WHERE event_type = 'p2p.trade.settled'").get() as { count: number }).count).toBe(1);
+    expect((database.prepare("SELECT COUNT(*) AS count FROM outbox WHERE destination = 'market.fact-event'").get() as { count: number }).count).toBeGreaterThanOrEqual(1);
+    expect((database.prepare("SELECT COUNT(*) AS count FROM jobs WHERE type = 'market.reprice'").get() as { count: number }).count).toBeGreaterThanOrEqual(1);
+    // 双方各一条履约审计；账本有买方 debit(p2p_buy)、卖方 credit(p2p_sell)。
+    expect((database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'bilateral_trade.fulfilled' AND entity_id = ?").get(trade.id) as { count: number }).count).toBe(2);
+    const buyerLedger = (database.prepare("SELECT direction, amount, reason FROM ledger_entries WHERE account_id = (SELECT id FROM accounts WHERE user_id = ?) AND reason = 'p2p_buy'").get(trade.buyer_user_id) as { direction: string; amount: number; reason: string });
+    expect(buyerLedger).toMatchObject({ direction: "debit", amount: 408 });
+    const sellerLedger = (database.prepare("SELECT direction, amount, reason FROM ledger_entries WHERE account_id = (SELECT id FROM accounts WHERE user_id = ?) AND reason = 'p2p_sell'").get(trade.seller_user_id) as { direction: string; amount: number; reason: string });
+    expect(sellerLedger).toMatchObject({ direction: "credit", amount: 392 });
+    // 撮合时已投递 trade 到期任务；履约后该 job 仍存在但 handler 会因 status=fulfilled 跳过。
+    expect((database.prepare("SELECT COUNT(*) AS count FROM jobs WHERE type = 'order.expire' AND unique_key = ?").get(`trade-expire:${trade.id}`) as { count: number }).count).toBe(1);
+    await app.close(); database.close();
+  });
+
+  it("取消履约：退回买方资金、扣除卖方保证金、恢复卖方库存，不写 p2p.trade.settled", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    const sellAuth = await seedSellerAndSell(app, database, `c-sell-${Math.random()}@example.test`, 2, 2, 200, "i20b-cancel-sell");
+    const { trade } = await matchATrade(app, database, `c-buy-${Math.random()}@example.test`, 210, 2, "i20b-cancel-buy");
+    const buyerBefore = (database.prepare("SELECT total_amount, available_amount, frozen_amount FROM accounts WHERE user_id = ?").get(trade.buyer_user_id) as { total_amount: number; available_amount: number; frozen_amount: number });
+    const sellerBefore = (database.prepare("SELECT total_amount, available_amount, frozen_amount FROM accounts WHERE user_id = ?").get(trade.seller_user_id) as { total_amount: number; available_amount: number; frozen_amount: number });
+
+    // 卖方发起取消履约。
+    const res = await app.inject({ method: "POST", url: `/v1/orders/trades/${trade.id}/cancel`, headers: { authorization: sellAuth, "idempotency-key": "i20b-cancel-01" } });
+    expect(res.statusCode).toBe(200);
+    expect((database.prepare("SELECT status FROM bilateral_trades WHERE id = ?").get(trade.id) as { status: string }).status).toBe("cancelled");
+
+    // 买方：待履约资金按买单限价预占 = 2*210+2*4=428 全额退回（total 不变、frozen 扣 428、available 加 428）。
+    const buyerAfter = (database.prepare("SELECT total_amount, available_amount, frozen_amount FROM accounts WHERE user_id = ?").get(trade.buyer_user_id) as { total_amount: number; available_amount: number; frozen_amount: number });
+    expect(buyerAfter.total_amount).toBe(buyerBefore.total_amount);
+    expect(buyerAfter.frozen_amount).toBe(buyerBefore.frozen_amount - 428);
+    expect(buyerAfter.available_amount).toBe(buyerBefore.available_amount + 428);
+    // 买方库存未增加。
+    const buyerHolding = database.prepare("SELECT quantity FROM inventory_holdings WHERE user_id = ?").get(trade.buyer_user_id) as { quantity: number } | undefined;
+    expect(buyerHolding ?? { quantity: 0 }).toMatchObject({ quantity: 0 });
+
+    // 卖方：保证金 40 扣除（total 扣 40、frozen 扣 40、available 不变）。
+    const sellerAfter = (database.prepare("SELECT total_amount, available_amount, frozen_amount FROM accounts WHERE user_id = ?").get(trade.seller_user_id) as { total_amount: number; available_amount: number; frozen_amount: number });
+    expect(sellerAfter.total_amount).toBe(sellerBefore.total_amount - 40);
+    expect(sellerAfter.frozen_amount).toBe(sellerBefore.frozen_amount - 40);
+    // 卖方库存恢复：原 2 张成交后离开持有，取消后恢复为 quantity=2、available=2。
+    const sellerHolding = database.prepare("SELECT quantity, available_quantity, order_locked_quantity FROM inventory_holdings WHERE user_id = ?").get(trade.seller_user_id) as { quantity: number; available_quantity: number; order_locked_quantity: number };
+    expect(sellerHolding).toMatchObject({ quantity: 2, available_quantity: 2, order_locked_quantity: 0 });
+
+    // 不写 p2p.trade.settled；写双方取消审计；卖方有 debit 扣除保证金（correlation 标识本次取消）。
+    expect((database.prepare("SELECT COUNT(*) AS count FROM fact_events WHERE event_type = 'p2p.trade.settled'").get() as { count: number }).count).toBe(0);
+    expect((database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'bilateral_trade.cancelled' AND entity_id = ?").get(trade.id) as { count: number }).count).toBe(2);
+    const sellerLedger = (database.prepare("SELECT direction, amount, reason FROM ledger_entries WHERE account_id = (SELECT id FROM accounts WHERE user_id = ?) AND correlation_id = ?").get(trade.seller_user_id, `p2p-deposit-forfeited:${trade.id}`) as { direction: string; amount: number; reason: string });
+    expect(sellerLedger).toMatchObject({ direction: "debit", amount: 40, reason: "order_fulfillment_deposit" });
+    await app.close(); database.close();
+  });
+
+  it("履约/取消幂等重放返回首次结果，同键异参 conflict，已终态状态机防护", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    const sellAuth = await seedSellerAndSell(app, database, `idem-sell-${Math.random()}@example.test`, 2, 2, 200, "i20b-idem-sell");
+    const { buyerAuth, trade } = await matchATrade(app, database, `idem-buy-${Math.random()}@example.test`, 210, 2, "i20b-idem-buy");
+
+    const first = await app.inject({ method: "POST", url: `/v1/orders/trades/${trade.id}/fulfill`, headers: { authorization: buyerAuth, "idempotency-key": "i20b-idem-key" } });
+    expect(first.statusCode).toBe(200);
+    // 同键同参重放返回首次结果（status=fulfilled，仍是 200 + ok）。
+    const replay = await app.inject({ method: "POST", url: `/v1/orders/trades/${trade.id}/fulfill`, headers: { authorization: buyerAuth, "idempotency-key": "i20b-idem-key" } });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toMatchObject({ ok: true });
+
+    // 卖方用同一键对已 fulfilled 的成交再请求 fulfill：状态机防护 → RESOURCE_CONFLICT。
+    const stale = await app.inject({ method: "POST", url: `/v1/orders/trades/${trade.id}/fulfill`, headers: { authorization: sellAuth, "idempotency-key": "i20b-idem-key-seller" } });
+    expect(stale.json()).toMatchObject({ ok: false, error: { code: "RESOURCE_CONFLICT" } });
+
+    // 同键异参（对另一笔成交）→ IDEMPOTENCY_CONFLICT。
+    const conflict = await app.inject({ method: "POST", url: `/v1/orders/trades/00000000-0000-4000-8000-000000000099/fulfill`, headers: { authorization: buyerAuth, "idempotency-key": "i20b-idem-key" } });
+    expect(conflict.json()).toMatchObject({ ok: false, error: { code: "IDEMPOTENCY_CONFLICT" } });
+    await app.close(); database.close();
+  });
+
+  it("无关玩家不可履约/取消他人成交，未成交 trade 不可履约", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    await seedSellerAndSell(app, database, `own-sell-${Math.random()}@example.test`, 2, 2, 200, "i20b-own-sell");
+    const { trade } = await matchATrade(app, database, `own-buy-${Math.random()}@example.test`, 210, 2, "i20b-own-buy");
+
+    // 无关第三方对他人成交 fulfill → 404（不是 403，避免泄露成交存在性）。
+    const observer = await player(app, `obs-${Math.random()}@example.test`, "旁观者");
+    const denied = await app.inject({ method: "POST", url: `/v1/orders/trades/${trade.id}/fulfill`, headers: { authorization: observer, "idempotency-key": "i20b-obs-01" } });
+    expect(denied.statusCode).toBe(404);
+    expect(denied.json()).toMatchObject({ ok: false, error: { code: "RESOURCE_NOT_FOUND" } });
+    await app.close(); database.close();
+  });
+
+  it("撮合投递成交到期任务；到期回收推进成交为取消履约并恢复资产，已终态不重复迁移", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    const sellAuth = await seedSellerAndSell(app, database, `exp-sell-${Math.random()}@example.test`, 2, 2, 200, "i20b-exp-sell");
+    const { trade } = await matchATrade(app, database, `exp-buy-${Math.random()}@example.test`, 210, 2, "i20b-exp-buy");
+    // 撮合已投递 trade 到期任务（runAfter=fulfillment_deadline，约 24h 后）。
+    const expireJob = database.prepare("SELECT run_after FROM jobs WHERE type = 'order.expire' AND unique_key = ?").get(`trade-expire:${trade.id}`) as { run_after: string };
+    expect(expireJob.run_after).toBe(trade.fulfillment_deadline);
+
+    // 普通玩家不可触发到期回收；admin 可。
+    const adminEmail = `exp-admin-${Math.random()}@example.test`;
+    const adminAuthorization = await player(app, adminEmail, "管理员");
+    database.prepare("UPDATE users SET role = 'admin' WHERE email = ?").run(adminEmail);
+    const denied = await app.inject({ method: "POST", url: `/v1/orders/trades/${trade.id}/expire`, headers: { authorization: sellAuth } });
+    expect(denied.statusCode).toBe(403);
+
+    // 把 fulfillment_deadline 提前到过去，使 admin 显式触发能进入到期回收路径。
+    database.prepare("UPDATE bilateral_trades SET fulfillment_deadline = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(trade.id);
+    const expired = await app.inject({ method: "POST", url: `/v1/orders/trades/${trade.id}/expire`, headers: { authorization: adminAuthorization } });
+    expect(expired.statusCode).toBe(200);
+    expect((database.prepare("SELECT status FROM bilateral_trades WHERE id = ?").get(trade.id) as { status: string }).status).toBe("cancelled");
+    // 不写 p2p.trade.settled；卖方库存恢复。
+    expect((database.prepare("SELECT COUNT(*) AS count FROM fact_events WHERE event_type = 'p2p.trade.settled'").get() as { count: number }).count).toBe(0);
+    expect((database.prepare("SELECT quantity FROM inventory_holdings WHERE user_id = (SELECT seller_user_id FROM bilateral_trades WHERE id = ?)").get(trade.id) as { quantity: number }).quantity).toBe(2);
+
+    // 重复触发：已 cancelled 不重复迁移、无第二次取消审计。
+    const auditBefore = (database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'bilateral_trade.expired' AND entity_id = ?").get(trade.id) as { count: number }).count;
+    const expired2 = await app.inject({ method: "POST", url: `/v1/orders/trades/${trade.id}/expire`, headers: { authorization: adminAuthorization } });
+    expect(expired2.statusCode).toBe(200);
+    const auditAfter = (database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'bilateral_trade.expired' AND entity_id = ?").get(trade.id) as { count: number }).count;
+    expect(auditAfter).toBe(auditBefore);
+    await app.close(); database.close();
+  });
+
+  it("委托到期：open 委托转 expired 并释放剩余预占（order.expire handler）", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    const buyerAuth = await player(app, `ord-exp-${Math.random()}@example.test`, "买方");
+    // 用不会自动成交的低买单（限价 100 < 任何卖单）创建，使其停留在 open。
+    const buyPreview = await previewBuy(app, buyerAuth, 2);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization: buyerAuth, "idempotency-key": "i20b-ord-exp-buy" }, payload: createBody(buyPreview.data.preview, 100, 2) })).statusCode).toBe(201);
+    const order = database.prepare("SELECT id, user_id, status, reserved_funds_amount, reserved_funds_hold_id FROM bilateral_orders WHERE side = 'buy'").get() as { id: string; user_id: string; status: string; reserved_funds_amount: number; reserved_funds_hold_id: string };
+    // 建单即投递委托到期任务。
+    expect((database.prepare("SELECT COUNT(*) AS count FROM jobs WHERE type = 'order.expire' AND unique_key = ?").get(`order-expire:${order.id}`) as { count: number }).count).toBe(1);
+    const buyerBefore = (database.prepare("SELECT frozen_amount FROM accounts WHERE user_id = ?").get(order.user_id) as { frozen_amount: number }).frozen_amount;
+
+    // 直接调用 service.expireOrder（模拟 handler 触发）；先把 expires_at 提前到过去。
+    database.prepare("UPDATE bilateral_orders SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(order.id);
+    new (await import("../application/order-service.js")).OrderService(database).expireOrder(order.id);
+    const expiredOrder = database.prepare("SELECT status, cancelled_at FROM bilateral_orders WHERE id = ?").get(order.id) as { status: string; cancelled_at: string };
+    expect(expiredOrder.status).toBe("expired");
+    // 预占资金释放：frozen 减少。
+    const buyerAfter = (database.prepare("SELECT frozen_amount FROM accounts WHERE user_id = ?").get(order.user_id) as { frozen_amount: number }).frozen_amount;
+    expect(buyerAfter).toBe(buyerBefore - order.reserved_funds_amount);
+    // 写 expired 审计。
+    expect((database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'bilateral_order.expired' AND entity_id = ?").get(order.id) as { count: number }).count).toBe(1);
+    await app.close(); database.close();
+  });
+
+  it("履约事务回滚：写入异常时不留半完成状态、资金/库存/保证金守恒", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    await seedSellerAndSell(app, database, `rb-sell-${Math.random()}@example.test`, 2, 2, 200, "i20b-rb-sell");
+    const { buyerAuth, trade } = await matchATrade(app, database, `rb-buy-${Math.random()}@example.test`, 210, 2, "i20b-rb-buy");
+    const buyerId = trade.buyer_user_id; const sellerId = trade.seller_user_id;
+    const totalBefore = (database.prepare("SELECT SUM(total_amount) AS s FROM accounts WHERE user_id IN (?, ?)").get(buyerId, sellerId) as { s: number }).s;
+    const frozenBefore = (database.prepare("SELECT SUM(frozen_amount) AS s FROM accounts WHERE user_id IN (?, ?)").get(buyerId, sellerId) as { s: number }).s;
+    // 在 bilateral_trades 更新上强制失败，验证整笔回滚。
+    database.exec("CREATE TRIGGER fail_trade_update BEFORE UPDATE ON bilateral_trades BEGIN SELECT RAISE(ABORT, 'forced trade update failure'); END");
+    const failed = await app.inject({ method: "POST", url: `/v1/orders/trades/${trade.id}/fulfill`, headers: { authorization: buyerAuth, "idempotency-key": "i20b-rb-01" } });
+    expect(failed.statusCode).toBe(500);
+    // 回滚：成交仍为 matched_pending_fulfillment，资金/库存/保证金守恒（未变更）。
+    expect((database.prepare("SELECT status FROM bilateral_trades WHERE id = ?").get(trade.id) as { status: string }).status).toBe("matched_pending_fulfillment");
+    const totalAfter = (database.prepare("SELECT SUM(total_amount) AS s FROM accounts WHERE user_id IN (?, ?)").get(buyerId, sellerId) as { s: number }).s;
+    const frozenAfter = (database.prepare("SELECT SUM(frozen_amount) AS s FROM accounts WHERE user_id IN (?, ?)").get(buyerId, sellerId) as { s: number }).s;
+    expect(totalAfter).toBe(totalBefore);
+    expect(frozenAfter).toBe(frozenBefore);
+    // 未写 p2p.trade.settled，未写 fulfilled 审计。
+    expect((database.prepare("SELECT COUNT(*) AS count FROM fact_events WHERE event_type = 'p2p.trade.settled'").get() as { count: number }).count).toBe(0);
+    expect((database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'bilateral_trade.fulfilled'").get() as { count: number }).count).toBe(0);
+    await app.close(); database.close();
+  });
+});
+

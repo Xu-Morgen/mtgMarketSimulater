@@ -99,6 +99,24 @@ export class SqliteInventoryRepository {
     return this.findHolding(userId, hold.sku_id)!;
   }
 
+  /**
+   * I20B 取消履约恢复已部分捕获的库存：把 tradeQuantity 加回卖方 holding 的 quantity 与
+   * available（已捕获数量当初从 quantity/order_locked 各扣减，恢复时同样对称加回）。不走 hold，
+   * 因为该 trade 的 inventory hold 已在撮合时按剩余收缩或整笔 captured；恢复直接调整持有与可用。
+   * 不变量 quantity=available+order_locked+tournament_locked 仍成立（order_locked 不变）。
+   */
+  restorePartial(userId: string, skuId: string, quantity: number, correlationId: string, now: string): InventoryHoldingDto {
+    if (!Number.isSafeInteger(quantity) || quantity <= 0) throw new RangeError("恢复库存数量必须为正整数");
+    const row = this.holding(userId, skuId);
+    if (!row) throw new Error("取消履约恢复的库存持有不存在，事务回滚");
+    const updated = this.database.prepare(
+      "UPDATE inventory_holdings SET quantity = quantity + ?, available_quantity = available_quantity + ?, updated_at = ? WHERE id = ?"
+    ).run(quantity, quantity, now, row.id);
+    if (updated.changes !== 1) throw new Error("库存恢复写入失败");
+    this.writeEntry(row.id, "order_restored", quantity, quantity, 0, 0, row.quantity + quantity, row.average_cost_amount, correlationId, now);
+    return this.findHolding(userId, skuId)!;
+  }
+
   list(userId: string, filters: InventoryFilters): Page<InventoryHoldingDto> {
     const where = ["h.user_id = ?"]; const values: unknown[] = [userId];
     if (filters.query) { where.push("lower(p.name) LIKE lower(?)"); values.push(`%${filters.query}%`); }

@@ -4,11 +4,12 @@ import { z } from "zod";
 import { isValidIdempotencyKey } from "@mtg-market/contracts";
 import { failure, success } from "../../../shared/http/api-response.js";
 import { requireRole } from "../../auth/api/auth-routes.js";
-import { orderCancelRequestFingerprint, orderCreateRequestFingerprint, OrderService, type OrderCommandResult } from "../application/order-service.js";
+import { orderCancelRequestFingerprint, orderCreateRequestFingerprint, orderTradeRequestFingerprint, OrderService, type OrderCommandResult, type TradeCommandResult } from "../application/order-service.js";
 
 const skuParams = z.object({ skuId: z.string().uuid() }).strict();
 const previewQuery = z.object({ quantity: z.coerce.number().int().min(1).max(1000) }).strict();
 const orderIdParams = z.object({ orderId: z.string().uuid() }).strict();
+const tradeIdParams = z.object({ tradeId: z.string().uuid() }).strict();
 const tradesListQuery = z.object({
   skuId: z.string().uuid().optional(),
   cursor: z.string().regex(/^\d+$/).optional(),
@@ -100,6 +101,35 @@ export async function registerOrderRoutes(app: FastifyInstance, database: Databa
     const match = orders.match({ skuId, requestId: request.requestId });
     return success(request.requestId, { match });
   });
+  // I20B 确认履约：买卖任一方均可发起；请求体为空，幂等键指纹仅依赖路径。
+  app.post("/v1/orders/trades/:tradeId/fulfill", { preHandler: requireRole("player") }, async (request, reply) => {
+    const tradeId = tradeIdParams.parse(request.params).tradeId;
+    const key = request.headers["idempotency-key"];
+    if (typeof key !== "string" || !isValidIdempotencyKey(key)) return reply.code(400).send(failure(request.requestId, "IDEMPOTENCY_KEY_REQUIRED", "写请求必须携带格式正确的 Idempotency-Key"));
+    const result = orders.fulfill({ userId: request.actor!.id, tradeId, idempotencyKey: key, requestFingerprint: orderTradeRequestFingerprint({ tradeId, action: "fulfill" }), requestId: request.requestId });
+    return resolveTradeCommand(request, reply, result);
+  });
+  // I20B 取消履约：买卖任一方均可发起；请求体为空，幂等键指纹仅依赖路径。
+  app.post("/v1/orders/trades/:tradeId/cancel", { preHandler: requireRole("player") }, async (request, reply) => {
+    const tradeId = tradeIdParams.parse(request.params).tradeId;
+    const key = request.headers["idempotency-key"];
+    if (typeof key !== "string" || !isValidIdempotencyKey(key)) return reply.code(400).send(failure(request.requestId, "IDEMPOTENCY_KEY_REQUIRED", "写请求必须携带格式正确的 Idempotency-Key"));
+    const result = orders.cancelTrade({ userId: request.actor!.id, tradeId, idempotencyKey: key, requestFingerprint: orderTradeRequestFingerprint({ tradeId, action: "cancel" }), requestId: request.requestId });
+    return resolveTradeCommand(request, reply, result);
+  });
+  // I20B 运维/测试显式触发到期回收（委托或成交）；admin 角色保护，幂等。
+  app.post("/v1/orders/trades/:tradeId/expire", { preHandler: requireRole("admin") }, async (request) => {
+    const tradeId = tradeIdParams.parse(request.params).tradeId;
+    orders.expireTrade(tradeId);
+    return success(request.requestId, { tradeId, expired: true });
+  });
+}
+
+/** 统一处理履约/取消履约幂等命令的三种状态（与 resolveCommand 语义一致）。 */
+async function resolveTradeCommand(request: { requestId: string }, reply: { code: (code: number) => { send: (body: unknown) => void } }, result: TradeCommandResult) {
+  if (result.state === "conflict") return reply.code(409).send(failure(request.requestId, "IDEMPOTENCY_CONFLICT", "Idempotency-Key 已用于不同请求"));
+  if (result.state === "in-progress") return reply.code(409).send(failure(request.requestId, "IDEMPOTENCY_IN_PROGRESS", "相同请求正在处理中"));
+  return reply.code(result.state === "replayed" && result.response.ok ? 200 : result.statusCode).send(result.response);
 }
 
 /** 把预览结果映射为 HTTP 响应；限价带、费用与预览版本完全来自服务端。 */

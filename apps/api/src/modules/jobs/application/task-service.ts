@@ -9,6 +9,21 @@ export function enqueueMarketRepriceJob(database: ConstructorParameters<typeof S
 }
 
 /**
+ * I20B：业务模块经由 jobs application 投递订单/成交到期回收。`runAfter` 设为 expires_at 或
+ * fulfillment_deadline，到期由 order.expire handler 推进状态；`(type, unique_key)` 唯一索引
+ * 保证重复投递不产生多行 job。payload 形如 `{ kind: "order" | "trade", id }`。
+ */
+export function enqueueOrderExpireJob(
+  database: ConstructorParameters<typeof SqliteJobRepository>[0],
+  uniqueKey: string,
+  runAfter: string,
+  payload: { kind: "order" | "trade"; id: string },
+  now: string
+): void {
+  new SqliteJobRepository(database).enqueue({ type: "order.expire", payload, uniqueKey, runAfter, maxAttempts: 5 }, now);
+}
+
+/**
  * I17B 每日价格同步调度。以 UTC 自然日为唯一键：`last_scheduled_date` 落后于今日时
  * 投递一次 `prices.sync`（uniqueKey=`prices.sync:daily:<date>`）。停机多日只补投一次
  * 而非逐日补投——历史回填由独立的 `prices.backfill` 负责。条件 UPDATE + 任务唯一键

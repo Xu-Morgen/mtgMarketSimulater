@@ -9,6 +9,7 @@ import { createPriceSyncService, createPriceBackfillService } from "./modules/pr
 import type { PriceSyncLogger } from "./modules/pricing/application/price-sync-service.js";
 import type { PriceBackfillLogger } from "./modules/pricing/application/price-backfill-service.js";
 import { MarketService } from "./modules/market/application/market-service.js";
+import { OrderService } from "./modules/orders/application/order-service.js";
 
 export interface TaskRunner {
   stop(): Promise<void>;
@@ -53,5 +54,8 @@ export function createTaskRegistry(config: ApiConfig, database: Database.Databas
   registry.register("prices.backfill", async (payload, context) => backfill.backfill((payload ?? {}) as { expectedPricesChecksumSha256?: string; allowChecksumMismatch?: boolean }, context));
   const market = new MarketService(database);
   registry.register("market.reprice", async (payload) => { market.reprice((payload ?? {}) as { priceSyncRunId?: string; triggerKey?: string }); });
+  // I20B：到期回收委托（转 expired）或成交（转取消履约）。状态机条件 UPDATE 保证幂等与重复迁移防护。
+  const orders = new OrderService(database);
+  registry.register("order.expire", async (payload) => { orders.expireByPayload(payload); });
   return registry;
 }

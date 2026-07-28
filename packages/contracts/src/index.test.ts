@@ -75,6 +75,7 @@ describe("共享契约", () => {
       pendingInventoryQuantity: null,
       ruleVersion: "order-matching/v1",
       status: "matched_pending_fulfillment",
+      fulfillmentDeadline: "2026-07-29T00:00:00.000Z",
       createdAt: "2026-07-28T00:00:00.000Z",
       updatedAt: "2026-07-28T00:00:00.000Z"
     };
@@ -98,5 +99,28 @@ describe("共享契约", () => {
     expect(serializedBuyer).not.toHaveProperty("sellerDepositHoldId");
     expect(serializedBuyer).toMatchObject({ role: "buyer", myOrderId: "my-buy-order", pendingInventoryQuantity: null });
     expect(serializedSeller).toMatchObject({ role: "seller", pendingInventoryQuantity: 2 });
+  });
+
+  it("I20B 成交 DTO 在履约/取消/待履约三态下均携带待履约期限", () => {
+    for (const status of ["matched_pending_fulfillment", "fulfilled", "cancelled"] as const) {
+      const view: PlayerBilateralTradeDto = {
+        id: "trade-2",
+        skuId: "sku-2",
+        role: "buyer",
+        myOrderId: "order-2",
+        quantity: 1,
+        executionPrice: { amount: 200, currency: "GAME_CREDIT" },
+        fee: { amount: 4, currency: "GAME_CREDIT" },
+        pendingFunds: { amount: 204, currency: "GAME_CREDIT" },
+        pendingInventoryQuantity: null,
+        ruleVersion: "order-matching/v1",
+        status,
+        fulfillmentDeadline: "2026-07-29T00:00:00.000Z",
+        createdAt: "2026-07-28T00:00:00.000Z",
+        updatedAt: "2026-07-28T00:00:00.000Z"
+      };
+      const serialized = JSON.parse(JSON.stringify(view)) as Record<string, unknown>;
+      expect(serialized).toMatchObject({ status, fulfillmentDeadline: "2026-07-29T00:00:00.000Z" });
+    }
   });
 });

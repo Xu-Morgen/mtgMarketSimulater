@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { INITIAL_FUNDING, INITIAL_FUNDING_RULE_VERSION, MARKET_RULE_VERSION, ORDER_MATCH_RULE_VERSION, ORDER_PREVIEW_VERSION, ORDER_RULE_VERSION, calculateMarketQuote, calculateOrderFees, checkSelfTrade, isWithinOrderLimitBand, marketQuoteValidUntil, matchOrders, openPack, packSlotProbabilities, propagateMarketPressure, resolveInitialFunding, resolveOrderLimitBand, validateOrderCancellation, type MatchOrderInput, type PackRuleInput } from "./index.js";
+import { INITIAL_FUNDING, INITIAL_FUNDING_RULE_VERSION, MARKET_RULE_VERSION, ORDER_FULFILLMENT_RULE_VERSION, ORDER_MATCH_RULE_VERSION, ORDER_PREVIEW_VERSION, ORDER_RULE_VERSION, calculateMarketQuote, calculateOrderFees, checkSelfTrade, isFulfillmentOverdue, isWithinOrderLimitBand, marketQuoteValidUntil, matchOrders, openPack, packSlotProbabilities, propagateMarketPressure, resolveFulfillmentDeadline, resolveInitialFunding, resolveOrderLimitBand, validateOrderCancellation, validateTradeCancellation, validateTradeFulfillment, type MatchOrderInput, type PackRuleInput } from "./index.js";
 
 const PACK_RULE: PackRuleInput = {
   version: "pack/v1",
@@ -235,5 +235,45 @@ describe("I19B 撮合规则", () => {
 
   it("规则版本固定且可追溯", () => {
     expect(ORDER_MATCH_RULE_VERSION).toBe("order-matching/v1");
+  });
+});
+
+describe("I20B 履约规则", () => {
+  it("按 ttl_seconds 从撮合时刻派生 UTC ISO 8601 待履约期限", () => {
+    const deadline = resolveFulfillmentDeadline(ORDER_FULFILLMENT_RULE_VERSION, 86_400, "2026-07-28T00:00:00.000Z");
+    expect(deadline).toBe("2026-07-29T00:00:00.000Z");
+  });
+
+  it("相同输入产生相同期限（可重放）", () => {
+    const a = resolveFulfillmentDeadline(ORDER_FULFILLMENT_RULE_VERSION, 3_600, "2026-07-28T12:00:00.000Z");
+    const b = resolveFulfillmentDeadline(ORDER_FULFILLMENT_RULE_VERSION, 3_600, "2026-07-28T12:00:00.000Z");
+    expect(a).toBe(b);
+    expect(a).toBe("2026-07-28T13:00:00.000Z");
+  });
+
+  it("拒绝未知版本、非正 ttl 与坏时间", () => {
+    expect(() => resolveFulfillmentDeadline("v0", 60, "2026-07-28T00:00:00.000Z")).toThrow("履约规则版本");
+    expect(() => resolveFulfillmentDeadline(ORDER_FULFILLMENT_RULE_VERSION, 0, "2026-07-28T00:00:00.000Z")).toThrow("委托有效期");
+    expect(() => resolveFulfillmentDeadline(ORDER_FULFILLMENT_RULE_VERSION, 60, "2026-07-28")).toThrow("UTC ISO 8601");
+  });
+
+  it("仅 matched_pending_fulfillment 可确认履约或取消履约", () => {
+    expect(validateTradeFulfillment("matched_pending_fulfillment")).toEqual({ ok: true, currentStatus: "matched_pending_fulfillment" });
+    expect(validateTradeFulfillment("fulfilled")).toEqual({ ok: false, reason: "not_fulfillable" });
+    expect(validateTradeFulfillment("cancelled")).toEqual({ ok: false, reason: "not_fulfillable" });
+    expect(validateTradeCancellation("matched_pending_fulfillment")).toEqual({ ok: true, currentStatus: "matched_pending_fulfillment" });
+    expect(validateTradeCancellation("fulfilled")).toEqual({ ok: false, reason: "not_cancellable" });
+    expect(validateTradeCancellation("cancelled")).toEqual({ ok: false, reason: "not_cancellable" });
+  });
+
+  it("isFulfillmentOverdue 严格按字符串比较且校验时间格式", () => {
+    expect(isFulfillmentOverdue(ORDER_FULFILLMENT_RULE_VERSION, "2026-07-29T00:00:00.000Z", "2026-07-29T00:00:00.000Z")).toBe(true);
+    expect(isFulfillmentOverdue(ORDER_FULFILLMENT_RULE_VERSION, "2026-07-29T00:00:00.000Z", "2026-07-28T23:59:59.999Z")).toBe(false);
+    expect(() => isFulfillmentOverdue("v0", "2026-07-29T00:00:00.000Z", "2026-07-29T00:00:00.000Z")).toThrow("履约规则版本");
+    expect(() => isFulfillmentOverdue(ORDER_FULFILLMENT_RULE_VERSION, "2026-07-29", "2026-07-29T00:00:00.000Z")).toThrow("待履约期限");
+  });
+
+  it("履约规则版本固定且可追溯", () => {
+    expect(ORDER_FULFILLMENT_RULE_VERSION).toBe("order-fulfillment/v1");
   });
 });

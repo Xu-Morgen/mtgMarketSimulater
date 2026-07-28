@@ -2,18 +2,24 @@ import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import {
   calculateOrderFees,
+  isFulfillmentOverdue,
   isWithinOrderLimitBand,
   matchOrders,
+  ORDER_FULFILLMENT_RULE_VERSION,
   ORDER_MATCH_RULE_VERSION,
   ORDER_PREVIEW_VERSION,
   ORDER_RULE_VERSION,
+  resolveFulfillmentDeadline,
   resolveOrderLimitBand,
   validateOrderCancellation,
+  validateTradeCancellation,
+  validateTradeFulfillment,
   type MatchLeg,
   type MatchOrderInput
 } from "@mtg-market/rules";
 import {
   canonicalizeRequest,
+  type AccountBalanceDto,
   type ApiErrorCode,
   type ApiResponse,
   type BilateralOrderBookDto,
@@ -29,15 +35,21 @@ import {
   type PlayerBilateralTradeDto
 } from "@mtg-market/contracts";
 import { InventoryService } from "../../inventory/application/inventory-service.js";
+import { enqueueMarketRepriceJob, enqueueOrderExpireJob } from "../../jobs/application/task-service.js";
 import { MarketService } from "../../market/application/market-service.js";
 import { UserService } from "../../users/application/user-service.js";
 import { success, failure } from "../../../shared/http/api-response.js";
 import {
   assertPositiveQuantity,
   BILATERAL_TRADE_ENTITY_TYPE,
+  isExpirableOrder,
+  ORDER_EXPIRE_TASK_PREFIX,
   ORDER_FULFILLMENT_DEPOSIT_HOLD_REASON,
   ORDER_FULFILLMENT_FUND_HOLD_REASON,
-  ORDER_HOLD_ENTITY_TYPE
+  ORDER_HOLD_ENTITY_TYPE,
+  P2P_BUY_LEDGER_REASON,
+  P2P_DEPOSIT_FORFEITED_CORRELATION_PREFIX,
+  P2P_SELL_LEDGER_REASON
 } from "../domain/order.js";
 
 type LimitsRow = {
@@ -103,6 +115,19 @@ type TradeRow = {
   status: string;
   created_at: string;
   updated_at: string;
+  fulfillment_deadline: string;
+};
+
+/**
+ * I20B 履约/取消/到期用例读取的完整成交行；含 holdIds 与卖单单位保证金、卖方原 inventory hold
+ * 数量。holdIds 仅在服务端事务内使用，绝不写入响应或前端 DTO。
+ */
+type FullTradeRow = TradeRow & {
+  buyer_funds_hold_id: string | null;
+  seller_inventory_hold_id: string | null;
+  seller_deposit_hold_id: string | null;
+  seller_inventory_quantity: number;
+  sell_unit_fulfillment_deposit_amount: number;
 };
 
 /** I19F 玩家成交只读查询行；比 TradeRow 多读卖方待履约库存数量与单位保证金（用于推导已成交保证金）。 */
@@ -116,10 +141,20 @@ export type OrderCommandResult =
   | { state: "conflict" }
   | { state: "in-progress" };
 
+/** I20B 履约/取消履约的响应；trade 为脱敏成交 DTO，balance 取请求者视角便于前端展示。 */
+export type TradeCommandResponse = { trade: BilateralTradeDto; balance: AccountBalanceDto };
+export type TradeCommandResult =
+  | { state: "completed"; statusCode: number; response: ApiResponse<TradeCommandResponse> }
+  | { state: "replayed"; statusCode: number; response: ApiResponse<TradeCommandResponse> }
+  | { state: "conflict" }
+  | { state: "in-progress" };
+
 /**
- * I18B 的双边委托用例。Order 模块只经 Market/User/Inventory 的 application 接口协作；
- * 委托、资金/库存预占、审计和幂等结果共享一个 SQLite 短事务。撮合、模拟履约与
- * p2p.trade.settled 事实事件延后至 I19B/I20B。
+ * I18B 的双边委托、I19B 的撮合与 I20B 的模拟履约用例。Order 模块只经 Market/User/Inventory
+ * 的 application 接口协作；委托、撮合、履约、取消、到期、资金/库存/保证金结算、审计和幂等结果
+ * 均在同一个 SQLite 短事务内提交或回滚。撮合不转移最终所有权、不写 p2p.trade.settled；
+ * 履约结算所有权转移与卖方收入/保证金、写 p2p.trade.settled；取消履约退回买方资金、扣除卖方
+ * 保证金并恢复卖方库存，不写 p2p.trade.settled。order.expire 到期把委托转 expired、成交转取消履约。
  */
 export class OrderService {
   private readonly inventory: InventoryService;
@@ -247,6 +282,8 @@ export class OrderService {
         quoteId: quote.id, quoteVersion: quote.rule_version, previewVersion: input.previewVersion,
         reservedFunds: reservedFundsAmount, reservedFundsHoldId, inventoryHoldId, expiresAt
       }, now);
+      // I20B：委托创建即投递到期回收任务（runAfter=expires_at；uniqueKey 去重，重复投递不产生多行 job）。
+      this.enqueueOrderExpire({ kind: "order", id: orderId, runAfter: expiresAt });
       const response = success(input.requestId, { order });
       this.completeIdempotency(input.userId, input.idempotencyKey, 201, response, now);
       return { state: "completed", statusCode: 201, response };
@@ -323,6 +360,192 @@ export class OrderService {
       const response = success(input.requestId, { order });
       this.completeIdempotency(input.userId, input.idempotencyKey, 200, response, now);
       return { state: "completed", statusCode: 200, response };
+    });
+  }
+
+  /**
+   * I20B 确认履约：在单个 SQLite 短事务内扣买方待履约资金、把库存转入买方、结算卖方收入（已扣
+   * order_fee）、返还卖方保证金，并追加 `p2p.trade.settled` 事实事件与重定价任务；不引入实体物流状态。
+   * 买卖任一方均可发起。状态机由条件 UPDATE（`WHERE status='matched_pending_fulfillment'`）保证并发与
+   * 重放至多产生一次业务结果；幂等键同参重放返回首次响应，异参返回 conflict。
+   */
+  fulfill(input: {
+    userId: string;
+    tradeId: string;
+    idempotencyKey: string;
+    requestFingerprint: string;
+    requestId: string;
+    now?: Date;
+  }): TradeCommandResult {
+    const now = (input.now ?? new Date()).toISOString();
+    return this.inventory.withLedgerTransaction(() => {
+      const existing = this.findIdempotency(input.userId, input.idempotencyKey);
+      if (existing) return this.tradeIdempotencyResult(existing, input.requestFingerprint);
+      try {
+        this.database.prepare(
+          "INSERT INTO idempotency_requests (id, actor_id, idempotency_key, request_fingerprint, status, response_status, response_json, created_at, completed_at) VALUES (?, ?, ?, ?, 'running', NULL, NULL, ?, NULL)"
+        ).run(randomUUID(), input.userId, input.idempotencyKey, input.requestFingerprint, now);
+      } catch {
+        const raced = this.findIdempotency(input.userId, input.idempotencyKey);
+        return raced ? this.tradeIdempotencyResult(raced, input.requestFingerprint) : { state: "in-progress" };
+      }
+
+      const trade = this.findFullTradeRow(input.tradeId);
+      if (!trade || (trade.buyer_user_id !== input.userId && trade.seller_user_id !== input.userId))
+        return this.tradeFail(input, now, 404, "RESOURCE_NOT_FOUND", "未找到该成交");
+      const validation = validateTradeFulfillment(trade.status);
+      if (!validation.ok)
+        return this.tradeFail(input, now, 409, "RESOURCE_CONFLICT", `当前状态 ${trade.status} 不可确认履约`);
+
+      const buyerFee = trade.buyer_fee_amount;
+      const sellerFee = trade.seller_fee_amount;
+      const grossSellerRevenue = trade.quantity * trade.execution_price_amount;
+      // 卖方收入 = 数量×成交价 - 已成交 order_fee（撮合时未预占 order_fee，这里从收入扣除）。
+      const sellerRevenue = Math.max(0, grossSellerRevenue - sellerFee);
+      // 买方实际欠款 = 数量×成交价 + 已成交 order_fee（按成交价结算，不是买单限价）。
+      const buyerOwed = trade.quantity * trade.execution_price_amount + buyerFee;
+
+      // 买方扣款：撮合时按买单限价预占的待履约资金 hold 可能高于实际欠款（限价 >= 成交价）；
+      // 先释放全量 hold 退回 available，再按成交价扣款，使限价与成交价之间的差额回到买方。
+      let buyerBalance: AccountBalanceDto | null = null;
+      if (trade.buyer_funds_hold_id) {
+        const released = this.users.releaseOrderFunds(trade.buyer_user_id, trade.buyer_funds_hold_id, now);
+        if (released === "not-active") throw new Error(`履约买方资金释放失败：hold ${trade.buyer_funds_hold_id} 非活跃，事务回滚`);
+        const spent = this.users.funds().spendAvailableFunds(trade.buyer_user_id, buyerOwed, now, `p2p-buy:${trade.id}`, P2P_BUY_LEDGER_REASON);
+        if (spent === "insufficient") throw new Error("履约买方按成交价扣款失败：资金不足，事务回滚");
+        buyerBalance = spent;
+      }
+
+      // 买方库存转入：以成交价为成本取得数量。
+      this.inventory.acquireInLedgerTransaction({
+        userId: trade.buyer_user_id,
+        skuId: trade.sku_id,
+        quantityDelta: trade.quantity,
+        unitCostAmount: trade.execution_price_amount,
+        reason: P2P_BUY_LEDGER_REASON,
+        correlationId: trade.id,
+        now
+      });
+
+      // 卖方保证金返还：releaseFunds 把保证金 hold 退回 available。
+      if (trade.seller_deposit_hold_id) {
+        const released = this.users.releaseOrderFunds(trade.seller_user_id, trade.seller_deposit_hold_id, now);
+        if (released === "not-active") throw new Error(`履约卖方保证金返还失败：hold ${trade.seller_deposit_hold_id} 非活跃，事务回滚`);
+      }
+
+      // 卖方收入到账（已扣 order_fee，可视为 0 但不报错）。
+      if (sellerRevenue > 0) {
+        const credited = this.users.funds().creditAvailableFunds(trade.seller_user_id, sellerRevenue, now, `p2p-sell:${trade.id}`, P2P_SELL_LEDGER_REASON);
+        if (credited === "missing") throw new Error("履约卖方收入到账失败：账户不存在，事务回滚");
+      }
+
+      // 成交状态推进为 fulfilled（条件 UPDATE，并发至多一次）。
+      const advanced = this.database.prepare(
+        "UPDATE bilateral_trades SET status = 'fulfilled', updated_at = ? WHERE id = ? AND status = 'matched_pending_fulfillment'"
+      ).run(now, trade.id);
+      if (advanced.changes !== 1) throw new Error(`履约成交状态迁移冲突：trade=${trade.id}，事务回滚`);
+
+      // p2p.trade.settled 事实事件：market-service 按 liquidity 维度消费一次 quantity。
+      const eventId = this.writeP2pTradeSettledEvent(trade, now);
+
+      this.users.writeEconomicAudit(trade.buyer_user_id, "bilateral_trade.fulfilled", "bilateral_trade", trade.id, input.requestId, {
+        skuId: trade.sku_id, role: "buyer", quantity: trade.quantity, executionPrice: trade.execution_price_amount,
+        buyerFee, sellerFee, sellerRevenue, ruleVersion: trade.rule_version, buyerFundsHoldId: trade.buyer_funds_hold_id,
+        eventId, fulfillmentDeadline: trade.fulfillment_deadline
+      }, now);
+      this.users.writeEconomicAudit(trade.seller_user_id, "bilateral_trade.fulfilled", "bilateral_trade", trade.id, input.requestId, {
+        skuId: trade.sku_id, role: "seller", quantity: trade.quantity, executionPrice: trade.execution_price_amount,
+        buyerFee, sellerFee, sellerRevenue, ruleVersion: trade.rule_version, sellerDepositHoldId: trade.seller_deposit_hold_id,
+        eventId, fulfillmentDeadline: trade.fulfillment_deadline
+      }, now);
+
+      const response = success(input.requestId, { trade: this.toTradeDto(this.findTradeRow(trade.id)!), balance: buyerBalance ?? this.users.balance(trade.buyer_user_id)! });
+      this.completeTradeIdempotency(input.userId, input.idempotencyKey, 200, response, now);
+      return { state: "completed", statusCode: 200, response };
+    });
+  }
+
+  /**
+   * I20B 取消履约：在单个 SQLite 短事务内退回买方资金、扣除（没收）卖方已冻结保证金、恢复卖方库存，
+   * 并写完整审计；不产生 `p2p.trade.settled`。买卖任一方均可发起，到期回收也复用本路径。
+   */
+  cancelTrade(input: {
+    userId: string;
+    tradeId: string;
+    idempotencyKey: string;
+    requestFingerprint: string;
+    requestId: string;
+    now?: Date;
+  }): TradeCommandResult {
+    const now = (input.now ?? new Date()).toISOString();
+    return this.inventory.withLedgerTransaction(() => {
+      const existing = this.findIdempotency(input.userId, input.idempotencyKey);
+      if (existing) return this.tradeIdempotencyResult(existing, input.requestFingerprint);
+      try {
+        this.database.prepare(
+          "INSERT INTO idempotency_requests (id, actor_id, idempotency_key, request_fingerprint, status, response_status, response_json, created_at, completed_at) VALUES (?, ?, ?, ?, 'running', NULL, NULL, ?, NULL)"
+        ).run(randomUUID(), input.userId, input.idempotencyKey, input.requestFingerprint, now);
+      } catch {
+        const raced = this.findIdempotency(input.userId, input.idempotencyKey);
+        return raced ? this.tradeIdempotencyResult(raced, input.requestFingerprint) : { state: "in-progress" };
+      }
+
+      const trade = this.findFullTradeRow(input.tradeId);
+      if (!trade || (trade.buyer_user_id !== input.userId && trade.seller_user_id !== input.userId))
+        return this.tradeFail(input, now, 404, "RESOURCE_NOT_FOUND", "未找到该成交");
+      const validation = validateTradeCancellation(trade.status);
+      if (!validation.ok)
+        return this.tradeFail(input, now, 409, "RESOURCE_CONFLICT", `当前状态 ${trade.status} 不可取消履约`);
+
+      this.applyTradeCancellation(trade, input.requestId, now, "bilateral_trade.cancelled");
+
+      const response = success(input.requestId, { trade: this.toTradeDto(this.findTradeRow(trade.id)!), balance: this.users.balance(input.userId)! });
+      this.completeTradeIdempotency(input.userId, input.idempotencyKey, 200, response, now);
+      return { state: "completed", statusCode: 200, response };
+    });
+  }
+
+  /**
+   * I20B 到期回收入口（供 order.expire handler 调用）。payload `{ kind, id }`：
+   * - `order`：未撮合完且 expires_at<=now 的委托转 expired 并释放剩余资金/库存/保证金预占。
+   * - `trade`：待履约且 fulfillment_deadline<=now 的成交走取消履约路径（系统 actor）。
+   * 已迁移到终态的实体直接跳过（幂等），失败由 TaskWorker 重试。
+   */
+  expireByPayload(payload: unknown, now = new Date()): void {
+    const cast = payload as { kind?: string; id?: string };
+    if (cast.kind === "order" && typeof cast.id === "string") this.expireOrder(cast.id, now);
+    else if (cast.kind === "trade" && typeof cast.id === "string") this.expireTrade(cast.id, now);
+    // 未知 payload 静默跳过：handler 不应因坏 payload 让任务进入死信，状态机兜底已足够。
+  }
+
+  /** 到期委托：条件 UPDATE 转 expired 并释放剩余预占；非 expirable 或未到期则跳过。 */
+  expireOrder(orderId: string, now = new Date()): void {
+    const iso = now.toISOString();
+    this.inventory.withLedgerTransaction(() => {
+      const row = this.findOrderRow(orderId);
+      if (!row || !isExpirableOrder(row.status as OrderStatus)) return;
+      if (row.expires_at > iso) return; // 未到期（重复投递或时钟漂移）跳过。
+      const advanced = this.database.prepare(
+        "UPDATE bilateral_orders SET status = 'expired', cancelled_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND status IN ('open', 'partially_filled') AND version = ?"
+      ).run(iso, iso, orderId, row.version);
+      if (advanced.changes !== 1) return; // 并发已被撤单或撮合，跳过。
+      this.releaseOrderReservedFunds(row, iso);
+      this.users.writeEconomicAudit(row.user_id, "bilateral_order.expired", "bilateral_order", orderId, `order.expire:${orderId}`, {
+        side: row.side, skuId: row.sku_id, remainingQuantity: row.remaining_quantity,
+        releasedFunds: row.reserved_funds_amount, releasedInventoryQuantity: row.side === "sell" ? row.remaining_quantity : 0,
+        expiresAt: row.expires_at
+      }, iso);
+    });
+  }
+
+  /** 到期成交：待履约且期限已过则走取消履约路径（系统 actor，无幂等键）；终态跳过。 */
+  expireTrade(tradeId: string, now = new Date()): void {
+    const iso = now.toISOString();
+    this.inventory.withLedgerTransaction(() => {
+      const trade = this.findFullTradeRow(tradeId);
+      if (!trade || trade.status !== "matched_pending_fulfillment") return;
+      if (!isFulfillmentOverdue(ORDER_FULFILLMENT_RULE_VERSION, trade.fulfillment_deadline, iso)) return;
+      this.applyTradeCancellation(trade, `order.expire:${tradeId}`, iso, "bilateral_trade.expired");
     });
   }
 
@@ -548,23 +771,144 @@ export class OrderService {
       }
     }
 
-    this.database.prepare(
-      `INSERT INTO bilateral_trades (id, sku_id, buy_order_id, sell_order_id, buyer_user_id, seller_user_id, quantity, execution_price_amount, buyer_fee_amount, seller_fee_amount, buyer_funds_hold_id, seller_inventory_hold_id, seller_deposit_hold_id, seller_inventory_quantity, rule_version, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'matched_pending_fulfillment', ?, ?)`
-    ).run(tradeId, buyOrder.sku_id, buyOrder.id, sellOrder.id, buyOrder.user_id, sellOrder.user_id, leg.quantity, leg.executionPrice, buyerFeeAmount, sellerFeeAmount, buyerFundsHoldId, sellerInventoryHoldId, sellerDepositHoldId, leg.quantity, leg.ruleVersion, now, now);
+    // I20B：履约期限沿用委托有效期 ttl_seconds，从撮合时刻起算；到期由 order.expire 把成交推进为取消履约。
+    const fulfillmentDeadline = resolveFulfillmentDeadline(ORDER_FULFILLMENT_RULE_VERSION, this.limits().ttl_seconds, now);
 
-    this.users.writeEconomicAudit(buyOrder.user_id, "bilateral_order.matched", "bilateral_trade", tradeId, requestId, { skuId: buyOrder.sku_id, side: "buy", buyOrderId: buyOrder.id, sellOrderId: sellOrder.id, quantity: leg.quantity, executionPrice: leg.executionPrice, buyerFee: buyerFeeAmount, ruleVersion: leg.ruleVersion, buyerFundsHoldId }, now);
-    this.users.writeEconomicAudit(sellOrder.user_id, "bilateral_order.matched", "bilateral_trade", tradeId, requestId, { skuId: sellOrder.sku_id, side: "sell", buyOrderId: buyOrder.id, sellOrderId: sellOrder.id, quantity: leg.quantity, executionPrice: leg.executionPrice, sellerFee: sellerFeeAmount, ruleVersion: leg.ruleVersion, sellerInventoryHoldId, sellerDepositHoldId }, now);
+    this.database.prepare(
+      `INSERT INTO bilateral_trades (id, sku_id, buy_order_id, sell_order_id, buyer_user_id, seller_user_id, quantity, execution_price_amount, buyer_fee_amount, seller_fee_amount, buyer_funds_hold_id, seller_inventory_hold_id, seller_deposit_hold_id, seller_inventory_quantity, rule_version, status, fulfillment_deadline, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'matched_pending_fulfillment', ?, ?, ?)`
+    ).run(tradeId, buyOrder.sku_id, buyOrder.id, sellOrder.id, buyOrder.user_id, sellOrder.user_id, leg.quantity, leg.executionPrice, buyerFeeAmount, sellerFeeAmount, buyerFundsHoldId, sellerInventoryHoldId, sellerDepositHoldId, leg.quantity, leg.ruleVersion, fulfillmentDeadline, now, now);
+
+    // I20B：撮合成功后投递到期回收任务（uniqueKey 去重，重复投递不会产生多行 job）。
+    this.enqueueOrderExpire({ kind: "trade", id: tradeId, runAfter: fulfillmentDeadline });
+
+    this.users.writeEconomicAudit(buyOrder.user_id, "bilateral_order.matched", "bilateral_trade", tradeId, requestId, { skuId: buyOrder.sku_id, side: "buy", buyOrderId: buyOrder.id, sellOrderId: sellOrder.id, quantity: leg.quantity, executionPrice: leg.executionPrice, buyerFee: buyerFeeAmount, ruleVersion: leg.ruleVersion, buyerFundsHoldId, fulfillmentDeadline }, now);
+    this.users.writeEconomicAudit(sellOrder.user_id, "bilateral_order.matched", "bilateral_trade", tradeId, requestId, { skuId: sellOrder.sku_id, side: "sell", buyOrderId: buyOrder.id, sellOrderId: sellOrder.id, quantity: leg.quantity, executionPrice: leg.executionPrice, sellerFee: sellerFeeAmount, ruleVersion: leg.ruleVersion, sellerInventoryHoldId, sellerDepositHoldId, fulfillmentDeadline }, now);
 
     return this.findTradeRow(tradeId) ?? null;
   }
 
   private selectTradeSql(): string {
-    return "SELECT id, sku_id, buy_order_id, sell_order_id, buyer_user_id, seller_user_id, quantity, execution_price_amount, buyer_fee_amount, seller_fee_amount, rule_version, status, created_at, updated_at FROM bilateral_trades";
+    return "SELECT id, sku_id, buy_order_id, sell_order_id, buyer_user_id, seller_user_id, quantity, execution_price_amount, buyer_fee_amount, seller_fee_amount, rule_version, status, fulfillment_deadline, created_at, updated_at FROM bilateral_trades";
   }
 
   private findTradeRow(tradeId: string): TradeRow | undefined {
     return this.database.prepare(`${this.selectTradeSql()} WHERE id = ?`).get(tradeId) as TradeRow | undefined;
+  }
+
+  /** I20B 履约/取消/到期用例读取完整成交行（含 holdIds 与卖方单位保证金/库存数量）。 */
+  private selectFullTradeSql(): string {
+    return "SELECT t.id, t.sku_id, t.buy_order_id, t.sell_order_id, t.buyer_user_id, t.seller_user_id, t.quantity, t.execution_price_amount, t.buyer_fee_amount, t.seller_fee_amount, t.buyer_funds_hold_id, t.seller_inventory_hold_id, t.seller_deposit_hold_id, t.seller_inventory_quantity, t.rule_version, t.status, t.fulfillment_deadline, t.created_at, t.updated_at, s.unit_fulfillment_deposit_amount AS sell_unit_fulfillment_deposit_amount FROM bilateral_trades t JOIN bilateral_orders s ON s.id = t.sell_order_id";
+  }
+
+  private findFullTradeRow(tradeId: string): FullTradeRow | undefined {
+    return this.database.prepare(`${this.selectFullTradeSql()} WHERE t.id = ?`).get(tradeId) as FullTradeRow | undefined;
+  }
+
+  /**
+   * I20B 取消履约的核心资产恢复逻辑，玩家取消与到期回收共用：退回买方资金、扣除卖方保证金、
+   * 恢复卖方库存，并把成交推进为 cancelled（条件 UPDATE）。无幂等键（由调用方在外层事务包裹）。
+   */
+  private applyTradeCancellation(trade: FullTradeRow, requestId: string, now: string, auditAction: string): void {
+    // 买方资金退回：releaseFunds 把待履约资金 hold 退回 available。
+    if (trade.buyer_funds_hold_id) {
+      const released = this.users.releaseOrderFunds(trade.buyer_user_id, trade.buyer_funds_hold_id, now);
+      if (released === "not-active") throw new Error(`取消履约买方资金退回失败：hold ${trade.buyer_funds_hold_id} 非活跃，事务回滚`);
+    }
+    // 卖方保证金扣除：captureFunds 释放并扣除保证金 hold，写 debit 账本。
+    if (trade.seller_deposit_hold_id) {
+      const captured = this.users.funds().captureFunds(trade.seller_user_id, trade.seller_deposit_hold_id, now, `${P2P_DEPOSIT_FORFEITED_CORRELATION_PREFIX}:${trade.id}`);
+      if (captured === "not-active") throw new Error(`取消履约卖方保证金扣除失败：hold ${trade.seller_deposit_hold_id} 非活跃，事务回滚`);
+    }
+    // 卖方库存恢复：把撮合时已 capture 离开持有的数量加回 quantity/available。
+    this.inventory.restorePartialInLedgerTransaction({
+      userId: trade.seller_user_id,
+      skuId: trade.sku_id,
+      quantity: trade.seller_inventory_quantity,
+      correlationId: trade.id,
+      now
+    });
+
+    const advanced = this.database.prepare(
+      "UPDATE bilateral_trades SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'matched_pending_fulfillment'"
+    ).run(now, trade.id);
+    if (advanced.changes !== 1) throw new Error(`取消履约成交状态迁移冲突：trade=${trade.id}，事务回滚`);
+
+    this.users.writeEconomicAudit(trade.buyer_user_id, auditAction, "bilateral_trade", trade.id, requestId, {
+      skuId: trade.sku_id, role: "buyer", quantity: trade.quantity, executionPrice: trade.execution_price_amount,
+      buyerFee: trade.buyer_fee_amount, sellerFee: trade.seller_fee_amount, ruleVersion: trade.rule_version,
+      buyerFundsHoldId: trade.buyer_funds_hold_id, fulfillmentDeadline: trade.fulfillment_deadline
+    }, now);
+    this.users.writeEconomicAudit(trade.seller_user_id, auditAction, "bilateral_trade", trade.id, requestId, {
+      skuId: trade.sku_id, role: "seller", quantity: trade.quantity, executionPrice: trade.execution_price_amount,
+      buyerFee: trade.buyer_fee_amount, sellerFee: trade.seller_fee_amount, ruleVersion: trade.rule_version,
+      sellerInventoryHoldId: trade.seller_inventory_hold_id, sellerDepositHoldId: trade.seller_deposit_hold_id,
+      restoredInventoryQuantity: trade.seller_inventory_quantity, fulfillmentDeadline: trade.fulfillment_deadline
+    }, now);
+  }
+
+  /** I20B 到期委托释放剩余资金/库存/保证金预占（与撤单释放同语义，但写 expired 审计）。 */
+  private releaseOrderReservedFunds(row: OrderRow, now: string): void {
+    if (row.reserved_funds_hold_id) {
+      const released = this.users.releaseOrderFunds(row.user_id, row.reserved_funds_hold_id, now);
+      if (released === "not-active") throw new Error(`到期委托资金释放失败：hold ${row.reserved_funds_hold_id} 非活跃，事务回滚`);
+    }
+    if (row.inventory_hold_id) {
+      const released = this.inventory.release({ userId: row.user_id, holdId: row.inventory_hold_id, correlationId: row.id, now });
+      if (released === "not-active") throw new Error(`到期委托库存释放失败：hold ${row.inventory_hold_id} 非活跃，事务回滚`);
+    }
+  }
+
+  /** I20B 写入 p2p.trade.settled 事实事件 + outbox + 重定价任务；market-service 按 liquidity 消费一次 quantity。 */
+  private writeP2pTradeSettledEvent(trade: FullTradeRow, now: string): string {
+    const eventId = randomUUID();
+    const event = {
+      id: eventId,
+      type: "p2p.trade.settled" as const,
+      version: 1 as const,
+      occurredAt: now,
+      correlationId: trade.id,
+      payload: {
+        tradeId: trade.id, skuId: trade.sku_id, side: "p2p" as const, quantity: trade.quantity,
+        executionPrice: { amount: trade.execution_price_amount, currency: "GAME_CREDIT" as const },
+        buyerFee: { amount: trade.buyer_fee_amount, currency: "GAME_CREDIT" as const },
+        sellerFee: { amount: trade.seller_fee_amount, currency: "GAME_CREDIT" as const },
+        ruleVersion: trade.rule_version
+      }
+    };
+    this.database.prepare(
+      "INSERT INTO fact_events (id, event_type, aggregate_type, aggregate_id, version, payload_json, occurred_at) VALUES (?, 'p2p.trade.settled', 'bilateral_trade', ?, 1, ?, ?)"
+    ).run(eventId, trade.id, JSON.stringify(event), now);
+    this.database.prepare(
+      "INSERT INTO outbox (id, event_id, destination, payload_json, status, created_at, dispatched_at) VALUES (?, ?, 'market.fact-event', ?, 'pending', ?, NULL)"
+    ).run(randomUUID(), eventId, JSON.stringify(event), now);
+    enqueueMarketRepriceJob(this.database, `fact-event:${eventId}`, now);
+    return eventId;
+  }
+
+  /** I20B 投递 order.expire 任务（uniqueKey 去重，重复投递不产生多行 job）。须在外层事务内调用。 */
+  private enqueueOrderExpire(input: { kind: "order" | "trade"; id: string; runAfter: string }): void {
+    const uniqueKey = input.kind === "order" ? `${ORDER_EXPIRE_TASK_PREFIX.order}:${input.id}` : `${ORDER_EXPIRE_TASK_PREFIX.trade}:${input.id}`;
+    enqueueOrderExpireJob(this.database, uniqueKey, input.runAfter, { kind: input.kind, id: input.id }, input.runAfter);
+  }
+
+  private tradeIdempotencyResult(existing: IdempotencyRow, fingerprint: string): TradeCommandResult {
+    if (existing.request_fingerprint !== fingerprint) return { state: "conflict" };
+    if (existing.status !== "completed" || !existing.response_status || !existing.response_json) return { state: "in-progress" };
+    return { state: "replayed", statusCode: existing.response_status, response: JSON.parse(existing.response_json) as ApiResponse<TradeCommandResponse> };
+  }
+
+  private tradeFail(input: { userId: string; idempotencyKey: string; requestId: string }, now: string, statusCode: number, code: ApiErrorCode, message: string): TradeCommandResult {
+    const response = failure(input.requestId, code, message);
+    this.completeTradeIdempotency(input.userId, input.idempotencyKey, statusCode, response, now);
+    return { state: "completed", statusCode, response };
+  }
+
+  private completeTradeIdempotency(actorId: string, key: string, statusCode: number, response: ApiResponse<TradeCommandResponse>, now: string): void {
+    const updated = this.database.prepare(
+      "UPDATE idempotency_requests SET status = 'completed', response_status = ?, response_json = ?, completed_at = ? WHERE actor_id = ? AND idempotency_key = ? AND status = 'running'"
+    ).run(statusCode, JSON.stringify(response), now, actorId, key);
+    if (updated.changes !== 1) throw new Error("履约/取消幂等请求状态损坏");
   }
 
   private toTradeDto(row: TradeRow): BilateralTradeDto {
@@ -580,6 +924,7 @@ export class OrderService {
       buyerFee: money(row.buyer_fee_amount),
       sellerFee: money(row.seller_fee_amount),
       ruleVersion: row.rule_version,
+      fulfillmentDeadline: row.fulfillment_deadline,
       status: row.status as BilateralTradeDto["status"],
       createdAt: row.created_at,
       updatedAt: row.updated_at
@@ -588,7 +933,7 @@ export class OrderService {
 
   /** I19F 玩家成交查询读取卖方待履约库存数量与卖方单位保证金；不读取 holdId（不返回给浏览器）。 */
   private selectPlayerTradeSql(): string {
-    return "SELECT t.id, t.sku_id, t.buy_order_id, t.sell_order_id, t.buyer_user_id, t.seller_user_id, t.quantity, t.execution_price_amount, t.buyer_fee_amount, t.seller_fee_amount, t.seller_inventory_quantity, t.rule_version, t.status, t.created_at, t.updated_at, s.unit_fulfillment_deposit_amount AS sell_unit_fulfillment_deposit_amount FROM bilateral_trades t JOIN bilateral_orders s ON s.id = t.sell_order_id";
+    return "SELECT t.id, t.sku_id, t.buy_order_id, t.sell_order_id, t.buyer_user_id, t.seller_user_id, t.quantity, t.execution_price_amount, t.buyer_fee_amount, t.seller_fee_amount, t.seller_inventory_quantity, t.rule_version, t.status, t.fulfillment_deadline, t.created_at, t.updated_at, s.unit_fulfillment_deposit_amount AS sell_unit_fulfillment_deposit_amount FROM bilateral_trades t JOIN bilateral_orders s ON s.id = t.sell_order_id";
   }
 
   /** 把成交行投影为玩家视角 DTO：只返回当前玩家自己的委托 ID、角色与待履约资产，脱敏对手。 */
@@ -609,6 +954,7 @@ export class OrderService {
       pendingFunds: money(pendingFundsAmount),
       pendingInventoryQuantity: isBuyer ? null : row.seller_inventory_quantity,
       ruleVersion: row.rule_version,
+      fulfillmentDeadline: row.fulfillment_deadline,
       status: row.status as PlayerBilateralTradeDto["status"],
       createdAt: row.created_at,
       updatedAt: row.updated_at
@@ -687,4 +1033,9 @@ export function orderCreateRequestFingerprint(body: unknown): string {
 
 export function orderCancelRequestFingerprint(body: unknown): string {
   return createHash("sha256").update(canonicalizeRequest(body)).digest("hex");
+}
+
+/** I20B 履约/取消履约请求指纹：请求体为空，指纹仅依赖 tradeId 与 action，确保同键同参重放。 */
+export function orderTradeRequestFingerprint(input: { tradeId: string; action: "fulfill" | "cancel" }): string {
+  return createHash("sha256").update(canonicalizeRequest(input)).digest("hex");
 }

@@ -592,8 +592,17 @@ export interface BilateralOrderBookDto {
   capturedAt: string;
 }
 
-/** I19B 成交记录状态；I19B 只产出 matched_pending_fulfillment，履约/取消留 I20B。 */
+/**
+ * I19B 成交记录状态：撮合只产出 `matched_pending_fulfillment`；I20B 履约结算推进为 `fulfilled`，
+ * 取消履约或到期回收推进为 `cancelled`。
+ */
 export type BilateralTradeStatus = "matched_pending_fulfillment" | "fulfilled" | "cancelled";
+
+/**
+ * I20B 模拟履约类型。本期只支持 `simulated`：成交后的确认/取消是经济结算动作，不引入实体
+ * 物流状态；客户端只能展示服务端返回的类型，不可自行推导或扩展。
+ */
+export type BilateralFulfillmentType = "simulated";
 
 /** I19B 单笔 P2P 成交；撮合只把预占转为待履约持有，不转移最终所有权、不写 p2p.trade.settled。 */
 export interface BilateralTradeDto {
@@ -612,6 +621,11 @@ export interface BilateralTradeDto {
   sellerFee: Money;
   /** 撮合规则版本，可追溯价格—时间优先与成交价取 maker 的语义。 */
   ruleVersion: string;
+  /**
+   * I20B 待履约期限（UTC ISO 8601）：撮合时刻起按 `bilateral_order_limits.ttl_seconds` 派生，
+   * 到期由 order.expire 任务把成交推进为取消履约；已 fulfilled/cancelled 的成交不再迁移。
+   */
+  fulfillmentDeadline: string;
   status: BilateralTradeStatus;
   createdAt: string;
   updatedAt: string;
@@ -650,6 +664,11 @@ export interface PlayerBilateralTradeDto {
   pendingInventoryQuantity: number | null;
   /** 撮合规则版本，可追溯价格—时间优先与成交价取 maker 的语义。 */
   ruleVersion: string;
+  /**
+   * I20B 待履约期限（UTC ISO 8601）。成交在到期前可由买卖任一方确认履约或取消履约；
+   * 到期后由 order.expire 任务推进为取消履约，不再可操作。
+   */
+  fulfillmentDeadline: string;
   status: BilateralTradeStatus;
   createdAt: string;
   updatedAt: string;

@@ -83,6 +83,11 @@ export class InventoryService {
     assertPositiveQuantity(input.captureQuantity);
     return this.inventory.capturePartial(input.userId, input.holdId, input.captureQuantity, input.correlationId, input.now);
   }
+  /** I20B 取消履约恢复已部分捕获的库存入口；只在 OrderService 经济短事务回调内调用。 */
+  restorePartialInLedgerTransaction(input: { userId: string; skuId: string; quantity: number; correlationId: string; now: string }) {
+    assertPositiveQuantity(input.quantity);
+    return this.inventory.restorePartial(input.userId, input.skuId, input.quantity, input.correlationId, input.now);
+  }
   list(userId: string, filters: InventoryFilters) {
     return this.inventory.list(userId, filters);
   }

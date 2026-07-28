@@ -528,3 +528,48 @@ function isMaker(buy: MatchOrderInput, sell: MatchOrderInput): boolean {
 function makerPrice(buy: MatchOrderInput, sell: MatchOrderInput): number {
   return isMaker(buy, sell) ? buy.limitPrice : sell.limitPrice;
 }
+
+/**
+ * I20B：模拟履约纯规则。成交价、收入与保证金的实际金额全部从服务端的成交事实字段读取，
+ * 规则只负责派生待履约期限（沿用委托有效期 ttl_seconds）与校验履约/取消/到期的状态前置，
+ * 避免把可结算语义复制到 API、前端或 AI。纯函数、显式校验、可重放。
+ */
+export const ORDER_FULFILLMENT_RULE_VERSION = "order-fulfillment/v1" as const;
+
+/**
+ * 从撮合时刻与委托有效期派生待履约期限。沿用 bilateral_order_limits.ttl_seconds，使
+ * 履约窗口与委托有效期语义一致；到期由 order.expire 把成交推进为取消履约。
+ */
+export function resolveFulfillmentDeadline(ruleVersion: string, ttlSeconds: number, matchedAt: string): string {
+  if (ruleVersion !== ORDER_FULFILLMENT_RULE_VERSION) throw new RangeError(`不支持的履约规则版本：${ruleVersion}`);
+  positiveInteger(ttlSeconds, "委托有效期秒数");
+  const parsed = Date.parse(matchedAt);
+  if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== matchedAt) throw new RangeError("撮合时刻必须是 UTC ISO 8601");
+  return new Date(parsed + ttlSeconds * 1_000).toISOString();
+}
+
+/** 履约前置状态：仅 `matched_pending_fulfillment` 可确认履约；fulfilled/cancelled 返回显式错误。 */
+export type TradeFulfillmentResult = { ok: true; currentStatus: "matched_pending_fulfillment" } | { ok: false; reason: "not_fulfillable" };
+
+export function validateTradeFulfillment(currentStatus: string): TradeFulfillmentResult {
+  if (currentStatus === "matched_pending_fulfillment") return { ok: true, currentStatus };
+  return { ok: false, reason: "not_fulfillable" };
+}
+
+/** 取消履约前置状态：仅 `matched_pending_fulfillment` 可取消履约；fulfilled/cancelled 返回显式错误。 */
+export type TradeCancellationResult = { ok: true; currentStatus: "matched_pending_fulfillment" } | { ok: false; reason: "not_cancellable" };
+
+export function validateTradeCancellation(currentStatus: string): TradeCancellationResult {
+  if (currentStatus === "matched_pending_fulfillment") return { ok: true, currentStatus };
+  return { ok: false, reason: "not_cancellable" };
+}
+
+/** 判断成交是否已到待履约期限；逾期可由 order.expire 推进为取消履约。 */
+export function isFulfillmentOverdue(ruleVersion: string, fulfillmentDeadline: string, now: string): boolean {
+  if (ruleVersion !== ORDER_FULFILLMENT_RULE_VERSION) throw new RangeError(`不支持的履约规则版本：${ruleVersion}`);
+  const deadline = Date.parse(fulfillmentDeadline);
+  const current = Date.parse(now);
+  if (!Number.isFinite(deadline) || new Date(deadline).toISOString() !== fulfillmentDeadline) throw new RangeError("待履约期限必须是 UTC ISO 8601");
+  if (!Number.isFinite(current) || new Date(current).toISOString() !== now) throw new RangeError("当前时间必须是 UTC ISO 8601");
+  return fulfillmentDeadline <= now;
+}

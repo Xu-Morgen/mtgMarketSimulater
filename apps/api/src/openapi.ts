@@ -21,6 +21,9 @@ export const publicApiPaths = [
   "/v1/orders/sell/{skuId}",
   "/v1/orders",
   "/v1/orders/trades",
+  "/v1/orders/trades/{tradeId}/fulfill",
+  "/v1/orders/trades/{tradeId}/cancel",
+  "/v1/orders/trades/{tradeId}/expire",
   "/v1/orders/{orderId}",
     "/v1/orders/{orderId}/cancel",
     "/v1/orders/book/{skuId}",
@@ -147,6 +150,24 @@ export const openApiDocument = {
       get: {
         summary: "分页查询当前玩家作为买方或卖方的成交（脱敏对手身份，附待履约资产）",
         responses: { "200": { description: "玩家成交分页" }, "401": { description: "认证无效或过期" } }
+      }
+    },
+    "/v1/orders/trades/{tradeId}/fulfill": {
+      post: {
+        summary: "以幂等键确认模拟履约：扣买方资金、库存转买方、结算卖方收入/费用、返还保证金、追加 p2p.trade.settled",
+        responses: { "200": { description: "已履约或幂等重放" }, "400": { description: "缺少幂等键" }, "404": { description: "未找到该成交" }, "409": { description: "状态不可履约或幂等冲突" } }
+      }
+    },
+    "/v1/orders/trades/{tradeId}/cancel": {
+      post: {
+        summary: "以幂等键取消模拟履约：退回买方资金、扣除卖方保证金、恢复卖方库存，不产生 p2p.trade.settled",
+        responses: { "200": { description: "已取消或幂等重放" }, "400": { description: "缺少幂等键" }, "404": { description: "未找到该成交" }, "409": { description: "状态不可取消或幂等冲突" } }
+      }
+    },
+    "/v1/orders/trades/{tradeId}/expire": {
+      post: {
+        summary: "管理员显式触发某笔成交的到期回收（推进为取消履约）",
+        responses: { "200": { description: "已处理到期回收" }, "401": { description: "认证无效或过期" }, "403": { description: "需要管理员权限" } }
       }
     },
     "/v1/orders/{orderId}": {
