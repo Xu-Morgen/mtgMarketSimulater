@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { INITIAL_FUNDING, INITIAL_FUNDING_RULE_VERSION, MARKET_RULE_VERSION, ORDER_PREVIEW_VERSION, ORDER_RULE_VERSION, calculateMarketQuote, calculateOrderFees, isWithinOrderLimitBand, marketQuoteValidUntil, openPack, packSlotProbabilities, propagateMarketPressure, resolveInitialFunding, resolveOrderLimitBand, validateOrderCancellation, type PackRuleInput } from "./index.js";
+import { INITIAL_FUNDING, INITIAL_FUNDING_RULE_VERSION, MARKET_RULE_VERSION, ORDER_MATCH_RULE_VERSION, ORDER_PREVIEW_VERSION, ORDER_RULE_VERSION, calculateMarketQuote, calculateOrderFees, checkSelfTrade, isWithinOrderLimitBand, marketQuoteValidUntil, matchOrders, openPack, packSlotProbabilities, propagateMarketPressure, resolveInitialFunding, resolveOrderLimitBand, validateOrderCancellation, type MatchOrderInput, type PackRuleInput } from "./index.js";
 
 const PACK_RULE: PackRuleInput = {
   version: "pack/v1",
@@ -125,5 +125,115 @@ describe("I18B 双边委托规则", () => {
   it("规则版本与预览版本固定且可追溯", () => {
     expect(ORDER_RULE_VERSION).toBe("order/v1");
     expect(ORDER_PREVIEW_VERSION).toBe("order-preview/v1");
+  });
+});
+
+describe("I19B 撮合规则", () => {
+  const baseBuy = (overrides: Partial<MatchOrderInput> & Pick<MatchOrderInput, "id" | "userId">): MatchOrderInput => ({
+    limitPrice: 200, remainingQuantity: 5, createdAt: "2026-07-27T00:00:00.000Z", sequence: 1, ...overrides
+  });
+  const baseSell = (overrides: Partial<MatchOrderInput> & Pick<MatchOrderInput, "id" | "userId">): MatchOrderInput => ({
+    limitPrice: 200, remainingQuantity: 5, createdAt: "2026-07-27T00:00:01.000Z", sequence: 2, ...overrides
+  });
+
+  it("自成交校验同用户拒绝，不同用户通过", () => {
+    expect(checkSelfTrade("u-buy", "u-sell")).toEqual({ ok: true });
+    expect(checkSelfTrade("u-same", "u-same")).toEqual({ ok: false, reason: "self_trade" });
+    expect(() => checkSelfTrade("", "u-sell")).toThrow("用户");
+  });
+
+  it("价格优先：更高买价先成交更低卖价，并按部分成交推进", () => {
+    const result = matchOrders({
+      ruleVersion: ORDER_MATCH_RULE_VERSION, minimumPrice: 1,
+      buyOrders: [baseBuy({ id: "b-high", userId: "u-b1", limitPrice: 210 }), baseBuy({ id: "b-low", userId: "u-b2", limitPrice: 190 })],
+      sellOrders: [baseSell({ id: "s-1", userId: "u-s1", limitPrice: 200, remainingQuantity: 7 })]
+    });
+    // b-high(210)先于 s-1(200)入簿，b-high 为 maker，成交价=买限价 210；低买 190 低于卖价 200 不成交。
+    expect(result.legs).toHaveLength(1);
+    expect(result.legs[0]).toMatchObject({ buyOrderId: "b-high", sellOrderId: "s-1", executionPrice: 210, quantity: 5 });
+    expect(result.remaining).toEqual({ "b-high": 0, "b-low": 5, "s-1": 2 });
+  });
+
+  it("时间优先：同价时先入订单簿（createdAt 更早）为 maker，成交价取 maker 限价", () => {
+    const result = matchOrders({
+      ruleVersion: ORDER_MATCH_RULE_VERSION, minimumPrice: 1,
+      buyOrders: [baseBuy({ id: "b-early", userId: "u-b1", limitPrice: 200, createdAt: "2026-07-27T00:00:00.000Z", sequence: 1 }), baseBuy({ id: "b-late", userId: "u-b2", limitPrice: 200, createdAt: "2026-07-27T00:00:10.000Z", sequence: 3, remainingQuantity: 2 })],
+      sellOrders: [baseSell({ id: "s-1", userId: "u-s1", limitPrice: 200, remainingQuantity: 4, createdAt: "2026-07-27T00:00:05.000Z", sequence: 2 })]
+    });
+    // b-early(00:00) 先于 s-1(00:05)，b-early 是 maker，成交价=200；b-early 5 张被 s-1 吃 4 张剩 1。
+    expect(result.legs[0]).toMatchObject({ buyOrderId: "b-early", sellOrderId: "s-1", executionPrice: 200, quantity: 4 });
+    // b-early 仍有 1 张，s-1 耗尽；b-late(200) 与剩余 b-early 都不能再成交（无卖盘）。
+    expect(result.remaining).toEqual({ "b-early": 1, "b-late": 2, "s-1": 0 });
+    expect(result.legs).toHaveLength(1);
+  });
+
+  it("成交价取 maker 限价：卖单先入时以卖限价成交", () => {
+    const result = matchOrders({
+      ruleVersion: ORDER_MATCH_RULE_VERSION, minimumPrice: 1,
+      buyOrders: [baseBuy({ id: "b-1", userId: "u-b1", limitPrice: 210, remainingQuantity: 2, createdAt: "2026-07-27T00:00:10.000Z", sequence: 5 })],
+      sellOrders: [baseSell({ id: "s-early", userId: "u-s1", limitPrice: 205, remainingQuantity: 2, createdAt: "2026-07-27T00:00:00.000Z", sequence: 1 })]
+    });
+    // 卖单先入为 maker，成交价=卖限价 205（而非买限价 210）。
+    expect(result.legs[0]).toMatchObject({ executionPrice: 205, quantity: 2 });
+  });
+
+  it("createdAt 相同时按 sequence 决定 maker", () => {
+    const sameTime = "2026-07-27T00:00:00.000Z";
+    const result = matchOrders({
+      ruleVersion: ORDER_MATCH_RULE_VERSION, minimumPrice: 1,
+      buyOrders: [baseBuy({ id: "b-1", userId: "u-b1", limitPrice: 210, remainingQuantity: 1, createdAt: sameTime, sequence: 2 })],
+      sellOrders: [baseSell({ id: "s-1", userId: "u-s1", limitPrice: 205, remainingQuantity: 1, createdAt: sameTime, sequence: 1 })]
+    });
+    // sequence 小者为 maker：卖单 seq=1 是 maker，成交价=205。
+    expect(result.legs[0]).toMatchObject({ executionPrice: 205 });
+  });
+
+  it("部分成交与边界：买限价刚好等于卖限价可成交", () => {
+    const result = matchOrders({
+      ruleVersion: ORDER_MATCH_RULE_VERSION, minimumPrice: 1,
+      buyOrders: [baseBuy({ id: "b-1", userId: "u-b1", limitPrice: 200, remainingQuantity: 3 })],
+      sellOrders: [baseSell({ id: "s-1", userId: "u-s1", limitPrice: 200, remainingQuantity: 5 })]
+    });
+    expect(result.legs).toHaveLength(1);
+    expect(result.legs[0]).toMatchObject({ quantity: 3 });
+    expect(result.remaining).toEqual({ "b-1": 0, "s-1": 2 });
+  });
+
+  it("自成交跳过且双方仍可与其他对手盘成交", () => {
+    const result = matchOrders({
+      ruleVersion: ORDER_MATCH_RULE_VERSION, minimumPrice: 1,
+      // u-a 同时挂买(200,seq=1,先入 maker)和卖(200,seq=2)：自成交跳过，推进买方游标。
+      buyOrders: [baseBuy({ id: "b-a", userId: "u-a", limitPrice: 200, createdAt: "2026-07-27T00:00:00.000Z", sequence: 1 }), baseBuy({ id: "b-b", userId: "u-b", limitPrice: 200, createdAt: "2026-07-27T00:00:05.000Z", sequence: 3, remainingQuantity: 2 })],
+      sellOrders: [baseSell({ id: "s-a", userId: "u-a", limitPrice: 200, remainingQuantity: 5, createdAt: "2026-07-27T00:00:02.000Z", sequence: 2 })]
+    });
+    // b-a 与 s-a 自成交跳过（b-a 是 maker 推进买方游标）；b-b 与 s-a 成交 2 张。
+    expect(result.skippedSelfTrade).toEqual([{ buyOrderId: "b-a", sellOrderId: "s-a" }]);
+    expect(result.legs).toHaveLength(1);
+    expect(result.legs[0]).toMatchObject({ buyOrderId: "b-b", sellOrderId: "s-a", quantity: 2 });
+    expect(result.remaining).toEqual({ "b-a": 5, "b-b": 0, "s-a": 3 });
+  });
+
+  it("确定性重放：相同输入产生相同 legs、remaining 与 skippedSelfTrade", () => {
+    const input = {
+      ruleVersion: ORDER_MATCH_RULE_VERSION, minimumPrice: 1,
+      buyOrders: [baseBuy({ id: "b-1", userId: "u-b1", limitPrice: 205 }), baseBuy({ id: "b-2", userId: "u-b2", limitPrice: 200 })],
+      sellOrders: [baseSell({ id: "s-1", userId: "u-s1", limitPrice: 200, remainingQuantity: 8 })]
+    };
+    const first = matchOrders(input);
+    expect(matchOrders(input)).toEqual(first);
+    expect(first.legs.map((leg) => leg.buyOrderId)).toEqual(["b-1", "b-2"]);
+  });
+
+  it("拒绝未知版本、非法数量/限价、坏时间、重复 id 与空输入列表", () => {
+    expect(() => matchOrders({ ruleVersion: "v0", minimumPrice: 1, buyOrders: [], sellOrders: [] })).toThrow("撮合规则版本");
+    expect(() => matchOrders({ ruleVersion: ORDER_MATCH_RULE_VERSION, minimumPrice: -1, buyOrders: [], sellOrders: [] })).toThrow("最低报价");
+    expect(() => matchOrders({ ruleVersion: ORDER_MATCH_RULE_VERSION, minimumPrice: 1, buyOrders: [baseBuy({ id: "b-1", userId: "u-b1", remainingQuantity: 0 })], sellOrders: [baseSell({ id: "s-1", userId: "u-s1" })] })).toThrow("剩余数量");
+    expect(() => matchOrders({ ruleVersion: ORDER_MATCH_RULE_VERSION, minimumPrice: 1, buyOrders: [baseBuy({ id: "b-1", userId: "u-b1", limitPrice: -1 })], sellOrders: [baseSell({ id: "s-1", userId: "u-s1" })] })).toThrow("限价");
+    expect(() => matchOrders({ ruleVersion: ORDER_MATCH_RULE_VERSION, minimumPrice: 1, buyOrders: [baseBuy({ id: "b-1", userId: "u-b1", createdAt: "2026-07-27" })], sellOrders: [baseSell({ id: "s-1", userId: "u-s1" })] })).toThrow("UTC ISO 8601");
+    expect(() => matchOrders({ ruleVersion: ORDER_MATCH_RULE_VERSION, minimumPrice: 1, buyOrders: [baseBuy({ id: "dup", userId: "u-b1" })], sellOrders: [baseSell({ id: "dup", userId: "u-s1" })] })).toThrow("唯一");
+  });
+
+  it("规则版本固定且可追溯", () => {
+    expect(ORDER_MATCH_RULE_VERSION).toBe("order-matching/v1");
   });
 });

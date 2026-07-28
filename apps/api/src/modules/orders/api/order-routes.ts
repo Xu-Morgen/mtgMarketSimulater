@@ -45,6 +45,7 @@ export async function registerOrderRoutes(app: FastifyInstance, database: Databa
     if (typeof key !== "string" || !isValidIdempotencyKey(key)) return reply.code(400).send(failure(request.requestId, "IDEMPOTENCY_KEY_REQUIRED", "写请求必须携带格式正确的 Idempotency-Key"));
     const body = createBody.parse(request.body);
     const result = orders.create({ userId: request.actor!.id, skuId, side: "buy", idempotencyKey: key, requestFingerprint: orderCreateRequestFingerprint({ ...body, skuId, side: "buy" }), requestId: request.requestId, ...body });
+    await triggerMatchAfterCreate(orders, result, skuId, request.requestId, request.log);
     return resolveCommand(request, reply, result);
   });
   app.post("/v1/orders/sell/:skuId", { preHandler: requireRole("player") }, async (request, reply) => {
@@ -53,6 +54,7 @@ export async function registerOrderRoutes(app: FastifyInstance, database: Databa
     if (typeof key !== "string" || !isValidIdempotencyKey(key)) return reply.code(400).send(failure(request.requestId, "IDEMPOTENCY_KEY_REQUIRED", "写请求必须携带格式正确的 Idempotency-Key"));
     const body = createBody.parse(request.body);
     const result = orders.create({ userId: request.actor!.id, skuId, side: "sell", idempotencyKey: key, requestFingerprint: orderCreateRequestFingerprint({ ...body, skuId, side: "sell" }), requestId: request.requestId, ...body });
+    await triggerMatchAfterCreate(orders, result, skuId, request.requestId, request.log);
     return resolveCommand(request, reply, result);
   });
 
@@ -79,6 +81,12 @@ export async function registerOrderRoutes(app: FastifyInstance, database: Databa
     const book = orders.book(skuParams.parse(request.params).skuId);
     return success(request.requestId, { book });
   });
+  // I19B 运维/测试显式触发撮合；admin 角色保护，撮合结果不含其他玩家敏感字段。
+  app.post("/v1/orders/:skuId/match", { preHandler: requireRole("admin") }, async (request) => {
+    const skuId = skuParams.parse(request.params).skuId;
+    const match = orders.match({ skuId, requestId: request.requestId });
+    return success(request.requestId, { match });
+  });
 }
 
 /** 把预览结果映射为 HTTP 响应；限价带、费用与预览版本完全来自服务端。 */
@@ -93,4 +101,17 @@ async function resolveCommand(request: { requestId: string }, reply: { code: (co
   if (result.state === "conflict") return reply.code(409).send(failure(request.requestId, "IDEMPOTENCY_CONFLICT", "Idempotency-Key 已用于不同请求"));
   if (result.state === "in-progress") return reply.code(409).send(failure(request.requestId, "IDEMPOTENCY_IN_PROGRESS", "相同请求正在处理中"));
   return reply.code(result.state === "replayed" && result.response.ok ? 200 : result.statusCode).send(result.response);
+}
+
+/**
+ * 创建成功后即时撮合。撮合在独立短事务执行，失败只记日志、不影响委托创建结果；
+ * 并发撮合由 SQLite 短事务串行 + bilateral_trades 唯一约束保证不重复成交。
+ */
+async function triggerMatchAfterCreate(orders: OrderService, result: OrderCommandResult, skuId: string, requestId: string, log: { warn: (message: string) => void }): Promise<void> {
+  if (result.state !== "completed" || !result.response.ok) return;
+  try {
+    orders.match({ skuId, requestId });
+  } catch (error) {
+    log.warn(`创建后撮合失败，委托已创建；运维可经 admin 端点重跑：${error instanceof Error ? error.message : String(error)}`);
+  }
 }

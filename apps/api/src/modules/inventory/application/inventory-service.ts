@@ -78,6 +78,11 @@ export class InventoryService {
       inventory.capture(input.userId, input.holdId, input.correlationId, input.now)
     );
   }
+  /** I19B P2P 部分成交库存捕获入口；只在 OrderService 经济短事务回调内调用。 */
+  capturePartialInLedgerTransaction(input: { userId: string; holdId: string; captureQuantity: number; correlationId: string; now: string }) {
+    assertPositiveQuantity(input.captureQuantity);
+    return this.inventory.capturePartial(input.userId, input.holdId, input.captureQuantity, input.correlationId, input.now);
+  }
   list(userId: string, filters: InventoryFilters) {
     return this.inventory.list(userId, filters);
   }

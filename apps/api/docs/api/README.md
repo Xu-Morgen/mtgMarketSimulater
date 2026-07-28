@@ -97,6 +97,13 @@
 - `GET /v1/orders?status=&side=&cursor=&limit=`、`GET /v1/orders/{orderId}` 只返回当前玩家的委托；`POST /v1/orders/{orderId}/cancel` 以幂等键撤单，释放未成交资金（买单）或库存+保证金（卖单），重复撤单返回 `409 RESOURCE_CONFLICT`。`GET /v1/orders/book/{skuId}` 返回只读订单簿（买单按价格降序、卖单按价格升序聚合），不含用户身份。
 - I18F 前端消费：`apps/web/api/orders-api.ts` 是上述 8 个端点的唯一入口，请求体与错误语义严格遵循本协议；浏览器只回传 `{quoteId,quoteVersion,previewVersion,quantity,limitPrice}` 与玩家确认的限价，绝不回传或本地重算费用、保证金、限价带或预计金额。
 
+## I19B P2P 撮合协议
+
+- 撮合触发：`POST /v1/orders/buy|sell/{skuId}` 创建成功后会自动触发一次 `OrderService.match(skuId)`；撮合在独立短事务执行，失败只记日志、不影响委托创建结果。`POST /v1/orders/{skuId}/match`（admin 角色）供运维/测试显式重跑撮合，返回 `MatchResultDto{skuId, trades[], capturedAt}`，普通玩家返回 `403 AUTHORIZATION_DENIED`。
+- 撮合顺序与成交价完全由 `packages/rules` 的 `order-matching/v1` 决定：买单按限价降序、卖单按限价升序，同价按 rowid（sequence）时间优先；当买限价 >= 卖限价时成交 `min(买余量, 卖余量)`，成交价取 maker（先入订单簿一方）限价，createdAt 相同按 sequence 决定 maker。同用户买卖自成交跳过不撮合。
+- 成交落库与待履约持有：每条成交写一行 `bilateral_trades`（status=`matched_pending_fulfillment`），买方已成交资金（数量*限价+已成交 order_fee）从 `order_buy` 预占转 `order_fulfillment` 待履约 hold，卖方已成交库存部分捕获离开持有（`inventory_holds` 收缩到剩余），卖方保证金按已成交/剩余切分；剩余委托保持 `partially_filled`，全成交则双方推进为 `matched_pending_fulfillment`。本期不转移最终所有权、不写 `p2p.trade.settled`、不结算卖方收入/保证金（留 I20B）。
+- 并发与幂等：撮合在 `InventoryService.withLedgerTransaction` 短事务内串行执行，逐 leg 以条件 UPDATE（`WHERE version=? AND remaining_quantity>=?`）扣减双方剩余；`bilateral_trades UNIQUE(buy_order_id, sell_order_id, execution_price_amount)` 保证同一对委托在相同成交价下至多一行成交。并发撮合不会超卖、超扣或重复成交；任一 leg 写入异常整笔回滚，不留半完成成交、状态或 hold。
+
 ## I17B 价格历史、每日同步与 AllPrices 回填协议
 
 - `GET /v1/market/quotes/{skuId}/history?range=7d|30d|all` 与 `GET /v1/market/index/history?range=7d|30d|all` 要求有效会话，按自然日采样返回 `PriceHistoryDto`/`MarketIndexHistoryDto`。历史来自只追加的 `price_snapshot_entries`（reference）与 `market_quotes`（game），同日多次同步/重定价取该日最新值；任一价格缺失为 null，空历史返回空 `points` 数组而非 `404`，确保失败同步仍能展示旧价或空态。浏览器不得自行计算曲线或推断缺失值。

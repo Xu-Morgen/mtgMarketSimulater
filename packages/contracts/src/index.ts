@@ -592,6 +592,39 @@ export interface BilateralOrderBookDto {
   capturedAt: string;
 }
 
+/** I19B 成交记录状态；I19B 只产出 matched_pending_fulfillment，履约/取消留 I20B。 */
+export type BilateralTradeStatus = "matched_pending_fulfillment" | "fulfilled" | "cancelled";
+
+/** I19B 单笔 P2P 成交；撮合只把预占转为待履约持有，不转移最终所有权、不写 p2p.trade.settled。 */
+export interface BilateralTradeDto {
+  id: string;
+  skuId: string;
+  buyOrderId: string;
+  sellOrderId: string;
+  buyerUserId: string;
+  sellerUserId: string;
+  quantity: number;
+  /** 取 maker（先入订单簿一方）限价的成交价，整数最小货币单位。 */
+  executionPrice: Money;
+  /** 买单已成交部分 order_fee；撮合时确认并转入买方待履约资金 hold。 */
+  buyerFee: Money;
+  /** 卖单已成交部分 order_fee；撮合时锁定，I20B 履约时从卖方收入结算。 */
+  sellerFee: Money;
+  /** 撮合规则版本，可追溯价格—时间优先与成交价取 maker 的语义。 */
+  ruleVersion: string;
+  status: BilateralTradeStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** I19B 一次撮合返回的成交列表；不包含用户身份敏感字段以外的内容。 */
+export interface MatchResultDto {
+  skuId: string;
+  trades: BilateralTradeDto[];
+  /** 本次撮合数据截至时间。 */
+  capturedAt: string;
+}
+
 export interface TournamentResult {
   tournamentId: string;
   playerId: string;

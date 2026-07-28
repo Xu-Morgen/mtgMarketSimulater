@@ -3,10 +3,14 @@ import type Database from "better-sqlite3";
 import {
   calculateOrderFees,
   isWithinOrderLimitBand,
+  matchOrders,
+  ORDER_MATCH_RULE_VERSION,
   ORDER_PREVIEW_VERSION,
   ORDER_RULE_VERSION,
   resolveOrderLimitBand,
-  validateOrderCancellation
+  validateOrderCancellation,
+  type MatchLeg,
+  type MatchOrderInput
 } from "@mtg-market/rules";
 import {
   canonicalizeRequest,
@@ -16,7 +20,9 @@ import {
   type BilateralOrderBookLevelDto,
   type BilateralOrderDto,
   type BilateralOrderPreviewDto,
+  type BilateralTradeDto,
   type FeeDto,
+  type MatchResultDto,
   type OrderSide,
   type OrderStatus,
   type Page
@@ -25,7 +31,13 @@ import { InventoryService } from "../../inventory/application/inventory-service.
 import { MarketService } from "../../market/application/market-service.js";
 import { UserService } from "../../users/application/user-service.js";
 import { success, failure } from "../../../shared/http/api-response.js";
-import { ORDER_HOLD_ENTITY_TYPE, assertPositiveQuantity } from "../domain/order.js";
+import {
+  assertPositiveQuantity,
+  BILATERAL_TRADE_ENTITY_TYPE,
+  ORDER_FULFILLMENT_DEPOSIT_HOLD_REASON,
+  ORDER_FULFILLMENT_FUND_HOLD_REASON,
+  ORDER_HOLD_ENTITY_TYPE
+} from "../domain/order.js";
 
 type LimitsRow = {
   max_quantity_per_order: number;
@@ -70,6 +82,27 @@ type OrderRow = {
 type IdempotencyRow = { request_fingerprint: string; status: string; response_status: number | null; response_json: string | null };
 
 type OrderResponse = { order: BilateralOrderDto };
+
+/** 撮合输入加载的委托行；rowid 作为单调 sequence 保证 createdAt 并列时仍稳定可重放。 */
+type MatchableOrderRow = OrderRow & { rowid: number };
+
+/** bilateral_trades 落库后回读的成交行，用于返回 MatchResultDto 与审计。 */
+type TradeRow = {
+  id: string;
+  sku_id: string;
+  buy_order_id: string;
+  sell_order_id: string;
+  buyer_user_id: string;
+  seller_user_id: string;
+  quantity: number;
+  execution_price_amount: number;
+  buyer_fee_amount: number;
+  seller_fee_amount: number;
+  rule_version: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
 
 export type OrderPreviewResult = BilateralOrderPreviewDto | "quote-unavailable" | "quote-stale" | "insufficient-quantity";
 
@@ -213,6 +246,32 @@ export class OrderService {
       const response = success(input.requestId, { order });
       this.completeIdempotency(input.userId, input.idempotencyKey, 201, response, now);
       return { state: "completed", statusCode: 201, response };
+    });
+  }
+
+  /**
+   * I19B 撮合用例。以独立短事务加载 skuId 下全部 open/partially_filled 买卖委托，调用
+   * order-matching/v1 纯规则得到成交 legs，再逐条以条件 UPDATE 与 hold 转换原子落库。
+   * 并发撮合由 SQLite 短事务串行 + 条件更新 + bilateral_trades 唯一约束保证至多执行一次、
+   * 业务结果至多一次；不转移最终所有权、不写 p2p.trade.settled、不结算卖方收入/保证金（留 I20B）。
+   */
+  match(input: { skuId: string; requestId: string; now?: Date }): MatchResultDto {
+    const now = (input.now ?? new Date()).toISOString();
+    return this.inventory.withLedgerTransaction(() => {
+      const { buyOrders, sellOrders } = this.loadMatchableOrders(input.skuId, now);
+      const matched = matchOrders({
+        ruleVersion: ORDER_MATCH_RULE_VERSION,
+        minimumPrice: this.minimumPrice(),
+        buyOrders,
+        sellOrders
+      });
+      const tradeIds: string[] = [];
+      for (const leg of matched.legs) {
+        const trade = this.applyLeg(leg, input.requestId, now);
+        if (trade) tradeIds.push(trade.id);
+      }
+      const trades = tradeIds.map((id) => this.toTradeDto(this.findTradeRow(id)!));
+      return { skuId: input.skuId, trades, capturedAt: now };
     });
   }
 
@@ -363,6 +422,145 @@ export class OrderService {
     const row = this.database.prepare("SELECT minimum_price FROM market_parameters WHERE singleton = 1").get() as { minimum_price: number } | undefined;
     if (!row) throw new Error("市场参数未初始化");
     return row.minimum_price;
+  }
+
+  /** 加载 skuId 下未过期且仍可撮合的买卖委托，按 side 分组并带 rowid 作为稳定 sequence。 */
+  private loadMatchableOrders(skuId: string, now: string): { buyOrders: MatchOrderInput[]; sellOrders: MatchOrderInput[] } {
+    const rows = this.database.prepare(
+      `SELECT id, user_id, sku_id, side, status, original_quantity, remaining_quantity, limit_price_amount, unit_fee_amount, unit_fulfillment_deposit_amount, reserved_funds_amount, reserved_funds_hold_id, inventory_hold_id, quote_id, quote_version, preview_version, expires_at, cancelled_at, version, settlement_date, created_at, updated_at, rowid
+       FROM bilateral_orders
+       WHERE sku_id = ? AND status IN ('open', 'partially_filled') AND expires_at > ? AND remaining_quantity > 0
+       ORDER BY side, limit_price_amount`
+    ).all(skuId, now) as MatchableOrderRow[];
+    const buyOrders: MatchOrderInput[] = [];
+    const sellOrders: MatchOrderInput[] = [];
+    for (const row of rows) {
+      const order = { id: row.id, userId: row.user_id, limitPrice: row.limit_price_amount, remainingQuantity: row.remaining_quantity, createdAt: row.created_at, sequence: row.rowid };
+      if (row.side === "buy") buyOrders.push(order);
+      else sellOrders.push(order);
+    }
+    return { buyOrders, sellOrders };
+  }
+
+  /**
+   * 应用单条成交 leg：条件 UPDATE 扣减双方剩余数量（乐观锁），转换买方资金/卖方库存/卖方保证金
+   * 为待履约持有，并写 bilateral_trades。任一步骤因并发已被消耗则跳过该 leg（返回 null），
+   * 保证不会超卖、超扣或重复成交。事务回滚由 withLedgerTransaction 兜底。
+   */
+  private applyLeg(leg: MatchLeg, requestId: string, now: string): TradeRow | null {
+    // 幂等保护：同对委托 + 同成交价已落 trade 则跳过（并发撮合至多一行成交）。
+    const existing = this.database.prepare(
+      "SELECT id FROM bilateral_trades WHERE buy_order_id = ? AND sell_order_id = ? AND execution_price_amount = ?"
+    ).get(leg.buyOrderId, leg.sellOrderId, leg.executionPrice) as { id: string } | undefined;
+    if (existing) return this.findTradeRow(existing.id) ?? null;
+
+    const buyOrder = this.findOrderRow(leg.buyOrderId);
+    const sellOrder = this.findOrderRow(leg.sellOrderId);
+    if (!buyOrder || !sellOrder) return null;
+    if (buyOrder.remaining_quantity < leg.quantity || sellOrder.remaining_quantity < leg.quantity) return null;
+
+    // 条件 UPDATE 推进双方剩余数量与版本；任一失败（并发消耗）则整体跳过该 leg。
+    const buyRemaining = buyOrder.remaining_quantity - leg.quantity;
+    const sellRemaining = sellOrder.remaining_quantity - leg.quantity;
+    const buyAdvanced = this.database.prepare(
+      "UPDATE bilateral_orders SET remaining_quantity = ?, status = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND remaining_quantity >= ?"
+    ).run(buyRemaining, buyRemaining === 0 ? "matched_pending_fulfillment" : "partially_filled", now, buyOrder.id, buyOrder.version, leg.quantity);
+    const sellAdvanced = this.database.prepare(
+      "UPDATE bilateral_orders SET remaining_quantity = ?, status = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND remaining_quantity >= ?"
+    ).run(sellRemaining, sellRemaining === 0 ? "matched_pending_fulfillment" : "partially_filled", now, sellOrder.id, sellOrder.version, leg.quantity);
+    if (buyAdvanced.changes !== 1 || sellAdvanced.changes !== 1) {
+      // 并发已被其他撮合消耗；抛错回滚整笔事务以保证订单/资金/库存无半完成状态。
+      throw new Error(`撮合 leg 并发冲突：buy=${buyOrder.id} sell=${sellOrder.id}`);
+    }
+
+    const tradeId = randomUUID();
+    const unitFee = buyOrder.unit_fee_amount;
+    const unitDeposit = sellOrder.unit_fulfillment_deposit_amount;
+    const buyerFeeAmount = unitFee * leg.quantity;
+    const sellerFeeAmount = unitFee * leg.quantity;
+    // 买方待履约资金 = 已成交数量*限价 + 已成交 order_fee；卖方已成交保证金 = 已成交数量*单位保证金。
+    const buyerFulfillmentFunds = leg.quantity * buyOrder.limit_price_amount + buyerFeeAmount;
+    const sellerCapturedDeposit = unitDeposit * leg.quantity;
+
+    // 转换买方资金：release 原全量 order_buy hold → reserve 已成交部分 order_fulfillment hold + 剩余 order_buy hold。
+    let buyerFundsHoldId: string | null = null;
+    if (buyOrder.reserved_funds_hold_id) {
+      const released = this.users.releaseOrderFunds(buyOrder.user_id, buyOrder.reserved_funds_hold_id, now);
+      if (released === "not-active") throw new Error(`撮合买方资金释放失败：hold ${buyOrder.reserved_funds_hold_id} 非活跃，事务回滚`);
+      const fulfilledReserved = this.users.reserveOrderFunds(buyOrder.user_id, buyerFulfillmentFunds, { entityType: BILATERAL_TRADE_ENTITY_TYPE, entityId: tradeId, reason: ORDER_FULFILLMENT_FUND_HOLD_REASON }, now);
+      if (fulfilledReserved === "insufficient") throw new Error("买方待履约资金重新预占失败：资金不足，事务回滚");
+      buyerFundsHoldId = fulfilledReserved.holdId;
+      if (buyRemaining > 0) {
+        const remainingBuyFunds = buyRemaining * buyOrder.limit_price_amount + unitFee * buyRemaining;
+        const remainingReserved = this.users.reserveOrderFunds(buyOrder.user_id, remainingBuyFunds, { entityType: ORDER_HOLD_ENTITY_TYPE, entityId: buyOrder.id, reason: "order_buy" }, now);
+        if (remainingReserved === "insufficient") throw new Error("买方剩余委托资金重新预占失败：资金不足，事务回滚");
+        this.database.prepare("UPDATE bilateral_orders SET reserved_funds_hold_id = ?, reserved_funds_amount = ?, updated_at = ? WHERE id = ?").run(remainingReserved.holdId, remainingBuyFunds, now, buyOrder.id);
+      } else {
+        this.database.prepare("UPDATE bilateral_orders SET reserved_funds_hold_id = NULL, reserved_funds_amount = 0, updated_at = ? WHERE id = ?").run(now, buyOrder.id);
+      }
+    }
+
+    // 转换卖方库存：部分 capture 已成交数量（库存离开卖方持有，待履约）。
+    const sellerInventoryHoldId: string | null = sellOrder.inventory_hold_id;
+    if (sellOrder.inventory_hold_id) {
+      const captured = this.inventory.capturePartialInLedgerTransaction({ userId: sellOrder.user_id, holdId: sellOrder.inventory_hold_id, captureQuantity: leg.quantity, correlationId: tradeId, now });
+      if (captured === "not-active" || captured === "insufficient") throw new Error(`撮合卖方库存部分成交失败：hold ${sellOrder.inventory_hold_id}，事务回滚`);
+    }
+
+    // 转换卖方保证金：release 原全量 order_fulfillment_deposit hold → reserve 已成交部分 + 剩余。
+    let sellerDepositHoldId: string | null = null;
+    if (sellOrder.reserved_funds_hold_id) {
+      const released = this.users.releaseOrderFunds(sellOrder.user_id, sellOrder.reserved_funds_hold_id, now);
+      if (released === "not-active") throw new Error(`撮合卖方保证金释放失败：hold ${sellOrder.reserved_funds_hold_id} 非活跃，事务回滚`);
+      const capturedReserved = this.users.reserveOrderFunds(sellOrder.user_id, sellerCapturedDeposit, { entityType: BILATERAL_TRADE_ENTITY_TYPE, entityId: tradeId, reason: ORDER_FULFILLMENT_DEPOSIT_HOLD_REASON }, now);
+      if (capturedReserved === "insufficient") throw new Error("卖方已成交保证金重新预占失败：资金不足，事务回滚");
+      sellerDepositHoldId = capturedReserved.holdId;
+      if (sellRemaining > 0) {
+        const remainingDeposit = unitDeposit * sellRemaining;
+        const remainingReserved = this.users.reserveOrderFunds(sellOrder.user_id, remainingDeposit, { entityType: ORDER_HOLD_ENTITY_TYPE, entityId: sellOrder.id, reason: ORDER_FULFILLMENT_DEPOSIT_HOLD_REASON }, now);
+        if (remainingReserved === "insufficient") throw new Error("卖方剩余保证金重新预占失败：资金不足，事务回滚");
+        this.database.prepare("UPDATE bilateral_orders SET reserved_funds_hold_id = ?, reserved_funds_amount = ?, updated_at = ? WHERE id = ?").run(remainingReserved.holdId, remainingDeposit, now, sellOrder.id);
+      } else {
+        this.database.prepare("UPDATE bilateral_orders SET reserved_funds_hold_id = NULL, reserved_funds_amount = 0, updated_at = ? WHERE id = ?").run(now, sellOrder.id);
+      }
+    }
+
+    this.database.prepare(
+      `INSERT INTO bilateral_trades (id, sku_id, buy_order_id, sell_order_id, buyer_user_id, seller_user_id, quantity, execution_price_amount, buyer_fee_amount, seller_fee_amount, buyer_funds_hold_id, seller_inventory_hold_id, seller_deposit_hold_id, seller_inventory_quantity, rule_version, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'matched_pending_fulfillment', ?, ?)`
+    ).run(tradeId, buyOrder.sku_id, buyOrder.id, sellOrder.id, buyOrder.user_id, sellOrder.user_id, leg.quantity, leg.executionPrice, buyerFeeAmount, sellerFeeAmount, buyerFundsHoldId, sellerInventoryHoldId, sellerDepositHoldId, leg.quantity, leg.ruleVersion, now, now);
+
+    this.users.writeEconomicAudit(buyOrder.user_id, "bilateral_order.matched", "bilateral_trade", tradeId, requestId, { skuId: buyOrder.sku_id, side: "buy", buyOrderId: buyOrder.id, sellOrderId: sellOrder.id, quantity: leg.quantity, executionPrice: leg.executionPrice, buyerFee: buyerFeeAmount, ruleVersion: leg.ruleVersion, buyerFundsHoldId }, now);
+    this.users.writeEconomicAudit(sellOrder.user_id, "bilateral_order.matched", "bilateral_trade", tradeId, requestId, { skuId: sellOrder.sku_id, side: "sell", buyOrderId: buyOrder.id, sellOrderId: sellOrder.id, quantity: leg.quantity, executionPrice: leg.executionPrice, sellerFee: sellerFeeAmount, ruleVersion: leg.ruleVersion, sellerInventoryHoldId, sellerDepositHoldId }, now);
+
+    return this.findTradeRow(tradeId) ?? null;
+  }
+
+  private selectTradeSql(): string {
+    return "SELECT id, sku_id, buy_order_id, sell_order_id, buyer_user_id, seller_user_id, quantity, execution_price_amount, buyer_fee_amount, seller_fee_amount, rule_version, status, created_at, updated_at FROM bilateral_trades";
+  }
+
+  private findTradeRow(tradeId: string): TradeRow | undefined {
+    return this.database.prepare(`${this.selectTradeSql()} WHERE id = ?`).get(tradeId) as TradeRow | undefined;
+  }
+
+  private toTradeDto(row: TradeRow): BilateralTradeDto {
+    return {
+      id: row.id,
+      skuId: row.sku_id,
+      buyOrderId: row.buy_order_id,
+      sellOrderId: row.sell_order_id,
+      buyerUserId: row.buyer_user_id,
+      sellerUserId: row.seller_user_id,
+      quantity: row.quantity,
+      executionPrice: money(row.execution_price_amount),
+      buyerFee: money(row.buyer_fee_amount),
+      sellerFee: money(row.seller_fee_amount),
+      ruleVersion: row.rule_version,
+      status: row.status as BilateralTradeDto["status"],
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
   }
 
   private selectOrderSql(): string {

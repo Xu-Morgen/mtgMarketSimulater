@@ -71,6 +71,34 @@ export class SqliteInventoryRepository {
     return this.findHolding(userId, hold.sku_id)!;
   }
 
+  /**
+   * I19B 部分成交库存捕获：只把 hold 的部分数量真正离开持有（待履约），其余数量保留为
+   * 同一 hold 的新活动额度（供撤单释放或后续撮合）。原 hold 数量原子收缩到 remaining，
+   * 已捕获数量从 quantity/order_locked 中扣减，不变量 quantity=available+order_locked+tournament_locked 始终成立。
+   */
+  capturePartial(userId: string, holdId: string, captureQuantity: number, correlationId: string, now: string): InventoryHoldingDto | "insufficient" | "not-active" {
+    if (!Number.isSafeInteger(captureQuantity) || captureQuantity <= 0) throw new RangeError("部分成交捕获数量必须为正整数");
+    const hold = this.activeHold(userId, holdId);
+    if (!hold) return "not-active";
+    if (captureQuantity > hold.quantity) return "insufficient";
+    const lockedColumn = hold.reason === "order" ? "order_locked_quantity" : "tournament_locked_quantity";
+    const remaining = hold.quantity - captureQuantity;
+    // 先收缩 hold 数量；若 remaining 为 0 则整笔转为 captured，否则保留为同 id 的活动 hold。
+    if (remaining === 0) {
+      const captured = this.database.prepare("UPDATE inventory_holds SET status = 'captured', released_at = ? WHERE id = ? AND status = 'active' AND quantity = ?").run(now, hold.id, hold.quantity);
+      if (captured.changes !== 1) return "not-active";
+    } else {
+      const shrunk = this.database.prepare("UPDATE inventory_holds SET quantity = ? WHERE id = ? AND status = 'active' AND quantity = ?").run(remaining, hold.id, hold.quantity);
+      if (shrunk.changes !== 1) return "not-active";
+    }
+    const nextQuantity = hold.quantity_after - captureQuantity;
+    const nextAverageCost = nextQuantity === 0 ? 0 : hold.average_cost_amount;
+    const updated = this.database.prepare(`UPDATE inventory_holdings SET quantity = quantity - ?, ${lockedColumn} = ${lockedColumn} - ?, average_cost_amount = ?, updated_at = ? WHERE id = ? AND quantity >= ? AND ${lockedColumn} >= ?`).run(captureQuantity, captureQuantity, nextAverageCost, now, hold.holding_id, captureQuantity, captureQuantity);
+    if (updated.changes !== 1) throw new Error("库存锁定状态损坏");
+    this.writeEntry(hold.holding_id, `${hold.reason}_captured`, -captureQuantity, 0, hold.reason === "order" ? -captureQuantity : 0, hold.reason === "tournament" ? -captureQuantity : 0, nextQuantity, nextAverageCost, correlationId, now);
+    return this.findHolding(userId, hold.sku_id)!;
+  }
+
   list(userId: string, filters: InventoryFilters): Page<InventoryHoldingDto> {
     const where = ["h.user_id = ?"]; const values: unknown[] = [userId];
     if (filters.query) { where.push("lower(p.name) LIKE lower(?)"); values.push(`%${filters.query}%`); }

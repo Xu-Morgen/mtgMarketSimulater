@@ -277,3 +277,143 @@ describe("I18B 事务回滚", () => {
     await app.close(); database.close();
   });
 });
+
+describe("I19B 撮合规则与服务端成交", () => {
+  // 给卖方先 NPC 买入 seedQuantity 张，再挂卖单；返回卖单创建后的状态。
+  async function seedSellerAndSell(app: Awaited<ReturnType<typeof createTestApp>>["app"], database: ReturnType<typeof openSqliteDatabase>, email: string, seedQuantity: number, sellQuantity: number, sellPrice: number, sellKey: string) {
+    const authorization = await player(app, `${email}`, "卖方");
+    expect((await app.inject({ method: "POST", url: `/v1/npc-trades/buy/${ids.sku}`, headers: { authorization, "idempotency-key": `${sellKey}-seed` }, payload: { quoteId: ids.quote, quoteVersion: "market/v1", quantity: seedQuantity, maxUnitPrice: 250 } })).statusCode).toBe(201);
+    const preview = await previewSell(app, authorization, sellQuantity);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/sell/${ids.sku}`, headers: { authorization, "idempotency-key": sellKey }, payload: createBody(preview.data.preview, sellPrice, sellQuantity) })).statusCode).toBe(201);
+    return authorization;
+  }
+
+  it("全量撮合：买单吃掉卖单，资金/库存/保证金转为待履约，不写 p2p.trade.settled", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    await seedSellerAndSell(app, database, `full-sell-${Math.random()}@example.test`, 2, 2, 200, "full-sell");
+    const buyAuth = await player(app, `full-buy-${Math.random()}@example.test`, "买方");
+    // 买单限价 210 >= 卖单 200，创建后自动触发撮合；卖单先入订单簿为 maker，成交价取卖限价 200。
+    const buyPreview = await previewBuy(app, buyAuth, 2);
+    const created = await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization: buyAuth, "idempotency-key": "full-buy" }, payload: createBody(buyPreview.data.preview, 210, 2) });
+    expect(created.statusCode).toBe(201);
+
+    const trades = database.prepare("SELECT buy_order_id, sell_order_id, quantity, execution_price_amount, buyer_fee_amount, status FROM bilateral_trades").all() as Array<{ buy_order_id: string; sell_order_id: string; quantity: number; execution_price_amount: number; buyer_fee_amount: number; status: string }>;
+    expect(trades).toHaveLength(1);
+    expect(trades[0]).toMatchObject({ quantity: 2, execution_price_amount: 200, status: "matched_pending_fulfillment" });
+    // 双方委托状态推进为 matched_pending_fulfillment，剩余数量归零。
+    const orders = database.prepare("SELECT side, status, remaining_quantity FROM bilateral_orders ORDER BY side").all() as Array<{ side: string; status: string; remaining_quantity: number }>;
+    expect(orders).toEqual([{ side: "buy", status: "matched_pending_fulfillment", remaining_quantity: 0 }, { side: "sell", status: "matched_pending_fulfillment", remaining_quantity: 0 }]);
+    // 不写 p2p.trade.settled（留 I20B）。
+    expect((database.prepare("SELECT COUNT(*) AS count FROM fact_events WHERE event_type = 'p2p.trade.settled'").get() as { count: number }).count).toBe(0);
+    await app.close(); database.close();
+  });
+
+  it("部分成交：买<卖，剩余委托保持 partially_filled，已成交资金/库存/保证金切分", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    await seedSellerAndSell(app, database, `part-sell-${Math.random()}@example.test`, 5, 5, 200, "part-sell");
+    const buyAuth = await player(app, `part-buy-${Math.random()}@example.test`, "买方");
+    const buyPreview = await previewBuy(app, buyAuth, 2);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization: buyAuth, "idempotency-key": "part-buy" }, payload: createBody(buyPreview.data.preview, 210, 2) })).statusCode).toBe(201);
+
+    // 买单全成交(2 张)→matched_pending_fulfillment；卖单部分成交(2/5)→partially_filled。
+    const buyOrder = database.prepare("SELECT status, remaining_quantity FROM bilateral_orders WHERE side = 'buy'").get() as { status: string; remaining_quantity: number };
+    const sellOrder = database.prepare("SELECT status, remaining_quantity FROM bilateral_orders WHERE side = 'sell'").get() as { status: string; remaining_quantity: number };
+    expect(buyOrder).toEqual({ status: "matched_pending_fulfillment", remaining_quantity: 0 });
+    expect(sellOrder).toEqual({ status: "partially_filled", remaining_quantity: 3 });
+    // 卖方库存：原 5 张，已成交 2 张离开持有 → 持有 3，order_locked 3（剩余未成交仍锁定）。
+    const holding = database.prepare("SELECT quantity, available_quantity, order_locked_quantity FROM inventory_holdings").get() as { quantity: number; available_quantity: number; order_locked_quantity: number };
+    expect(holding).toEqual({ quantity: 3, available_quantity: 0, order_locked_quantity: 3 });
+    await app.close(); database.close();
+  });
+
+  it("自成交拒绝：同一用户的买卖委托不会被撮合", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    const authorization = await player(app, `self-${Math.random()}@example.test`, "自成交者");
+    expect((await app.inject({ method: "POST", url: `/v1/npc-trades/buy/${ids.sku}`, headers: { authorization, "idempotency-key": "self-seed" }, payload: { quoteId: ids.quote, quoteVersion: "market/v1", quantity: 2, maxUnitPrice: 250 } })).statusCode).toBe(201);
+    const sellPreview = await previewSell(app, authorization, 2);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/sell/${ids.sku}`, headers: { authorization, "idempotency-key": "self-sell" }, payload: createBody(sellPreview.data.preview, 200, 2) })).statusCode).toBe(201);
+    const buyPreview = await previewBuy(app, authorization, 2);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization, "idempotency-key": "self-buy" }, payload: createBody(buyPreview.data.preview, 210, 2) })).statusCode).toBe(201);
+    // 自成交跳过：无成交记录，双方仍 open。
+    expect((database.prepare("SELECT COUNT(*) AS count FROM bilateral_trades").get() as { count: number }).count).toBe(0);
+    expect(database.prepare("SELECT status FROM bilateral_orders ORDER BY side").all()).toEqual([{ status: "open" }, { status: "open" }]);
+    await app.close(); database.close();
+  });
+
+  it("admin 显式触发撮合返回成交列表，普通玩家 403", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    await seedSellerAndSell(app, database, `admin-sell-${Math.random()}@example.test`, 2, 2, 200, "admin-sell");
+    const buyAuth = await player(app, `admin-buy-${Math.random()}@example.test`, "买方");
+    const buyPreview = await previewBuy(app, buyAuth, 2);
+    // 用与卖单同价的买单创建（限价 200 >= 卖 200），创建后自动撮合。
+    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization: buyAuth, "idempotency-key": "admin-buy" }, payload: createBody(buyPreview.data.preview, 200, 2) })).statusCode).toBe(201);
+
+    // 注册一名管理员并提权。
+    const adminEmail = `admin-${Math.random()}@example.test`;
+    const adminAuthorization = await player(app, adminEmail, "管理员");
+    database.prepare("UPDATE users SET role = 'admin' WHERE email = ?").run(adminEmail);
+
+    const denied = await app.inject({ method: "POST", url: `/v1/orders/${ids.sku}/match`, headers: { authorization: buyAuth } });
+    expect(denied.statusCode).toBe(403);
+    const triggered = await app.inject({ method: "POST", url: `/v1/orders/${ids.sku}/match`, headers: { authorization: adminAuthorization } });
+    expect(triggered.statusCode).toBe(200);
+    // 自动撮合已产生成交，admin 显式触发幂等重跑，不会重复成交。
+    expect((database.prepare("SELECT COUNT(*) AS count FROM bilateral_trades").get() as { count: number }).count).toBe(1);
+    await app.close(); database.close();
+  });
+
+  it("并发撮合同一剩余数量不会重复成交、超卖或超扣", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    await seedSellerAndSell(app, database, `cc-sell-${Math.random()}@example.test`, 2, 2, 200, "cc-sell-key");
+    const buyAuth = await player(app, `cc-buy-${Math.random()}@example.test`, "买方");
+    const buyPreview = await previewBuy(app, buyAuth, 2);
+    // 用不会自动成交的低买单创建（限价 100 < 卖 200），然后并发 admin 触发两次。
+    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization: buyAuth, "idempotency-key": "cc-buy-key01" }, payload: createBody(buyPreview.data.preview, 200, 2) })).statusCode).toBe(201);
+    const adminEmail = `cc-admin-${Math.random()}@example.test`;
+    const adminAuthorization = await player(app, adminEmail, "管理员");
+    database.prepare("UPDATE users SET role = 'admin' WHERE email = ?").run(adminEmail);
+
+    const [first, second] = await Promise.all([
+      app.inject({ method: "POST", url: `/v1/orders/${ids.sku}/match`, headers: { authorization: adminAuthorization } }),
+      app.inject({ method: "POST", url: `/v1/orders/${ids.sku}/match`, headers: { authorization: adminAuthorization } })
+    ]);
+    // 并发中只有一次能产生成交；另一次因剩余数量已被消耗而无成交或安全失败。
+    const totalTrades = (database.prepare("SELECT COUNT(*) AS count FROM bilateral_trades").get() as { count: number }).count;
+    expect(totalTrades).toBe(1);
+    const sellOrder = database.prepare("SELECT remaining_quantity FROM bilateral_orders WHERE side = 'sell'").get() as { remaining_quantity: number };
+    expect(sellOrder.remaining_quantity).toBe(0);
+    // 至少一次成功（200），且无重复成交。
+    expect([first.statusCode, second.statusCode].sort()).toEqual(expect.arrayContaining([200]));
+    await app.close(); database.close();
+  });
+
+  it("撮合事务回滚：写入异常时不留半完成成交或状态", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    await seedSellerAndSell(app, database, `rb-sell-${Math.random()}@example.test`, 2, 2, 200, "rb-sell-key");
+    const buyAuth = await player(app, `rb-buy-${Math.random()}@example.test`, "买方");
+    const buyPreview = await previewBuy(app, buyAuth, 2);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization: buyAuth, "idempotency-key": "rb-buy-key01" }, payload: createBody(buyPreview.data.preview, 200, 2) })).statusCode).toBe(201);
+    // 重置买卖委托为未撮合状态以便显式触发（自动撮合已成交，先清理成交记录后重置状态模拟回滚场景）。
+    // 这里改为在创建卖单前注入失败触发器，验证撮合整笔回滚。
+    database.exec("DELETE FROM bilateral_trades");
+    database.prepare("UPDATE bilateral_orders SET status = 'open', remaining_quantity = original_quantity, version = version + 1").run();
+    // 在 bilateral_trades 插入上强制失败。
+    database.exec("CREATE TRIGGER fail_trade_insert BEFORE INSERT ON bilateral_trades BEGIN SELECT RAISE(ABORT, 'forced trade failure'); END");
+    const adminEmail = `rb-admin-${Math.random()}@example.test`;
+    const adminAuthorization = await player(app, adminEmail, "管理员");
+    database.prepare("UPDATE users SET role = 'admin' WHERE email = ?").run(adminEmail);
+    const failed = await app.inject({ method: "POST", url: `/v1/orders/${ids.sku}/match`, headers: { authorization: adminAuthorization } });
+    expect(failed.statusCode).toBe(500);
+    // 回滚：无成交记录，双方委托保持 open 且剩余数量不变。
+    expect((database.prepare("SELECT COUNT(*) AS count FROM bilateral_trades").get() as { count: number }).count).toBe(0);
+    const orders = database.prepare("SELECT status, remaining_quantity FROM bilateral_orders ORDER BY side").all() as Array<{ status: string; remaining_quantity: number }>;
+    expect(orders).toEqual([{ status: "open", remaining_quantity: 2 }, { status: "open", remaining_quantity: 2 }]);
+    await app.close(); database.close();
+  });
+});

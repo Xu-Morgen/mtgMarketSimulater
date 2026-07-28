@@ -390,3 +390,141 @@ function addSafe(left: number, right: number, label: string): number {
   if (!Number.isSafeInteger(result)) throw new RangeError(`${label} 超出安全整数范围`);
   return result;
 }
+
+/**
+ * I19B：双边委托撮合纯规则。价格—时间优先、成交价取 maker、部分成交、剩余数量与自成交
+ * 拒绝均在此确定；服务端只把已结算 legs 落库为 bilateral_trades，不在此修改经济真相。
+ * 规则不依赖数据库、HTTP 或随机源，相同输入必产生相同输出。
+ */
+export const ORDER_MATCH_RULE_VERSION = "order-matching/v1" as const;
+
+/** 自成交校验：买卖双方为同一用户时拒绝撮合，避免刷量与操纵。 */
+export type SelfTradeCheckResult = { ok: true } | { ok: false; reason: "self_trade" };
+
+export function checkSelfTrade(buyerUserId: string, sellerUserId: string): SelfTradeCheckResult {
+  if (buyerUserId.trim().length === 0 || sellerUserId.trim().length === 0) throw new RangeError("自成交校验的用户不能为空");
+  return buyerUserId === sellerUserId ? { ok: false, reason: "self_trade" } : { ok: true };
+}
+
+/** 参与撮合的单条委托投影；sequence 为服务端单调序，保证 createdAt 并列时仍稳定可重放。 */
+export interface MatchOrderInput {
+  id: string;
+  userId: string;
+  /** 单位限价，整数最小货币单位。 */
+  limitPrice: number;
+  remainingQuantity: number;
+  /** 创建时刻 UTC ISO 8601；用于确定 maker（先入订单簿一方）。 */
+  createdAt: string;
+  /** 服务端单调序；createdAt 相同时以 sequence 决定先后。 */
+  sequence: number;
+}
+
+/** 单笔撮合结果；每条对应一行 bilateral_trades。 */
+export interface MatchLeg {
+  buyOrderId: string;
+  sellOrderId: string;
+  buyerUserId: string;
+  sellerUserId: string;
+  buyLimitPrice: number;
+  sellLimitPrice: number;
+  /** 取 maker（先入订单簿一方）限价；买卖同时入则以 sequence 较小者为 maker。 */
+  executionPrice: number;
+  quantity: number;
+  ruleVersion: string;
+}
+
+export interface MatchOrdersInput {
+  ruleVersion: string;
+  /** 仅用于校验；撮合本身不改写该值。 */
+  minimumPrice: number;
+  buyOrders: MatchOrderInput[];
+  sellOrders: MatchOrderInput[];
+}
+
+export interface MatchOrdersResult {
+  ruleVersion: string;
+  legs: MatchLeg[];
+  /** 撮合后每条委托的剩余数量（仅含输入中出现的 orderId）。 */
+  remaining: Record<string, number>;
+  /** 因自成交被跳过的委托对，供服务端审计与风控复核。 */
+  skippedSelfTrade: Array<{ buyOrderId: string; sellOrderId: string }>;
+}
+
+/** 校验单条委托投影；空 id/用户、负价或负量、坏时间或非安全整数均拒绝。 */
+function validateMatchOrder(order: MatchOrderInput, label: string): void {
+  if (order.id.trim().length === 0) throw new RangeError(`${label} id 不能为空`);
+  if (order.userId.trim().length === 0) throw new RangeError(`${label} 用户不能为空`);
+  nonNegativeSafeInteger(order.limitPrice, `${label} 限价`);
+  if (!Number.isSafeInteger(order.remainingQuantity) || order.remainingQuantity <= 0) throw new RangeError(`${label} 剩余数量必须为正整数`);
+  if (!Number.isSafeInteger(order.sequence) || order.sequence < 0) throw new RangeError(`${label} 序号必须为非负安全整数`);
+  const parsed = Date.parse(order.createdAt);
+  if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== order.createdAt) throw new RangeError(`${label} 创建时间必须是 UTC ISO 8601`);
+}
+
+/**
+ * 价格—时间优先撮合。买单按「限价降序、序号升序」，卖单按「限价升序、序号升序」；
+ * 双游标逐对推进，当买限价 >= 卖限价时以 maker 价成交 min(买余量, 卖余量)；自成交跳过
+ * 并继续推进。算法纯且可重放：相同输入恒产生相同 legs/remaining/skippedSelfTrade。
+ */
+export function matchOrders(input: MatchOrdersInput): MatchOrdersResult {
+  if (input.ruleVersion !== ORDER_MATCH_RULE_VERSION) throw new RangeError(`不支持的撮合规则版本：${input.ruleVersion}`);
+  nonNegativeSafeInteger(input.minimumPrice, "最低报价");
+  if (input.buyOrders.length === 0 || input.sellOrders.length === 0) return { ruleVersion: input.ruleVersion, legs: [], remaining: {}, skippedSelfTrade: [] };
+  for (const order of input.buyOrders) validateMatchOrder(order, "买单");
+  for (const order of input.sellOrders) validateMatchOrder(order, "卖单");
+
+  const buyIds = new Set(input.buyOrders.map((order) => order.id));
+  for (const order of input.sellOrders) {
+    if (buyIds.has(order.id)) throw new RangeError("买卖委托 id 必须唯一");
+  }
+
+  const buys = [...input.buyOrders].sort((left, right) => right.limitPrice - left.limitPrice || left.sequence - right.sequence);
+  const sells = [...input.sellOrders].sort((left, right) => left.limitPrice - right.limitPrice || left.sequence - right.sequence);
+
+  const legs: MatchLeg[] = [];
+  const skippedSelfTrade: MatchOrdersResult["skippedSelfTrade"] = [];
+  const remaining: Record<string, number> = {};
+  for (const order of input.buyOrders) remaining[order.id] = order.remainingQuantity;
+  for (const order of input.sellOrders) remaining[order.id] = order.remainingQuantity;
+
+  let buyIndex = 0;
+  let sellIndex = 0;
+  while (buyIndex < buys.length && sellIndex < sells.length) {
+    const buy = buys[buyIndex]!;
+    const sell = sells[sellIndex]!;
+    if (buy.limitPrice < sell.limitPrice) break; // 最佳买价已低于最佳卖价，订单簿无更多可成交对。
+
+    if (buy.userId === sell.userId) {
+      skippedSelfTrade.push({ buyOrderId: buy.id, sellOrderId: sell.id });
+      // 自成交双方均仍有剩余且可能匹配其他对手盘：按 maker（先入者）推进游标，
+      // 避免无限循环；同时保留另一侧继续与其他对手盘撮合的机会。
+      if (isMaker(buy, sell)) buyIndex += 1;
+      else sellIndex += 1;
+      continue;
+    }
+
+    const quantity = Math.min(remaining[buy.id] ?? 0, remaining[sell.id] ?? 0);
+    if (quantity <= 0) break;
+    const executionPrice = makerPrice(buy, sell);
+    if (executionPrice < input.minimumPrice) throw new RangeError("撮合成交价低于最低报价");
+    legs.push({ buyOrderId: buy.id, sellOrderId: sell.id, buyerUserId: buy.userId, sellerUserId: sell.userId, buyLimitPrice: buy.limitPrice, sellLimitPrice: sell.limitPrice, executionPrice, quantity, ruleVersion: input.ruleVersion });
+    remaining[buy.id] = (remaining[buy.id] ?? 0) - quantity;
+    remaining[sell.id] = (remaining[sell.id] ?? 0) - quantity;
+    if ((remaining[buy.id] ?? 0) === 0) buyIndex += 1;
+    if ((remaining[sell.id] ?? 0) === 0) sellIndex += 1;
+  }
+
+  return { ruleVersion: input.ruleVersion, legs, remaining, skippedSelfTrade };
+}
+
+/** maker（先入订单簿一方）判定；createdAt 相同时以 sequence 较小者为 maker。 */
+function isMaker(buy: MatchOrderInput, sell: MatchOrderInput): boolean {
+  if (buy.createdAt < sell.createdAt) return true;
+  if (buy.createdAt > sell.createdAt) return false;
+  return buy.sequence <= sell.sequence;
+}
+
+/** 成交价取 maker 限价：buy 为 maker 取买限价，否则取卖限价。 */
+function makerPrice(buy: MatchOrderInput, sell: MatchOrderInput): number {
+  return isMaker(buy, sell) ? buy.limitPrice : sell.limitPrice;
+}

@@ -110,6 +110,12 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 - 撮合（价格-时间优先、成交价、部分成交）、模拟履约、`p2p.trade.settled` 事实事件与 `order.expire` 定时回收延后至 I19B/I20B/I22B；本期委托只处于 `open` 状态。
 - I18F 前端消费：`apps/web/api/orders-api.ts` 是上述命令与查询的唯一前端入口，请求体与错误语义严格遵循 `order/v1` 与本模块；浏览器只回传 `{quoteId,quoteVersion,previewVersion,quantity,limitPrice}` 与玩家确认的限价，绝不回传或本地重算费用、保证金、限价带或预计金额。后端契约与端点在 I18F 无变更。
 
+## P2P 撮合与待履约持有（I19B）
+
+- `modules/orders/application/OrderService.match(skuId)` 是双边委托撮合的唯一入口。它在独立 `InventoryService.withLedgerTransaction` 短事务内加载 skuId 下未过期 `open/partially_filled` 买卖委托，调用 `@mtg-market/rules` 的 `order-matching/v1`（`matchOrders`/`checkSelfTrade`）确定价格—时间优先顺序、成交价（取 maker）、部分成交与自成交跳过；规则纯、版本化、可重放，Orders 模块不复制撮合算法。
+- 创建买单/卖单成功后自动触发一次 `match`；`POST /v1/orders/{skuId}/match`（admin 角色）供运维/测试显式重跑。撮合失败只记日志、不影响委托创建结果。逐 leg 以条件 UPDATE（`WHERE version=? AND remaining_quantity>=?`）扣减双方剩余；成交写一行 `bilateral_trades`（status=`matched_pending_fulfillment`），把已成交部分的买方资金（`order_buy` → `order_fulfillment` 待履约 hold）、卖方库存（`SqliteInventoryRepository.capturePartial` 部分捕获离开持有、原 hold 收缩到剩余）与卖方保证金（按已成交/剩余切分）转为待履约持有。
+- 并发与幂等由 SQLite 短事务串行 + 条件 UPDATE + `bilateral_trades UNIQUE(buy_order_id, sell_order_id, execution_price_amount)` 保证至多执行一次、业务结果至多一次；任一 leg 写入异常整笔回滚。本期不转移最终所有权、不写 `p2p.trade.settled`、不结算卖方收入/保证金（留 I20B）；自成交只跳过不撮合，风控标记延后至 I21B。
+
 ## 库存卖出与估值投影（I16F）
 
 - `InventoryModule` 的只读 DTO 在 SQLite 查询中以当前持久化 `market_quotes` 投影服务端单张游戏内价、全部持有市值与未实现盈亏；计算只使用整数，市值按全部持有量（含订单/比赛锁定量）而非可用量展示。报价缺失时保留最近持仓估值，单张现价为 `null`；完全无估值时以明确不可用状态返回。

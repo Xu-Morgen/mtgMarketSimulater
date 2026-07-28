@@ -21,8 +21,9 @@ export const publicApiPaths = [
   "/v1/orders/sell/{skuId}",
   "/v1/orders",
   "/v1/orders/{orderId}",
-  "/v1/orders/{orderId}/cancel",
-  "/v1/orders/book/{skuId}",
+    "/v1/orders/{orderId}/cancel",
+    "/v1/orders/book/{skuId}",
+    "/v1/orders/{skuId}/match",
   "/v1/auth/register",
   "/v1/auth/login",
   "/v1/auth/refresh",
@@ -157,6 +158,12 @@ export const openApiDocument = {
       get: {
         summary: "查询某个 SKU 的只读双边订单簿",
         responses: { "200": { description: "订单簿" }, "401": { description: "认证无效或过期" } }
+      }
+    },
+    "/v1/orders/{skuId}/match": {
+      post: {
+        summary: "管理员显式触发某个 SKU 的双边委托撮合（价格—时间优先）",
+        responses: { "200": { description: "撮合结果与成交列表" }, "401": { description: "认证无效或过期" }, "403": { description: "需要管理员权限" } }
       }
     },
     "/v1/auth/register": {

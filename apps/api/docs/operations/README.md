@@ -55,6 +55,13 @@
 - 按请求 ID、幂等键或 `bilateral_orders.id` 关联 `idempotency_requests`、`fund_holds`/`inventory_holds`/`inventory_entries` 与审计记录。撤单以幂等键 + 状态版本条件 UPDATE 推进状态机 `open|partially_filled → cancelled`，释放对应预占；重复撤单返回 `409 RESOURCE_CONFLICT`。
 - 异常定位遵循“禁止直接修数”：余额、库存、保证金、委托状态或预占的任何缺失或漂移，必须由所属模块的补偿命令在同事务写新流水与原因，禁止直接覆盖 `bilateral_orders`、`fund_holds`、`inventory_holdings` 或账户最终值。撮合、模拟履约、`p2p.trade.settled` 与 `order.expire` 定时回收延后至 I19B/I20B/I22B。
 
+## I19B P2P 撮合排障
+
+- 撮合由 `OrderService.match(skuId)` 在独立 `InventoryService.withLedgerTransaction` 短事务执行：创建买单/卖单成功后自动触发一次；运维/测试可经 `POST /v1/orders/{skuId}/match`（admin 角色）显式重跑。撮合失败只记日志、不影响委托创建结果，可重跑安全。
+- 撮合顺序与成交价由 `packages/rules` 的 `order-matching/v1` 决定（买单限价降序、卖单限价升序、同价按 rowid 时间优先、成交价取 maker）。成交写一行 `bilateral_trades`（status=`matched_pending_fulfillment`），买方已成交资金转 `order_fulfillment` 待履约 hold，卖方已成交库存部分捕获离开持有（`inventory_holds` 收缩到剩余），卖方保证金按已成交/剩余切分。本期不转移最终所有权、不写 `p2p.trade.settled`、不结算卖方收入/保证金（留 I20B）。
+- 并发与幂等：逐 leg 以条件 UPDATE（`WHERE version=? AND remaining_quantity>=?`）扣减双方剩余；`bilateral_trades UNIQUE(buy_order_id, sell_order_id, execution_price_amount)` 保证同一对委托在相同成交价下至多一行成交。并发撮合不会超卖、超扣或重复成交；任一 leg 写入异常整笔回滚。
+- 按请求 ID、`bilateral_trades.id` 或 `bilateral_orders.id` 关联 `bilateral_trades`、`fund_holds`（reason=`order_fulfillment`/`order_fulfillment_deposit`）、`inventory_holds`（status=`captured`/`active`）与审计记录（`bilateral_order.matched`）。异常定位遵循“禁止直接修数”：成交、待履约 hold 或委托状态的任何缺失或漂移，必须由补偿命令在同事务写新流水与原因，禁止直接覆盖 `bilateral_trades`、`bilateral_orders`、`fund_holds`、`inventory_holdings` 或账户最终值。模拟履约、`p2p.trade.settled`、取消履约与 `order.expire` 定时回收延后至 I20B/I22B。
+
 ## I30B 管理活动与玩家补偿（计划）
 
 以下是 I30B 实现时必须细化为可执行手册的边界；当前尚未实现，不授权通过数据库手工操作替代后台能力。
