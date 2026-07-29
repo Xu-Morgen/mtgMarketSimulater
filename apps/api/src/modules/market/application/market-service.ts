@@ -37,7 +37,8 @@ function asMoney(amount: number) { return { amount, currency: "GAME_CREDIT" as c
 
 /**
  * 市场应用层只读取已提交事实和外部快照，再物化本服报价投影。它从不修改外部快照、
- * 库存或经济流水；同一 triggerKey 的重放由报价唯一约束收敛为相同结果。
+ * 库存或经济流水；同一 triggerKey（按 UTC 自然日派生）的重放由报价唯一约束 `ON CONFLICT
+ * (sku_id, trigger_key) DO UPDATE` 收敛为「同日只保留最新业务结果」——业务结果至多一次（按 SKU 维度）。
  */
 export class MarketService {
   constructor(private readonly database: Database.Database) {}
@@ -46,7 +47,9 @@ export class MarketService {
     return withinTransaction(this.database, () => {
       const runId = payload.priceSyncRunId ?? this.latestSuccessfulRunId();
       if (!runId) return 0;
-      const triggerKey = payload.triggerKey ?? `price-sync:${runId}`;
+      // 默认 triggerKey 按本次 reprice 时刻的 UTC 自然日派生，与价格同步显式投递路径（price-sync:{completedAt 当日}）一致：
+      // 报价新鲜度取决于「本日是否成功 reprice 过」，而非某次同步的 runId。
+      const triggerKey = payload.triggerKey ?? `price-sync:${now.slice(0, 10)}`;
       const parameters = this.parameters();
       const snapshots = this.database.prepare(
         `SELECT entry.id, entry.sku_id, entry.price_amount, entry.captured_at, run.source_version, printing.set_id
@@ -71,17 +74,33 @@ export class MarketService {
           npcFeeBasisPoints: parameters.npc_fee_bps,
           factors
         });
+        // ON CONFLICT(sku_id, trigger_key) DO UPDATE 覆盖全部业务字段：同日二次 reprice（triggerKey=price-sync:{UTC日}）
+        // 会刷新价格、参数、reasons、calculated_at 与 valid_until，而非被首写挡住。业务结果至多一次——按 SKU 维度
+        // 收敛为当日唯一一行的最新值；跨日因 triggerKey 不同而保留各自历史版本。
         const changed = this.database.prepare(
           `INSERT INTO market_quotes (id, sku_id, price_snapshot_entry_id, trigger_key, rule_version, reference_price_eur_cents,
             market_price_amount, npc_buy_price_amount, npc_sell_price_amount, npc_buy_fee_amount, npc_sell_fee_amount,
             parameters_json, reasons_json, calculated_at, valid_until)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(sku_id, trigger_key) DO NOTHING`
+           ON CONFLICT(sku_id, trigger_key) DO UPDATE SET
+             price_snapshot_entry_id = excluded.price_snapshot_entry_id,
+             rule_version = excluded.rule_version,
+             reference_price_eur_cents = excluded.reference_price_eur_cents,
+             market_price_amount = excluded.market_price_amount,
+             npc_buy_price_amount = excluded.npc_buy_price_amount,
+             npc_sell_price_amount = excluded.npc_sell_price_amount,
+             npc_buy_fee_amount = excluded.npc_buy_fee_amount,
+             npc_sell_fee_amount = excluded.npc_sell_fee_amount,
+             parameters_json = excluded.parameters_json,
+             reasons_json = excluded.reasons_json,
+             calculated_at = excluded.calculated_at,
+             valid_until = excluded.valid_until`
         ).run(
           randomUUID(), snapshot.sku_id, snapshot.id, triggerKey, result.ruleVersion, result.referencePriceEurCents,
           result.marketPrice, result.npcBuyPrice, result.npcSellPrice, result.npcBuyFee, result.npcSellFee,
           JSON.stringify(parameters), JSON.stringify(result.reasons), now, validUntil
         );
+        // DO UPDATE 下 changes() 对「插入」和「更新」均返回 1，故 written 表示「落库的报价行数（新增或覆盖）」，不再是「纯新增数」。
         written += changed.changes;
       }
       return written;

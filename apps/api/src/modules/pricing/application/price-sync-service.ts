@@ -46,7 +46,10 @@ export class PriceSyncService {
         const completedAt = new Date().toISOString();
         this.database.prepare("UPDATE price_sync_runs SET status = 'succeeded', mapped_skus = ?, priced_skus = ?, unpriced_skus = ?, mapping_failed_skus = ?, completed_at = ? WHERE id = ?").run(counts.mapped, counts.priced, counts.unpriced, counts.mappingFailed, completedAt, runId);
         this.database.prepare("INSERT INTO price_sync_state (singleton, latest_successful_run_id, updated_at) VALUES (1, ?, ?) ON CONFLICT(singleton) DO UPDATE SET latest_successful_run_id = excluded.latest_successful_run_id, updated_at = excluded.updated_at").run(runId, completedAt);
-        enqueueMarketRepriceJob(this.database, `price-sync:${runId}`, completedAt, runId);
+        // 报价 triggerKey 按服务端下载完成的 UTC 自然日派生（而非 runId）：报价新鲜度取决于「本日是否成功下载过」，
+        // 不再强耦合 MTGJSON 的 meta.date。同一 UTC 日内重复成功同步会复用同一 triggerKey，由 market_quotes
+        // 的 ON CONFLICT(sku_id, trigger_key) DO UPDATE 收敛为「同日只保留最新业务结果」。
+        enqueueMarketRepriceJob(this.database, `price-sync:${completedAt.slice(0, 10)}`, completedAt, runId);
       });
     } catch (error) {
       const reason = (error instanceof Error ? error.message : String(error)).slice(0, 1000);

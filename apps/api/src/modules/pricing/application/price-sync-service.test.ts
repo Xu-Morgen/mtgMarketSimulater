@@ -98,4 +98,22 @@ describe("I13B MTGJSON Cardmarket 价格快照", () => {
     ]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM card_skus WHERE tradable = 1").get()).toEqual({ count: 3 }); db.close();
   });
+
+  it("成功同步后按 UTC 自然日投递 market.reprice，triggerKey 与 job 唯一键均为 price-sync:{当日}", async () => {
+    const prices = { data: { [uuid]: { paper: { cardmarket: { currency: "EUR", retail: { normal: { "2026-07-25": 1.23 } } } } } }, meta: { date: "2026-07-25" } };
+    const printings = { data: { TST: { cards: [{ uuid, finishes: ["nonfoil"], identifiers: { scryfallId } }] } }, meta: { version: "5.3.0" } };
+    const priceBytes = Buffer.from(JSON.stringify(prices)); const mappingBytes = Buffer.from(JSON.stringify(printings));
+    const client = new MtgjsonClient("https://fixture.test/prices", "https://fixture.test/printings", "test", async (input) => {
+      const target = String(input); const bytes = target.includes("prices") ? priceBytes : mappingBytes;
+      return target.endsWith(".sha256") ? new Response(createHash("sha256").update(bytes).digest("hex")) : new Response(bytes);
+    });
+    const db = database(); const sync = new PriceSyncService(db, client);
+    // 固定 completedAt 当日：用 fake timers 或断言「形如 price-sync:YYYY-MM-DD」即可（completedAt 由服务端取当下）。
+    await sync.synchronize();
+    const job = db.prepare("SELECT type, unique_key, payload_json FROM jobs WHERE type = 'market.reprice'").get() as { type: string; unique_key: string; payload_json: string };
+    expect(job.type).toBe("market.reprice");
+    expect(job.unique_key).toMatch(/^price-sync:\d{4}-\d{2}-\d{2}$/);
+    expect(JSON.parse(job.payload_json)).toMatchObject({ triggerKey: expect.stringMatching(/^price-sync:\d{4}-\d{2}-\d{2}$/), priceSyncRunId: expect.any(String) });
+    db.close();
+  });
 });

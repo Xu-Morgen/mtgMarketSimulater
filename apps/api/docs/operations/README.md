@@ -24,7 +24,7 @@
 
 ## I13B MTGJSON Cardmarket 价格同步
 
-- 设置仅服务端可见的 `MTGJSON_PRICES_ENDPOINT`、`MTGJSON_PRINTINGS_ENDPOINT` 和标识服务的 `MTGJSON_USER_AGENT`。任务必须同时读取两个 URL 加 `.sha256` 的侧车校验和；`AllPricesToday` 提供当前日价格，`AllPrintings` 仅用于将 MTGJSON UUID/工艺映射到已导入的 Scryfall SKU，解压后逐张处理而不整体转为 JS 字符串；浏览器不得下载任一文件或读取其原始内容。
+- 设置仅服务端可见的 `MTGJSON_PRICES_ENDPOINT`、`MTGJSON_PRINTINGS_ENDPOINT`、`MTGJSON_ALLPRICES_ENDPOINT` 和标识服务的 `MTGJSON_USER_AGENT`。三个载荷（`AllPricesToday`、`AllPrintings`、`AllPrices`）均采用流式下载与解析：边下载边计算 SHA-256 并写入 `TMPDIR` 临时文件（单遍、恒定内存），下载失败/截断最多重试 3 次；解析时 `createReadStream →（按 gzip 魔数决定是否 gunzip）→ stream-json` 逐对象产出，绝不把整个文件 `gunzipSync` + `toString("utf8")`（`AllPrices` 历史文件会触发 V8 单字符串上限 `0x1fffffe8`）。校验和比对下载阶段已算出的值，不做二次全量哈希。临时文件在解析后删除。浏览器不得下载任一文件或读取其原始内容。
 - 管理员以新的 `Idempotency-Key` 调用 `POST /v1/admin/prices/sync`，再通过 `GET /v1/admin/prices/sync` 或通用 jobs API 观察运行。可选的两个 expected checksum 仅用于已获准的版本固定导入；不匹配、下载、gzip/JSON、映射或 SQLite 失败都会追加 `failed` 运行和任务错误摘要。
 - 成功运行会追加映射与每 SKU 快照，`price_sync_state` 才移动到该运行；无 Cardmarket EUR 正价、零价、缺失或歧义映射均明确标为不可新增交易。失败时不得删除 `price_snapshot_entries`、修改 state 指针、手工改 `tradable` 或把兜底价写成 Cardmarket 价；修复外部输入后重新投递任务。
 - 若管理状态的 `checksumBypassAvailable` 为真，页面会要求管理员明确确认后提交 `{ "allowChecksumMismatch": true }`。这是上游文件与侧车 SHA-256 不一致时的最后手段：先保存失败运行与请求 ID，再确认审计中的操作者、任务 ID 和 `price_sync.checksum_bypass_requested` 事实。覆写成功会标记为 `bypassed`；不得用直接改库或普通任务绕过该确认条件。
@@ -32,8 +32,10 @@
 
 ## I14B 市场重定价
 
-- 成功 `prices.sync` 会以 `price-sync:<syncRunId>` 投递唯一 `market.reprice`；已结算开包等经济事实以 `fact-event:<eventId>` 投递唯一任务。用 `/v1/admin/jobs` 和 `job_runs` 按唯一键、运行 ID 和错误摘要追踪，禁止手工改 `market_quotes`、`market_events`、任务状态或外部快照。
+- 成功 `prices.sync` 会以 `price-sync:<YYYY-MM-DD>`（下载完成的 UTC 自然日）投递唯一 `market.reprice`；已结算开包等经济事实以 `fact-event:<eventId>` 投递唯一任务。报价新鲜度取决于「本日是否成功 reprice 过」，不再耦合 MTGJSON 的 `meta.date`。用 `/v1/admin/jobs` 和 `job_runs` 按唯一键、运行 ID 和错误摘要追踪，禁止手工改 `market_quotes`、`market_events`、任务状态或外部快照。
+- 同一 UTC 日内重复 `market.reprice`（triggerKey 相同）由 `market_quotes` 的 `ON CONFLICT(sku_id, trigger_key) DO UPDATE` 覆盖全部业务字段（价格、参数、reasons、`calculated_at`、`valid_until`）——即「同日只保留最新业务结果」，业务结果按 SKU 维度至多一次；跨日因 triggerKey 不同而保留各自历史版本。`reprice` 返回的「落库行数」语义为新增或覆盖之和，不再是纯新增数。
 - 处理器只读取最近成功运行中的有效 EUR 快照、已结算事实、当前处于 UTC 生效区间的系列周期/关联/市场事件及版本化参数，写入带参数/原因 JSON 的报价投影。失败时旧报价保持可读；修复数据或代码后只重试原任务，勿通过复制或修改系数补偿。
+- 报价有效期固定 15 分钟（`MARKET_QUOTE_VALIDITY_MS`）。`/v1/npc-trades/*/preview` 与 `/v1/orders/*/preview` 对超过 `valid_until` 的报价返回 `VERSION_STALE`，要求等待服务端刷新——这是预期行为，不是故障。
 - 基础市场事件必须同时核对 scope（global/set/sku）、目标、UTC `starts_at`/`ends_at`、5,000–20,000 bp 上限和原因。到期事件自然退出后续重定价；I30B 才会提供受审计的发布/暂停/结束命令，在此之前不允许数据库手工运营。
 
 ## I15B NPC 买入排障

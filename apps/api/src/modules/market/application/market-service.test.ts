@@ -28,19 +28,43 @@ function fixture() {
 }
 
 describe("I14B market.reprice", () => {
-  it("只消费已结算事实与不可变快照，并发重放同一键不重复叠加报价", async () => {
+  it("只消费已结算事实与不可变快照，并发重放同一键收敛为同日唯一最新报价", async () => {
     const database = fixture();
     const event = { id: "event-1", type: "pack.opened", version: 1, occurredAt: now, correlationId: "opening-1", payload: { userId: "user", packId: "pack", packRuleVersion: "v1", spent: { amount: 500, currency: "GAME_CREDIT" }, received: [{ skuId, quantity: 8 }] } };
     database.prepare("INSERT INTO fact_events (id, event_type, aggregate_type, aggregate_id, version, payload_json, occurred_at) VALUES (?, 'pack.opened', 'pack_opening', 'opening-1', 1, ?, ?)").run("60000000-0000-4000-8000-000000000001", JSON.stringify(event), now);
     database.prepare("INSERT INTO market_events (id, scope_type, scope_id, factor_bps, starts_at, ends_at, reason, created_at) VALUES (?, 'sku', ?, 10100, ?, ?, '测试活动', ?)").run("70000000-0000-4000-8000-000000000001", skuId, "2026-07-26T00:00:00.000Z", "2026-07-28T00:00:00.000Z", now);
     const market = new MarketService(database);
+    // I14B→修复：同一 triggerKey 的并发重放经 ON CONFLICT(sku_id,trigger_key) DO UPDATE 收敛。
+    // 两次 reprice 都落库（changes 各为 1，无论插入还是覆盖），但 market_quotes 仍按 SKU+triggerKey 唯一为 1 行。
     const results = await Promise.all([
       Promise.resolve().then(() => market.reprice({ priceSyncRunId: runId, triggerKey: "price-sync:fixture" }, now)),
       Promise.resolve().then(() => market.reprice({ priceSyncRunId: runId, triggerKey: "price-sync:fixture" }, now))
     ]);
-    expect(results.sort()).toEqual([0, 1]);
+    expect(results).toEqual([1, 1]);
     expect(market.quote(skuId)).toMatchObject({ skuId, quoteVersion: "market/v1", referencePrice: { amount: 100, currency: "EUR" }, marketPrice: { currency: "GAME_CREDIT" } });
     expect(database.prepare("SELECT COUNT(*) AS count FROM market_quotes").get()).toEqual({ count: 1 });
+    database.close();
+  });
+
+  it("同日二次 reprice 覆盖刷新报价字段（calculated_at/valid_until 推进），跨日保留各自版本", () => {
+    const database = fixture();
+    const market = new MarketService(database);
+    const day1 = "2026-07-27T00:00:00.000Z";
+    const day1Later = "2026-07-27T06:00:00.000Z";
+    const day2 = "2026-07-28T00:00:00.000Z";
+    // 同日（triggerKey=price-sync:2026-07-27）两次 reprice：第二次应覆盖 calculated_at/valid_until。
+    market.reprice({ priceSyncRunId: runId, triggerKey: `price-sync:${day1.slice(0, 10)}` }, day1);
+    const firstRow = database.prepare("SELECT calculated_at, valid_until FROM market_quotes WHERE sku_id = ?").get(skuId) as { calculated_at: string; valid_until: string };
+    expect(firstRow.calculated_at).toBe(day1);
+    market.reprice({ priceSyncRunId: runId, triggerKey: `price-sync:${day1Later.slice(0, 10)}` }, day1Later);
+    const overwritten = database.prepare("SELECT calculated_at, valid_until FROM market_quotes WHERE sku_id = ?").get(skuId) as { calculated_at: string; valid_until: string };
+    expect(overwritten.calculated_at).toBe(day1Later);
+    expect(overwritten.valid_until).not.toBe(firstRow.valid_until);
+    // 同日覆盖后仍只有 1 行。
+    expect(database.prepare("SELECT COUNT(*) AS count FROM market_quotes").get()).toEqual({ count: 1 });
+    // 跨日（不同 triggerKey）保留各自版本，共 2 行。
+    market.reprice({ priceSyncRunId: runId, triggerKey: `price-sync:${day2.slice(0, 10)}` }, day2);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM market_quotes").get()).toEqual({ count: 2 });
     database.close();
   });
 
