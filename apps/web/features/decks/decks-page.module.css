@@ -1,0 +1,21 @@
+.grid { display: grid; gap: 1rem; }
+.deckCard, .panel { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 1rem; }
+.deckCardHeader, .row, .actions { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+.deckCardHeader { justify-content: space-between; }
+.muted { color: var(--muted); font-size: .9rem; }
+.issues { margin: .7rem 0 0; padding-left: 1.25rem; color: #a53d18; }
+.serverOk { color: #257942; font-weight: 600; }
+.serverBad { color: #a53d18; font-weight: 600; }
+.editor { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(18rem, .75fr); gap: 1rem; align-items: start; }
+.editor > section { min-width: 0; }
+.sticky { position: sticky; top: 1rem; }
+.inventoryList, .selectedList { display: grid; gap: .65rem; max-height: 34rem; overflow: auto; }
+.inventoryRow, .selectedRow { display: flex; justify-content: space-between; align-items: center; gap: .75rem; border-bottom: 1px solid var(--border); padding: .65rem 0; }
+.inventoryRow:last-child, .selectedRow:last-child { border-bottom: 0; }
+.zone { font-size: .8rem; border-radius: 999px; padding: .15rem .5rem; background: #eef3ff; color: #2d4d94; }
+.quantity { width: 5rem; }
+.basicGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; }
+.basicGrid label, .nameField { display: grid; gap: .35rem; }
+.notice { border-left: 4px solid #a66c00; background: #fff9eb; padding: .75rem; }
+.success { border-left-color: #267a42; background: #edf9f0; }
+@media (max-width: 850px) { .editor { grid-template-columns: 1fr; } .sticky { position: static; } .basicGrid { grid-template-columns: 1fr; } .inventoryRow, .selectedRow { align-items: flex-start; flex-direction: column; } }
