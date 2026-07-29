@@ -22,6 +22,19 @@ export type OrderStatus =
   | "fulfilled"
   | "cancelled"
   | "expired";
+export type OrderRiskAction = "create" | "cancel" | "match";
+export type OrderRiskOutcome = "allowed" | "blocked" | "flagged";
+export interface OrderRiskDecisionDto {
+  id: string;
+  orderId: string | null;
+  skuId: string;
+  action: OrderRiskAction;
+  outcome: OrderRiskOutcome;
+  score: number;
+  reasons: string[];
+  ruleVersion: string;
+  createdAt: string;
+}
 export type JobStatus = "pending" | "running" | "succeeded" | "failed" | "dead";
 
 export type ApiErrorCode =

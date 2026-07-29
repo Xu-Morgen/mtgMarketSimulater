@@ -28,6 +28,7 @@ const listQuery = z.object({
   cursor: z.string().regex(/^\d+$/).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20)
 }).strict();
+const riskListQuery = z.object({ outcome: z.enum(["blocked", "flagged"]).optional(), cursor: z.string().regex(/^\d+$/).optional(), limit: z.coerce.number().int().min(1).max(100).default(20) }).strict();
 
 /**
  * 双边委托 HTTP 边界。只验证意图与幂等键；限价带、费用、保证金、额度与预占/释放
@@ -94,6 +95,14 @@ export async function registerOrderRoutes(app: FastifyInstance, database: Databa
   app.get("/v1/orders/book/:skuId", { preHandler: requireRole("player") }, async (request) => {
     const book = orders.book(skuParams.parse(request.params).skuId);
     return success(request.requestId, { book });
+  });
+  // I21B 管理员只读人工复核入口：只暴露风控理由、评分、规则版本和关联订单，不提供放行或资产修改命令。
+  app.get("/v1/admin/orders/risk-decisions", { preHandler: requireRole("admin") }, async (request) => {
+    const query = riskListQuery.parse(request.query);
+    const filters: Parameters<OrderService["listRiskDecisions"]>[0] = { limit: query.limit };
+    if (query.outcome) filters.outcome = query.outcome;
+    if (query.cursor) filters.cursor = query.cursor;
+    return success(request.requestId, orders.listRiskDecisions(filters));
   });
   // I19B 运维/测试显式触发撮合；admin 角色保护，撮合结果不含其他玩家敏感字段。
   app.post("/v1/orders/:skuId/match", { preHandler: requireRole("admin") }, async (request) => {

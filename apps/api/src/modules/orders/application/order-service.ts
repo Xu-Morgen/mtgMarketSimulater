@@ -2,12 +2,15 @@ import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import {
   calculateOrderFees,
+  evaluateCancellationRisk,
+  evaluateOrderRisk,
   isFulfillmentOverdue,
   isWithinOrderLimitBand,
   matchOrders,
   ORDER_FULFILLMENT_RULE_VERSION,
   ORDER_MATCH_RULE_VERSION,
   ORDER_PREVIEW_VERSION,
+  ORDER_RISK_RULE_VERSION,
   ORDER_RULE_VERSION,
   resolveFulfillmentDeadline,
   resolveOrderLimitBand,
@@ -33,6 +36,7 @@ import {
   type OrderStatus,
   type Page,
   type PlayerBilateralTradeDto
+  , type OrderRiskDecisionDto
 } from "@mtg-market/contracts";
 import { InventoryService } from "../../inventory/application/inventory-service.js";
 import { enqueueMarketRepriceJob, enqueueOrderExpireJob } from "../../jobs/application/task-service.js";
@@ -60,6 +64,15 @@ type LimitsRow = {
   fulfillment_deposit_bps: number;
   ttl_seconds: number;
 };
+type RiskLimitsRow = {
+  order_cooldown_seconds: number;
+  max_orders_per_window: number;
+  order_window_seconds: number;
+  max_cancellations_per_window: number;
+  cancellation_window_seconds: number;
+  review_score_threshold: number;
+};
+type RiskDecisionRow = { id: string; order_id: string | null; sku_id: string; action: "create" | "cancel" | "match"; outcome: "allowed" | "blocked" | "flagged"; score: number; reasons_json: string; rule_version: string; created_at: string };
 type QuoteRow = {
   id: string;
   sku_id: string;
@@ -222,6 +235,13 @@ export class OrderService {
           return this.fail(input, now, 409, "INSUFFICIENT_INVENTORY", "可用库存不足，锁定库存不可挂卖单");
         return this.fail(input, now, 409, "RULE_VIOLATION", "本次委托超过服务器交易量限制");
       }
+      // I21B：在基础存档/余额/库存前置校验通过后记录风控决策；异常价格、冷却/频率/数量与
+      // 可立即成交的自买自卖均在预占资产前拦截，且不静默修改任何资产。
+      const risk = this.evaluateCreateRisk(input.userId, input.skuId, input.side, input.quantity, input.limitPrice, quote.market_price_amount, now);
+      if (risk.outcome === "blocked") {
+        this.writeRiskDecision({ userId: input.userId, orderId: null, skuId: input.skuId, action: "create", ...risk, requestId: input.requestId, now });
+        return this.fail(input, now, 409, "RULE_VIOLATION", `订单风控已拦截：${this.riskReasonMessage(risk.reasons)}`);
+      }
       if (!isWithinOrderLimitBand(input.limitPrice, resolveOrderLimitBand({ marketPrice: quote.market_price_amount, minimumPrice: this.minimumPrice(), limitPriceBandBasisPoints: this.limits().limit_price_band_bps })))
         return this.fail(input, now, 409, "RULE_VIOLATION", "限价超出有效报价范围，请重新预览");
 
@@ -282,6 +302,7 @@ export class OrderService {
         quoteId: quote.id, quoteVersion: quote.rule_version, previewVersion: input.previewVersion,
         reservedFunds: reservedFundsAmount, reservedFundsHoldId, inventoryHoldId, expiresAt
       }, now);
+      this.writeRiskDecision({ userId: input.userId, orderId, skuId: input.skuId, action: "create", ...risk, requestId: input.requestId, now });
       // I20B：委托创建即投递到期回收任务（runAfter=expires_at；uniqueKey 去重，重复投递不产生多行 job）。
       this.enqueueOrderExpire({ kind: "order", id: orderId, runAfter: expiresAt });
       const response = success(input.requestId, { order });
@@ -337,6 +358,9 @@ export class OrderService {
       if (!cancellation.ok)
         return this.fail(input, now, 409, "RESOURCE_CONFLICT", `当前状态 ${row.status} 不可撤单`);
 
+      // 高频撤单不强制扣留资产：保留玩家撤单权，但写 flagged 决策供管理员只读人工复核。
+      const cancellationRisk = this.evaluateCancellationRisk(input.userId, now);
+
       const advanced = this.database.prepare(
         "UPDATE bilateral_orders SET status = 'cancelled', cancelled_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND user_id = ? AND version = ?"
       ).run(now, now, input.orderId, input.userId, row.version);
@@ -357,6 +381,7 @@ export class OrderService {
         side: row.side, skuId: row.sku_id, remainingQuantity: row.remaining_quantity,
         releasedFunds: row.reserved_funds_amount, releasedInventoryQuantity: row.side === "sell" ? row.remaining_quantity : 0
       }, now);
+      this.writeRiskDecision({ userId: input.userId, orderId: input.orderId, skuId: row.sku_id, action: "cancel", ...cancellationRisk, requestId: input.requestId, now });
       const response = success(input.requestId, { order });
       this.completeIdempotency(input.userId, input.idempotencyKey, 200, response, now);
       return { state: "completed", statusCode: 200, response };
@@ -655,6 +680,51 @@ export class OrderService {
        ORDER BY q.calculated_at DESC, q.rowid DESC LIMIT 1`
     ).get(...(quoteId ? [skuId, quoteId] : [skuId])) as QuoteRow | undefined;
   }
+
+  /** 管理端只读人工复核入口；不返回用户身份、请求体或任何资产/hold 信息。 */
+  listRiskDecisions(filters: { outcome?: "blocked" | "flagged"; cursor?: string; limit: number }): Page<OrderRiskDecisionDto> {
+    const where = filters.outcome ? "WHERE outcome = ?" : "";
+    const cursor = filters.cursor ? " AND rowid < ?" : "";
+    const prefix = where ? where : "WHERE 1 = 1";
+    const values: unknown[] = filters.outcome ? [filters.outcome] : [];
+    if (filters.cursor) values.push(Number(filters.cursor));
+    const rows = this.database.prepare(`SELECT rowid, id, order_id, sku_id, action, outcome, score, reasons_json, rule_version, created_at FROM order_risk_decisions ${prefix}${cursor} ORDER BY rowid DESC LIMIT ?`).all(...values, filters.limit + 1) as Array<RiskDecisionRow & { rowid: number }>;
+    const visible = rows.slice(0, filters.limit);
+    return { items: visible.map((row) => this.toRiskDecisionDto(row)), page: { nextCursor: rows.length > filters.limit ? String(visible[visible.length - 1]!.rowid) : null, hasMore: rows.length > filters.limit } };
+  }
+
+  private riskLimits(): RiskLimitsRow {
+    const row = this.database.prepare("SELECT order_cooldown_seconds, max_orders_per_window, order_window_seconds, max_cancellations_per_window, cancellation_window_seconds, review_score_threshold FROM bilateral_order_risk_limits WHERE singleton = 1").get() as RiskLimitsRow | undefined;
+    if (!row) throw new Error("订单风控配置未初始化");
+    return row;
+  }
+
+  private evaluateCreateRisk(userId: string, skuId: string, side: OrderSide, quantity: number, limitPrice: number, marketPrice: number, now: string) {
+    const limits = this.limits(); const riskLimits = this.riskLimits();
+    const band = resolveOrderLimitBand({ marketPrice, minimumPrice: this.minimumPrice(), limitPriceBandBasisPoints: limits.limit_price_band_bps });
+    const quantityToday = (this.database.prepare("SELECT COALESCE(SUM(original_quantity), 0) AS quantity FROM bilateral_orders WHERE user_id = ? AND sku_id = ? AND settlement_date = ?").get(userId, skuId, now.slice(0, 10)) as { quantity: number }).quantity;
+    const windowStart = new Date(Date.parse(now) - riskLimits.order_window_seconds * 1_000).toISOString();
+    const ordersInWindow = (this.database.prepare("SELECT COUNT(*) AS count FROM order_risk_decisions WHERE user_id = ? AND action = 'create' AND created_at >= ?").get(userId, windowStart) as { count: number }).count;
+    const last = this.database.prepare("SELECT created_at FROM order_risk_decisions WHERE user_id = ? AND action = 'create' ORDER BY rowid DESC LIMIT 1").get(userId) as { created_at: string } | undefined;
+    const opposite = side === "buy" ? "sell" : "buy";
+    const crossesOwnOppositeOrder = Boolean(this.database.prepare(`SELECT 1 FROM bilateral_orders WHERE user_id = ? AND sku_id = ? AND side = ? AND status IN ('open', 'partially_filled') AND remaining_quantity > 0 AND ${side === "buy" ? "limit_price_amount <= ?" : "limit_price_amount >= ?"} LIMIT 1`).get(userId, skuId, opposite, limitPrice));
+    return evaluateOrderRisk({ ruleVersion: ORDER_RISK_RULE_VERSION, quantity, limitPrice, band, quantityToday, ordersInWindow, secondsSinceLastOrder: last ? Math.max(0, Math.floor((Date.parse(now) - Date.parse(last.created_at)) / 1_000)) : null, crossesOwnOppositeOrder, config: { maxQuantityPerOrder: limits.max_quantity_per_order, maxQuantityPerUserSkuDay: limits.max_quantity_per_user_sku_day, limitPriceBandBasisPoints: limits.limit_price_band_bps, orderCooldownSeconds: riskLimits.order_cooldown_seconds, maxOrdersPerWindow: riskLimits.max_orders_per_window, maxCancellationsPerWindow: riskLimits.max_cancellations_per_window, reviewScoreThreshold: riskLimits.review_score_threshold } });
+  }
+
+  private evaluateCancellationRisk(userId: string, now: string) {
+    const limits = this.riskLimits(); const start = new Date(Date.parse(now) - limits.cancellation_window_seconds * 1_000).toISOString();
+    const cancellationsInWindow = (this.database.prepare("SELECT COUNT(*) AS count FROM order_risk_decisions WHERE user_id = ? AND action = 'cancel' AND created_at >= ?").get(userId, start) as { count: number }).count;
+    return evaluateCancellationRisk({ ruleVersion: ORDER_RISK_RULE_VERSION, cancellationsInWindow, config: { maxCancellationsPerWindow: limits.max_cancellations_per_window, reviewScoreThreshold: limits.review_score_threshold } });
+  }
+
+  private writeRiskDecision(input: { userId: string; orderId: string | null; skuId: string; action: "create" | "cancel" | "match"; outcome: "allowed" | "blocked" | "flagged"; score: number; reasons: string[]; ruleVersion: string; requestId: string; now: string }): void {
+    const id = randomUUID();
+    this.database.prepare("INSERT INTO order_risk_decisions (id, user_id, order_id, sku_id, action, outcome, score, reasons_json, rule_version, request_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, input.userId, input.orderId, input.skuId, input.action, input.outcome, input.score, JSON.stringify(input.reasons), input.ruleVersion, input.requestId, input.now);
+    this.users.writeEconomicAudit(input.userId, `order_risk.${input.outcome}`, "order_risk_decision", id, input.requestId, { orderId: input.orderId, skuId: input.skuId, action: input.action, score: input.score, reasons: input.reasons, ruleVersion: input.ruleVersion }, input.now);
+  }
+
+  private toRiskDecisionDto(row: RiskDecisionRow): OrderRiskDecisionDto { return { id: row.id, orderId: row.order_id, skuId: row.sku_id, action: row.action, outcome: row.outcome, score: row.score, reasons: JSON.parse(row.reasons_json) as string[], ruleVersion: row.rule_version, createdAt: row.created_at }; }
+  private riskReasonMessage(reasons: string[]): string { const labels: Record<string, string> = { price_out_of_band: "限价越界", cooldown: "下单冷却中", order_frequency: "下单频率过高", quantity_limit: "交易数量超限", self_trade: "检测到可能自买自卖" }; return reasons.map((reason) => labels[reason] ?? reason).join("、"); }
 
   private limits(): LimitsRow {
     const limits = this.database.prepare(

@@ -199,6 +199,23 @@ describe("I18B 卖单创建与库存/保证金预占", () => {
 });
 
 describe("I18B 撤单幂等释放", () => {
+  it("I21B 高频撤单只标记复核，不阻断撤单或静默改资产", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    database.prepare("UPDATE bilateral_order_risk_limits SET order_cooldown_seconds = 0, max_orders_per_window = 20, max_cancellations_per_window = 1, cancellation_window_seconds = 3600").run();
+    const authorization = await player(app, `risk-cancel-${Math.random()}@example.test`, "撤单风控方");
+    for (const key of ["risk-cancel-first", "risk-cancel-second"]) {
+      const preview = await previewBuy(app, authorization, 1);
+      const created = await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization, "idempotency-key": `${key}-create` }, payload: createBody(preview.data.preview, 200, 1) });
+      expect(created.statusCode).toBe(201);
+      const orderId = created.json().data.order.id as string;
+      expect((await app.inject({ method: "POST", url: `/v1/orders/${orderId}/cancel`, headers: { authorization, "idempotency-key": `${key}-run` }, payload: {} })).statusCode).toBe(200);
+    }
+    expect(database.prepare("SELECT outcome, reasons_json, rule_version FROM order_risk_decisions WHERE action = 'cancel' ORDER BY rowid DESC LIMIT 1").get()).toEqual({ outcome: "flagged", reasons_json: '["cancellation_frequency"]', rule_version: "order-risk/v1" });
+    expect(database.prepare("SELECT available_amount, frozen_amount FROM accounts").get()).toEqual({ available_amount: 10000, frozen_amount: 0 });
+    await app.close(); database.close();
+  });
+
   it("撤单释放买单资金预占，重放返回首次结果", async () => {
     const { app, database } = await createTestApp();
     seedTradableQuote(database);
@@ -328,7 +345,7 @@ describe("I19B 撮合规则与服务端成交", () => {
     await app.close(); database.close();
   });
 
-  it("自成交拒绝：同一用户的买卖委托不会被撮合", async () => {
+  it("I21B 自买自卖在创建阶段拦截并留下风控决策", async () => {
     const { app, database } = await createTestApp();
     seedTradableQuote(database);
     const authorization = await player(app, `self-${Math.random()}@example.test`, "自成交者");
@@ -336,10 +353,13 @@ describe("I19B 撮合规则与服务端成交", () => {
     const sellPreview = await previewSell(app, authorization, 2);
     expect((await app.inject({ method: "POST", url: `/v1/orders/sell/${ids.sku}`, headers: { authorization, "idempotency-key": "self-sell" }, payload: createBody(sellPreview.data.preview, 200, 2) })).statusCode).toBe(201);
     const buyPreview = await previewBuy(app, authorization, 2);
-    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization, "idempotency-key": "self-buy" }, payload: createBody(buyPreview.data.preview, 210, 2) })).statusCode).toBe(201);
-    // 自成交跳过：无成交记录，双方仍 open。
+    const blocked = await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization, "idempotency-key": "self-buy" }, payload: createBody(buyPreview.data.preview, 210, 2) });
+    expect(blocked).toMatchObject({ statusCode: 409 });
+    expect(blocked.json()).toMatchObject({ ok: false, error: { code: "RULE_VIOLATION", message: expect.stringContaining("自买自卖") } });
+    // 无成交、只有原卖单，决策可供人工复核。
     expect((database.prepare("SELECT COUNT(*) AS count FROM bilateral_trades").get() as { count: number }).count).toBe(0);
-    expect(database.prepare("SELECT status FROM bilateral_orders ORDER BY side").all()).toEqual([{ status: "open" }, { status: "open" }]);
+    expect(database.prepare("SELECT status FROM bilateral_orders").all()).toEqual([{ status: "open" }]);
+    expect(database.prepare("SELECT outcome, rule_version FROM order_risk_decisions WHERE action = 'create' ORDER BY rowid DESC LIMIT 1").get()).toEqual({ outcome: "blocked", rule_version: "order-risk/v1" });
     await app.close(); database.close();
   });
 
@@ -504,7 +524,7 @@ describe("I19F 玩家成交只读视图", () => {
     await app.close(); database.close();
   });
 
-  it("自成交场景无成交记录，列表为空", async () => {
+  it("I21B 自成交拦截后没有成交记录，列表为空", async () => {
     const { app, database } = await createTestApp();
     seedTradableQuote(database);
     const authorization = await player(app, `self-trades-${Math.random()}@example.test`, "自成交者");
@@ -512,7 +532,7 @@ describe("I19F 玩家成交只读视图", () => {
     const sellPreview = await previewSell(app, authorization, 2);
     expect((await app.inject({ method: "POST", url: `/v1/orders/sell/${ids.sku}`, headers: { authorization, "idempotency-key": "self-trades-sell" }, payload: createBody(sellPreview.data.preview, 200, 2) })).statusCode).toBe(201);
     const buyPreview = await previewBuy(app, authorization, 2);
-    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization, "idempotency-key": "self-trades-buy" }, payload: createBody(buyPreview.data.preview, 210, 2) })).statusCode).toBe(201);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization, "idempotency-key": "self-trades-buy" }, payload: createBody(buyPreview.data.preview, 210, 2) })).statusCode).toBe(409);
     const view = (await app.inject({ method: "GET", url: "/v1/orders/trades", headers: { authorization } })).json().data;
     expect(view.items).toEqual([]);
     await app.close(); database.close();
@@ -743,4 +763,3 @@ describe("I20B 模拟履约、取消与到期", () => {
     await app.close(); database.close();
   });
 });
-

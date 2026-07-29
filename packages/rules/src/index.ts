@@ -573,3 +573,32 @@ export function isFulfillmentOverdue(ruleVersion: string, fulfillmentDeadline: s
   if (!Number.isFinite(current) || new Date(current).toISOString() !== now) throw new RangeError("当前时间必须是 UTC ISO 8601");
   return fulfillmentDeadline <= now;
 }
+
+/** I21B：订单风控纯规则；配置、历史计数和潜在自成交均由 API 明确输入。 */
+export const ORDER_RISK_RULE_VERSION = "order-risk/v1" as const;
+export type OrderRiskReason = "price_out_of_band" | "cooldown" | "order_frequency" | "quantity_limit" | "self_trade" | "cancellation_frequency";
+export interface OrderRiskConfig { maxQuantityPerOrder: number; maxQuantityPerUserSkuDay: number; limitPriceBandBasisPoints: number; orderCooldownSeconds: number; maxOrdersPerWindow: number; maxCancellationsPerWindow: number; reviewScoreThreshold: number; }
+export interface OrderRiskInput { ruleVersion: string; quantity: number; limitPrice: number; band: OrderLimitBand; quantityToday: number; ordersInWindow: number; secondsSinceLastOrder: number | null; crossesOwnOppositeOrder: boolean; config: OrderRiskConfig; }
+export interface OrderRiskResult { ruleVersion: string; outcome: "allowed" | "blocked" | "flagged"; score: number; reasons: OrderRiskReason[]; }
+export function evaluateOrderRisk(input: OrderRiskInput): OrderRiskResult {
+  if (input.ruleVersion !== ORDER_RISK_RULE_VERSION) throw new RangeError(`不支持的订单风控规则版本：${input.ruleVersion}`);
+  positiveInteger(input.quantity, "风控委托数量"); nonNegativeSafeInteger(input.quantityToday, "当日委托数量"); nonNegativeSafeInteger(input.ordersInWindow, "窗口委托次数");
+  for (const [value, label] of [[input.config.maxQuantityPerOrder, "单笔数量上限"], [input.config.maxQuantityPerUserSkuDay, "单日数量上限"], [input.config.maxOrdersPerWindow, "窗口次数上限"], [input.config.reviewScoreThreshold, "复核分数阈值"]] as const) positiveInteger(value, label);
+  nonNegativeSafeInteger(input.config.orderCooldownSeconds, "下单冷却"); basisPoints(input.config.limitPriceBandBasisPoints, "风控限价带", 0, 100_000);
+  if (input.secondsSinceLastOrder !== null) nonNegativeSafeInteger(input.secondsSinceLastOrder, "距上次下单秒数");
+  const reasons: OrderRiskReason[] = [];
+  if (!isWithinOrderLimitBand(input.limitPrice, input.band)) reasons.push("price_out_of_band");
+  if (input.quantity > input.config.maxQuantityPerOrder || input.quantityToday + input.quantity > input.config.maxQuantityPerUserSkuDay) reasons.push("quantity_limit");
+  if (input.ordersInWindow >= input.config.maxOrdersPerWindow) reasons.push("order_frequency");
+  if (input.secondsSinceLastOrder !== null && input.secondsSinceLastOrder < input.config.orderCooldownSeconds) reasons.push("cooldown");
+  if (input.crossesOwnOppositeOrder) reasons.push("self_trade");
+  const weights: Record<OrderRiskReason, number> = { price_out_of_band: 80, quantity_limit: 50, order_frequency: 60, cooldown: 30, self_trade: 100, cancellation_frequency: 60 };
+  const score = reasons.reduce((sum, reason) => sum + weights[reason], 0);
+  return { ruleVersion: input.ruleVersion, outcome: reasons.length === 0 ? "allowed" : "blocked", score, reasons };
+}
+export function evaluateCancellationRisk(input: { ruleVersion: string; cancellationsInWindow: number; config: Pick<OrderRiskConfig, "maxCancellationsPerWindow" | "reviewScoreThreshold"> }): OrderRiskResult {
+  if (input.ruleVersion !== ORDER_RISK_RULE_VERSION) throw new RangeError(`不支持的订单风控规则版本：${input.ruleVersion}`);
+  nonNegativeSafeInteger(input.cancellationsInWindow, "窗口撤单次数"); positiveInteger(input.config.maxCancellationsPerWindow, "撤单次数上限"); positiveInteger(input.config.reviewScoreThreshold, "复核分数阈值");
+  const flagged = input.cancellationsInWindow >= input.config.maxCancellationsPerWindow;
+  return { ruleVersion: input.ruleVersion, outcome: flagged ? "flagged" : "allowed", score: flagged ? input.config.reviewScoreThreshold : 0, reasons: flagged ? ["cancellation_frequency"] : [] };
+}

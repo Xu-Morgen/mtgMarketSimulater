@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { INITIAL_FUNDING, INITIAL_FUNDING_RULE_VERSION, MARKET_RULE_VERSION, ORDER_FULFILLMENT_RULE_VERSION, ORDER_MATCH_RULE_VERSION, ORDER_PREVIEW_VERSION, ORDER_RULE_VERSION, calculateMarketQuote, calculateOrderFees, checkSelfTrade, isFulfillmentOverdue, isWithinOrderLimitBand, marketQuoteValidUntil, matchOrders, openPack, packSlotProbabilities, propagateMarketPressure, resolveFulfillmentDeadline, resolveInitialFunding, resolveOrderLimitBand, validateOrderCancellation, validateTradeCancellation, validateTradeFulfillment, type MatchOrderInput, type PackRuleInput } from "./index.js";
+import { INITIAL_FUNDING, INITIAL_FUNDING_RULE_VERSION, MARKET_RULE_VERSION, ORDER_FULFILLMENT_RULE_VERSION, ORDER_MATCH_RULE_VERSION, ORDER_PREVIEW_VERSION, ORDER_RISK_RULE_VERSION, ORDER_RULE_VERSION, calculateMarketQuote, calculateOrderFees, checkSelfTrade, evaluateCancellationRisk, evaluateOrderRisk, isFulfillmentOverdue, isWithinOrderLimitBand, marketQuoteValidUntil, matchOrders, openPack, packSlotProbabilities, propagateMarketPressure, resolveFulfillmentDeadline, resolveInitialFunding, resolveOrderLimitBand, validateOrderCancellation, validateTradeCancellation, validateTradeFulfillment, type MatchOrderInput, type PackRuleInput } from "./index.js";
 
 const PACK_RULE: PackRuleInput = {
   version: "pack/v1",
@@ -125,6 +125,23 @@ describe("I18B 双边委托规则", () => {
   it("规则版本与预览版本固定且可追溯", () => {
     expect(ORDER_RULE_VERSION).toBe("order/v1");
     expect(ORDER_PREVIEW_VERSION).toBe("order-preview/v1");
+  });
+});
+
+describe("I21B 订单风控规则", () => {
+  const config = { maxQuantityPerOrder: 20, maxQuantityPerUserSkuDay: 100, limitPriceBandBasisPoints: 5_000, orderCooldownSeconds: 5, maxOrdersPerWindow: 5, maxCancellationsPerWindow: 3, reviewScoreThreshold: 60 };
+  const base = { ruleVersion: ORDER_RISK_RULE_VERSION, quantity: 1, limitPrice: 200, band: resolveOrderLimitBand({ marketPrice: 200, minimumPrice: 1, limitPriceBandBasisPoints: 5_000 }), quantityToday: 0, ordersInWindow: 0, secondsSinceLastOrder: null, crossesOwnOppositeOrder: false, config };
+  it("合法订单稳定允许，越界价格、频率、数量与自成交均明确拦截", () => {
+    expect(evaluateOrderRisk(base)).toEqual({ ruleVersion: ORDER_RISK_RULE_VERSION, outcome: "allowed", score: 0, reasons: [] });
+    expect(evaluateOrderRisk({ ...base, limitPrice: 301 }).reasons).toContain("price_out_of_band");
+    expect(evaluateOrderRisk({ ...base, ordersInWindow: 5 }).reasons).toContain("order_frequency");
+    expect(evaluateOrderRisk({ ...base, quantity: 21 }).reasons).toContain("quantity_limit");
+    expect(evaluateOrderRisk({ ...base, crossesOwnOppositeOrder: true })).toMatchObject({ outcome: "blocked", reasons: ["self_trade"] });
+  });
+  it("高频撤单只标记人工复核，不静默扣留资产", () => {
+    expect(evaluateCancellationRisk({ ruleVersion: ORDER_RISK_RULE_VERSION, cancellationsInWindow: 2, config })).toMatchObject({ outcome: "allowed", score: 0 });
+    expect(evaluateCancellationRisk({ ruleVersion: ORDER_RISK_RULE_VERSION, cancellationsInWindow: 3, config })).toMatchObject({ outcome: "flagged", score: 60, reasons: ["cancellation_frequency"] });
+    expect(() => evaluateOrderRisk({ ...base, ruleVersion: "order-risk/v0" })).toThrow("不支持的订单风控规则版本");
   });
 });
 

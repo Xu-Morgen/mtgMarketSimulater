@@ -122,6 +122,11 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 - 响应 `PlayerBilateralTradeDto` 脱敏对手身份：只返回当前玩家自己的 `myOrderId`、`role`（buyer/seller）、成交价（取 maker）、本方已成交 order_fee 与已转入待履约的资产（买方待履约资金 = 数量×成交价+order_fee，卖方待履约资金 = 已成交保证金、待履约库存数量）。对手 userId、对手 orderId 与所有 holdId 一律不返回；`skuId` 可选过滤，`cursor/limit` 整型分页。
 - 撮合顺序、成交价与部分成交语义全部由 `order-matching/v1` 决定；订单簿 `GET /v1/orders/book/{skuId}` 只读聚合、不含用户身份。玩家页面只展示服务端状态，连接失败时提示数据可能过期。
 
+## 订单风控与异常交易防护（I21B）
+
+- `order-risk/v1` 是价格边界、冷却、频率/数量与自买自卖判定的唯一来源；OrderService 只提供明确的报价、历史计数与 `bilateral_order_risk_limits`。异常在任何预占前拦截，不静默修改资产。
+- `order_risk_decisions` 与审计均只追加。高频撤单保留原子释放路径，仅 `flagged` 供复核；`GET /v1/admin/orders/risk-decisions` 是管理员只读入口，不提供放行或修数命令。
+
 ## P2P 模拟履约、取消与到期回收（I20B）
 
 - `modules/orders/application/OrderService` 的 `fulfill`/`cancelTrade` 是模拟履约状态机的唯一结算入口；`expireOrder`/`expireTrade`/`expireByPayload` 供 `order.expire` 任务到期回收。所有路径都在同一个 `InventoryService.withLedgerTransaction` 短事务内，经 users/inventory application 接口协作，不跨界写 `accounts`/`fund_holds`/`inventory_holdings`。

@@ -117,6 +117,11 @@
 - 到期回收：创建委托与撮合成交时分别投递 `runAfter=expires_at`/`fulfillment_deadline`、`uniqueKey=order-expire:{id}`/`trade-expire:{id}` 的 `order.expire` 任务（`(type, unique_key)` 唯一索引去重）。`order.expire` handler（`OrderService.expireByPayload({kind,id})`）到期把 `open/partially_filled` 委托转 `expired`（释放剩余预占）或 `matched_pending_fulfillment` 成交转取消履约；`POST /v1/orders/trades/{tradeId}/expire`（admin）供运维/测试显式触发成交到期回收，普通玩家 `403`。状态机条件 UPDATE 保证已终态实体不重复迁移。
 - 履约期限沿用 `bilateral_order_limits.ttl_seconds`，由 `@mtg-market/rules` 的 `order-fulfillment/v1`（`resolveFulfillmentDeadline`）从撮合时刻派生，写入 `bilateral_trades.fulfillment_deadline`，并随 `BilateralTradeDto`/`PlayerBilateralTradeDto.fulfillmentDeadline` 返回。并发与幂等由 SQLite 短事务串行 + 条件 UPDATE 保证至多一次业务结果；同键同参重放返回首次响应，异参 `IDEMPOTENCY_CONFLICT`。本期单一模拟履约类型，不引入实体物流状态。
 
+## I21B 订单风控协议
+
+- `POST /v1/orders/buy|sell/{skuId}` 在既有基础资产校验后、预占前执行 `order-risk/v1`；异常价格、冷却、窗口频率、数量限额与潜在自买自卖返回 `409 RULE_VIOLATION`，同键重放仍遵循既有幂等协议。
+- 高频撤单完成原子释放后追加 `flagged` 决策。`GET /v1/admin/orders/risk-decisions?outcome=blocked|flagged&cursor=&limit=`（admin）仅返回脱敏 `OrderRiskDecisionDto`，不提供放行或写资产命令。
+
 ## I17B 价格历史、每日同步与 AllPrices 回填协议
 
 - `GET /v1/market/quotes/{skuId}/history?range=7d|30d|all` 与 `GET /v1/market/index/history?range=7d|30d|all` 要求有效会话，按自然日采样返回 `PriceHistoryDto`/`MarketIndexHistoryDto`。历史来自只追加的 `price_snapshot_entries`（reference）与 `market_quotes`（game），同日多次同步/重定价取该日最新值；任一价格缺失为 null，空历史返回空 `points` 数组而非 `404`，确保失败同步仍能展示旧价或空态。浏览器不得自行计算曲线或推断缺失值。

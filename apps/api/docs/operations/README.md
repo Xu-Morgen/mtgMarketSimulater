@@ -77,6 +77,11 @@
 - 并发与幂等：履约/取消在短事务内串行，条件 UPDATE（`WHERE status='matched_pending_fulfillment'`）保证至多一次业务结果；同键同参重放返回首次响应，异参 `IDEMPOTENCY_CONFLICT`。事务回滚测试（`fail_trade_update` 触发器）验证写入异常时无半完成状态、资金/库存/保证金守恒。
 - 按 `bilateral_trades.id` 关联 `fund_holds`（`buyer_funds_hold_id`=`order_fulfillment`、`seller_deposit_hold_id`=`order_fulfillment_deposit`）、`inventory_holds`（卖方 `seller_inventory_hold_id`）、`ledger_entries`（`p2p_buy`/`p2p_sell`/`order_fulfillment_deposit`）、`fact_events`（`p2p.trade.settled`）与审计（`bilateral_trade.fulfilled`/`.cancelled`/`.expired`）。异常定位遵循“禁止直接修数”：任何缺失或漂移必须由补偿命令在同事务写新流水与原因，禁止直接覆盖 `bilateral_trades`、`fund_holds`、`inventory_holdings`、`accounts` 最终值或删除流水/审计。撮合风控（价格边界/频率/自成交标记）延后至 I21B；端到端一致性恢复回归属 I22B。
 
+## I21B 订单风控排障
+
+- 用请求 ID 或订单 ID 查询 `order_risk_decisions` 与 `audit_logs(entity_type='order_risk_decision')`；`blocked` 发生在资产预占前，禁止通过直接改订单、余额、库存或决策行“放行”。
+- `self_trade`、`price_out_of_band`、`cooldown`、`order_frequency`、`quantity_limit` 均拒绝；`cancellation_frequency` 是只读复核标记，撤单资产已按原事务释放。
+
 ## I30B 管理活动与玩家补偿（计划）
 
 以下是 I30B 实现时必须细化为可执行手册的边界；当前尚未实现，不授权通过数据库手工操作替代后台能力。
