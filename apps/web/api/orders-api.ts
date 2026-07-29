@@ -1,9 +1,11 @@
 "use client";
 
 import type {
+  AccountBalanceDto,
   BilateralOrderBookDto,
   BilateralOrderDto,
   BilateralOrderPreviewDto,
+  BilateralTradeDto,
   OrderSide,
   OrderStatus,
   Page,
@@ -80,7 +82,12 @@ export const bilateralOrderApi = {
   book: (accessToken: string, skuId: string) =>
     apiRequest<{ book: BilateralOrderBookDto }>(`/v1/orders/book/${skuId}`, { accessToken }),
   trades: (accessToken: string, filters: PlayerTradesFilters) =>
-    apiRequest<Page<PlayerBilateralTradeDto>>(`/v1/orders/trades?${tradesQueryString(filters)}`, { accessToken })
+    apiRequest<Page<PlayerBilateralTradeDto>>(`/v1/orders/trades?${tradesQueryString(filters)}`, { accessToken }),
+  // I20B 履约/取消履约请求体为空，幂等键指纹仅依赖路径与动作；trade 为服务端脱敏成交，balance 为请求者视角。
+  fulfillTrade: (accessToken: string, tradeId: string, idempotencyKey: string) =>
+    apiRequest<{ trade: BilateralTradeDto; balance: AccountBalanceDto }>(`/v1/orders/trades/${tradeId}/fulfill`, { method: "POST", accessToken, idempotencyKey }),
+  cancelTrade: (accessToken: string, tradeId: string, idempotencyKey: string) =>
+    apiRequest<{ trade: BilateralTradeDto; balance: AccountBalanceDto }>(`/v1/orders/trades/${tradeId}/cancel`, { method: "POST", accessToken, idempotencyKey })
 };
 
 function tradesQueryString(filters: PlayerTradesFilters): string {
@@ -204,6 +211,82 @@ export function useCancelOrderMutation() {
     mutationFn: async (input: { orderId: string }) => {
       if (!intent.current || intent.current.orderId !== input.orderId) intent.current = { key: createIdempotencyKey(), orderId: input.orderId };
       return bilateralOrderApi.cancel(accessToken!, input.orderId, intent.current.key);
+    },
+    onSuccess: () => {
+      if (user) {
+        void queryClient.invalidateQueries({ queryKey: ["orders", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["orders", "book", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["orders", "trades", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["archive", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["ledger", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["inventory", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["market", "quotes", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["market", "quote", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["market", "index", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["prices", "public-status", user.id] });
+      }
+      intent.current = null;
+    }
+  });
+  return {
+    ...mutation,
+    beginNewIntent: () => {
+      intent.current = null;
+      mutation.reset();
+    }
+  };
+}
+
+/**
+ * I20F 确认履约：以幂等键 + 成交 ID 提交空请求体；买卖任一方均可发起。
+ * 同键同成交重放返回首次结果；换成交才生成新键。成功只失效服务器真相缓存，不在浏览器结算余额/库存。
+ */
+export function useFulfillTradeMutation() {
+  const { accessToken, user } = useSession();
+  const queryClient = useQueryClient();
+  const intent = useRef<{ key: string; tradeId: string } | null>(null);
+  const mutation = useMutation({
+    mutationFn: async (input: { tradeId: string }) => {
+      if (!intent.current || intent.current.tradeId !== input.tradeId) intent.current = { key: createIdempotencyKey(), tradeId: input.tradeId };
+      return bilateralOrderApi.fulfillTrade(accessToken!, input.tradeId, intent.current.key);
+    },
+    onSuccess: () => {
+      if (user) {
+        void queryClient.invalidateQueries({ queryKey: ["orders", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["orders", "book", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["orders", "trades", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["archive", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["ledger", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["inventory", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["market", "quotes", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["market", "quote", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["market", "index", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["prices", "public-status", user.id] });
+      }
+      intent.current = null;
+    }
+  });
+  return {
+    ...mutation,
+    beginNewIntent: () => {
+      intent.current = null;
+      mutation.reset();
+    }
+  };
+}
+
+/**
+ * I20F 取消履约：以幂等键 + 成交 ID 提交空请求体；买卖任一方均可发起，到期回收在服务端复用本路径。
+ * 同键同成交重放返回首次结果；换成交才生成新键。成功只失效服务器真相缓存，不在浏览器结算。
+ */
+export function useCancelTradeMutation() {
+  const { accessToken, user } = useSession();
+  const queryClient = useQueryClient();
+  const intent = useRef<{ key: string; tradeId: string } | null>(null);
+  const mutation = useMutation({
+    mutationFn: async (input: { tradeId: string }) => {
+      if (!intent.current || intent.current.tradeId !== input.tradeId) intent.current = { key: createIdempotencyKey(), tradeId: input.tradeId };
+      return bilateralOrderApi.cancelTrade(accessToken!, input.tradeId, intent.current.key);
     },
     onSuccess: () => {
       if (user) {

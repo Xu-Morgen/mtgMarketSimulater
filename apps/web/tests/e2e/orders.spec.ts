@@ -295,7 +295,7 @@ test.describe("P2P 订单簿与撮合状态（I19F）", () => {
       fee: { amount: quantity * 4, currency: "GAME_CREDIT" },
       pendingFunds: { amount: quantity * 204, currency: "GAME_CREDIT" },
       pendingInventoryQuantity: null, ruleVersion: "order-matching/v1", status: "matched_pending_fulfillment",
-      createdAt: now, updatedAt: now
+      fulfillmentDeadline: "2026-07-29T08:00:00.000Z", createdAt: now, updatedAt: now
     };
   }
   /** 卖方视角成交：role=seller、待履约资金=保证金、待履约库存=已成交数量。 */
@@ -306,7 +306,7 @@ test.describe("P2P 订单簿与撮合状态（I19F）", () => {
       fee: { amount: quantity * 4, currency: "GAME_CREDIT" },
       pendingFunds: { amount: quantity * 20, currency: "GAME_CREDIT" },
       pendingInventoryQuantity: quantity, ruleVersion: "order-matching/v1", status: "matched_pending_fulfillment",
-      createdAt: now, updatedAt: now
+      fulfillmentDeadline: "2026-07-29T08:00:00.000Z", createdAt: now, updatedAt: now
     };
   }
 
@@ -395,7 +395,7 @@ test.describe("P2P 订单簿与撮合状态窄屏（390 × 844）", () => {
     await page.route("**/v1/orders?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [{ ...order("sell", 3, 200, "partially_filled", 2), id: orderId, remainingQuantity: 1 }], page: { total: 1, hasMore: false, nextCursor: null } })) }));
     await page.route("**/v1/orders/trades?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [{
       id: "trade-narrow-1", skuId, role: "seller", myOrderId: orderId, quantity: 2, executionPrice: { amount: 200, currency: "GAME_CREDIT" },
-      fee: { amount: 8, currency: "GAME_CREDIT" }, pendingFunds: { amount: 40, currency: "GAME_CREDIT" }, pendingInventoryQuantity: 2, ruleVersion: "order-matching/v1", status: "matched_pending_fulfillment", createdAt: now, updatedAt: now
+      fee: { amount: 8, currency: "GAME_CREDIT" }, pendingFunds: { amount: 40, currency: "GAME_CREDIT" }, pendingInventoryQuantity: 2, ruleVersion: "order-matching/v1", status: "matched_pending_fulfillment", fulfillmentDeadline: "2026-07-29T08:00:00.000Z", createdAt: now, updatedAt: now
     }], page: { total: 1, hasMore: false, nextCursor: null } })) }));
     await recoverSessionAsNarrow(page, sellerUserIdNarrow, "seller-token-narrow");
     await page.goto("/orders");
@@ -414,4 +414,186 @@ test.describe("P2P 订单簿与撮合状态窄屏（390 × 844）", () => {
     await page.context().addCookies([{ name: "mtg_csrf", value: `i19f-${userId}`, url: webBaseUrl }]);
     await page.route("**/v1/auth/refresh", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ accessToken, user: { id: userId, email: `i19f-${userId}@example.test`, displayName: "窄屏卖方", role: "player", createdAt: now } })) }));
   }
+});
+
+test.describe("P2P 模拟履约确认与取消（I20F）", () => {
+  const buyerUserId = "10000000-0000-4000-8000-0000000002f1";
+  const sellerUserId = "10000000-0000-4000-8000-0000000002f2";
+  const tradeId = "trade-i20f-1";
+
+  /** 买方视角待履约成交；含履约期限。 */
+  function buyerPendingTrade(): Record<string, unknown> {
+    return {
+      id: tradeId, skuId, role: "buyer", myOrderId: "order-buyer-i20f",
+      quantity: 2, executionPrice: { amount: 200, currency: "GAME_CREDIT" },
+      fee: { amount: 8, currency: "GAME_CREDIT" },
+      pendingFunds: { amount: 408, currency: "GAME_CREDIT" },
+      pendingInventoryQuantity: null, ruleVersion: "order-matching/v1", status: "matched_pending_fulfillment",
+      fulfillmentDeadline: "2026-07-29T08:00:00.000Z", createdAt: now, updatedAt: now
+    };
+  }
+  /** 卖方视角待履约成交。 */
+  function sellerPendingTrade(): Record<string, unknown> {
+    return {
+      id: tradeId, skuId, role: "seller", myOrderId: "order-seller-i20f",
+      quantity: 2, executionPrice: { amount: 200, currency: "GAME_CREDIT" },
+      fee: { amount: 8, currency: "GAME_CREDIT" },
+      pendingFunds: { amount: 40, currency: "GAME_CREDIT" },
+      pendingInventoryQuantity: 2, ruleVersion: "order-matching/v1", status: "matched_pending_fulfillment",
+      fulfillmentDeadline: "2026-07-29T08:00:00.000Z", createdAt: now, updatedAt: now
+    };
+  }
+  /** 服务端履约/取消履约命令响应：trade 携带推进后的状态与成交 ID（前端只取 status/updatedAt/id）。 */
+  function tradeCommandResponse(status: "fulfilled" | "cancelled", userId: string) {
+    return { trade: { id: tradeId, status, updatedAt: now }, balance: { total: { amount: 10000, currency: "GAME_CREDIT" }, available: { amount: 10000, currency: "GAME_CREDIT" }, frozen: { amount: 0, currency: "GAME_CREDIT" }, updatedAt: now, userId } };
+  }
+
+  async function mockOrderBook(page: Page) {
+    await page.route(`**/v1/orders/book/${skuId}`, async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(envelope({ book: { skuId, bids: [], asks: [], capturedAt: now } }))
+    }));
+  }
+
+  async function mockArchive(page: Page, userId: string, frozenAmount = 408) {
+    await page.route("**/v1/archive", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ archive: { id: "archive-1", userId, initialFundingRuleVersion: "initial-funding/v1", createdAt: now, balance: { total: { amount: 10000, currency: "GAME_CREDIT" }, available: { amount: 10000 - frozenAmount, currency: "GAME_CREDIT" }, frozen: { amount: frozenAmount, currency: "GAME_CREDIT" }, updatedAt: now } } })) }));
+    await page.route("**/v1/ledger?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+  }
+
+  async function recoverSessionAs(page: Page, userId: string, accessToken: string, displayName: string) {
+    await page.context().addCookies([{ name: "mtg_csrf", value: `i20f-${userId}`, url: webBaseUrl }]);
+    await page.route("**/v1/auth/refresh", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ accessToken, user: { id: userId, email: `i20f-${userId}@example.test`, displayName, role: "player", createdAt: now } })) }));
+  }
+
+  test("确认履约：二次确认后只发一个 POST，成功状态推进为已完成，重复点击不重复请求", async ({ page }) => {
+    await mockMarket(page);
+    await mockArchive(page, buyerUserId, 408);
+    await mockOrderBook(page);
+    await page.route("**/v1/orders?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+    await recoverSessionAs(page, buyerUserId, "buyer-token-i20f", "履约买方");
+    let currentTrade = buyerPendingTrade();
+    let fulfillCalls = 0; const keys: string[] = [];
+    await page.route("**/v1/orders/trades?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [currentTrade], page: { total: 1, hasMore: false, nextCursor: null } })) }));
+    await page.route(`**/v1/orders/trades/${tradeId}/fulfill`, async (route) => {
+      fulfillCalls += 1; keys.push(route.request().headers()["idempotency-key"] ?? "");
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      // 履约后服务端成交列表会推进为 fulfilled。
+      currentTrade = { ...buyerPendingTrade(), status: "fulfilled", pendingFunds: null, pendingInventoryQuantity: null };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(envelope(tradeCommandResponse("fulfilled", buyerUserId))) });
+    });
+
+    await page.goto("/orders");
+    await page.getByRole("heading", { name: "我的成交与待履约资产" }).scrollIntoViewIfNeeded();
+    await expect(page.locator("table").getByText("买方")).toBeVisible();
+    await expect(page.locator("table").getByText("待履约").first()).toBeVisible();
+    // 无实体物流声明可见。
+    await expect(page.getByText("不涉及实体卡牌物流、发货或退货").first()).toBeVisible();
+
+    // 确认履约：打开二次确认弹窗，展示期限、待履约资产与无物流声明。
+    await page.getByRole("button", { name: "确认履约" }).click();
+    await expect(page.getByRole("heading", { name: "确认履约" })).toBeVisible();
+    await expect(page.getByText("待履约资金：408 游戏币（数量×成交价 + order_fee）")).toBeVisible();
+    // 弹窗内展示派生自成交的履约期限。
+    await expect(page.getByRole("dialog").getByText("履约期限")).toBeVisible();
+    await expect(page.getByRole("dialog").getByText("不涉及实体卡牌物流、发货或退货")).toBeVisible();
+
+    // 双击确认只触发一次提交；按钮在提交期间禁用。
+    const confirm = page.getByRole("dialog").getByRole("button", { name: "确认履约" });
+    await confirm.dblclick();
+    await expect(page.getByRole("heading", { name: "履约已完成" })).toBeVisible();
+    await expect(page.getByText("已确认履约")).toBeVisible();
+    // 关联成交 ID 可作为账本核对入口。
+    await expect(page.getByText(`关联成交 ID ${tradeId}`)).toBeVisible();
+    expect(fulfillCalls).toBe(1);
+    expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/i);
+  });
+
+  test("取消履约：买方视角退回资金，状态推进为已取消", async ({ page }) => {
+    await mockMarket(page);
+    await mockArchive(page, buyerUserId, 408);
+    await mockOrderBook(page);
+    await page.route("**/v1/orders?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+    await recoverSessionAs(page, buyerUserId, "buyer-token-i20f-cancel", "取消买方");
+    let currentTrade = buyerPendingTrade();
+    let cancelCalls = 0;
+    await page.route("**/v1/orders/trades?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [currentTrade], page: { total: 1, hasMore: false, nextCursor: null } })) }));
+    await page.route(`**/v1/orders/trades/${tradeId}/cancel`, async (route) => {
+      cancelCalls += 1;
+      currentTrade = { ...buyerPendingTrade(), status: "cancelled", pendingFunds: null, pendingInventoryQuantity: null };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(envelope(tradeCommandResponse("cancelled", buyerUserId))) });
+    });
+
+    await page.goto("/orders");
+    await page.getByRole("heading", { name: "我的成交与待履约资产" }).scrollIntoViewIfNeeded();
+    await page.getByRole("button", { name: "取消履约" }).click();
+    await expect(page.getByRole("heading", { name: "取消履约" })).toBeVisible();
+    // 买方视角：取消履约会退回待履约资金。
+    await expect(page.getByText("你的待履约资金将退回可用额")).toBeVisible();
+    await page.getByRole("dialog").getByRole("button", { name: "确认取消履约" }).click();
+    await expect(page.getByRole("heading", { name: "履约已取消" })).toBeVisible();
+    await expect(page.getByText("你的待履约资金已退回")).toBeVisible();
+    expect(cancelCalls).toBe(1);
+  });
+
+  test("到期：服务端推进为已取消后成交不可操作", async ({ page }) => {
+    await mockMarket(page);
+    await mockArchive(page, sellerUserId, 40);
+    await mockOrderBook(page);
+    await page.route("**/v1/orders?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+    await recoverSessionAs(page, sellerUserId, "seller-token-i20f-expired", "到期卖方");
+    // 成交已被服务端（order.expire）推进为 cancelled；前端只读，不再展示履约/取消按钮。
+    const expiredTrade = { ...sellerPendingTrade(), status: "cancelled" as const, pendingFunds: null, pendingInventoryQuantity: null };
+    await page.route("**/v1/orders/trades?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [expiredTrade], page: { total: 1, hasMore: false, nextCursor: null } })) }));
+
+    await page.goto("/orders");
+    await page.getByRole("heading", { name: "我的成交与待履约资产" }).scrollIntoViewIfNeeded();
+    await expect(page.locator("table").getByText("已取消").first()).toBeVisible();
+    await expect(page.locator("table").getByText("不可操作")).toBeVisible();
+    await expect(page.getByRole("button", { name: "确认履约" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "取消履约" })).toHaveCount(0);
+  });
+
+  test("失败重试：状态冲突时显示服务端原因并提示刷新，不伪造成功", async ({ page }) => {
+    await mockMarket(page);
+    await mockArchive(page, buyerUserId, 408);
+    await mockOrderBook(page);
+    await page.route("**/v1/orders?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+    await recoverSessionAs(page, buyerUserId, "buyer-token-i20f-fail", "履约失败买方");
+    await page.route("**/v1/orders/trades?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [buyerPendingTrade()], page: { total: 1, hasMore: false, nextCursor: null } })) }));
+    await page.route(`**/v1/orders/trades/${tradeId}/fulfill`, async (route) => route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify(failure("RESOURCE_CONFLICT", "当前状态 matched_pending_fulfillment 不可确认履约")) }));
+
+    await page.goto("/orders");
+    await page.getByRole("heading", { name: "我的成交与待履约资产" }).scrollIntoViewIfNeeded();
+    await page.getByRole("button", { name: "确认履约" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "确认履约" }).click();
+    // 服务端拒绝原因展示为行内错误，并提供刷新成交列表；不展示伪造的成功横幅。
+    await expect(page.getByText("当前状态 matched_pending_fulfillment 不可确认履约")).toBeVisible();
+    await expect(page.getByRole("button", { name: "刷新成交列表" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "履约已完成" })).toHaveCount(0);
+  });
+});
+
+test.describe("P2P 模拟履约确认与取消窄屏（390 × 844）", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+  test("窄屏履约二次确认与无物流声明不阻断", async ({ page }) => {
+    await mockMarket(page);
+    const narrowUserId = "10000000-0000-4000-8000-0000000002f3";
+    await page.route("**/v1/archive", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ archive: { id: "archive-1", userId: narrowUserId, initialFundingRuleVersion: "initial-funding/v1", createdAt: now, balance: { total: { amount: 10000, currency: "GAME_CREDIT" }, available: { amount: 9592, currency: "GAME_CREDIT" }, frozen: { amount: 408, currency: "GAME_CREDIT" }, updatedAt: now } } })) }));
+    await page.route("**/v1/ledger?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+    await page.route(`**/v1/orders/book/${skuId}`, async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ book: { skuId, bids: [], asks: [], capturedAt: now } })) }));
+    await page.route("**/v1/orders?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+    await page.route("**/v1/orders/trades?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [{
+      id: "trade-i20f-narrow", skuId, role: "buyer", myOrderId: "order-narrow", quantity: 2, executionPrice: { amount: 200, currency: "GAME_CREDIT" },
+      fee: { amount: 8, currency: "GAME_CREDIT" }, pendingFunds: { amount: 408, currency: "GAME_CREDIT" }, pendingInventoryQuantity: null, ruleVersion: "order-matching/v1", status: "matched_pending_fulfillment", fulfillmentDeadline: "2026-07-29T08:00:00.000Z", createdAt: now, updatedAt: now
+    }], page: { total: 1, hasMore: false, nextCursor: null } })) }));
+    await page.context().addCookies([{ name: "mtg_csrf", value: `i20f-${narrowUserId}`, url: webBaseUrl }]);
+    await page.route("**/v1/auth/refresh", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ accessToken: "narrow-token-i20f", user: { id: narrowUserId, email: `i20f-${narrowUserId}@example.test`, displayName: "窄屏履约买方", role: "player", createdAt: now } })) }));
+
+    await page.goto("/orders");
+    await page.getByRole("heading", { name: "我的成交与待履约资产" }).scrollIntoViewIfNeeded();
+    await expect(page.getByRole("button", { name: "确认履约" })).toBeVisible();
+    await page.getByRole("button", { name: "确认履约" }).click();
+    await expect(page.getByRole("heading", { name: "确认履约" })).toBeVisible();
+    await expect(page.getByText("不涉及实体卡牌物流、发货或退货").first()).toBeVisible();
+  });
 });

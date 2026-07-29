@@ -6,6 +6,7 @@ import {
   isValidRequestFingerprint,
   isValidRequestId,
   type ApiResponse,
+  type BilateralFulfillmentType,
   type EconomicFactEvent,
   type PlayerBilateralTradeDto
 } from "./index.js";
@@ -122,5 +123,12 @@ describe("共享契约", () => {
       const serialized = JSON.parse(JSON.stringify(view)) as Record<string, unknown>;
       expect(serialized).toMatchObject({ status, fulfillmentDeadline: "2026-07-29T00:00:00.000Z" });
     }
+  });
+
+  it("I20F 模拟履约类型固定为 simulated，不引入实体物流状态", () => {
+    // BilateralFulfillmentType 是常量联合；本期唯一取值 "simulated" 表示成交后的确认/取消是经济结算，
+    // 客户端只能展示服务端返回的类型，不可自行推导或扩展为实体物流状态。
+    const fulfillmentType: BilateralFulfillmentType = "simulated";
+    expect(fulfillmentType).toBe("simulated");
   });
 });
