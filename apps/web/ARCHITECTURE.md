@@ -111,6 +111,12 @@
 - 挂单入口由市场页可交易 SKU 行「挂买单」与库存页可用持仓行「挂卖单」触发；玩家导航新增 `/orders`。撮合、模拟履约、`p2p.trade.settled` 与 `order.expire` 延后至 I19B/I20B/I22B；本迭代订单只处于 `open` 状态，页面不展示撮合/履约 UI。
 - `tests/e2e/orders.spec.ts` 在桌面与窄屏覆盖买单创建/双击/限价越界/余额不足、报价过期重新预览换键、卖单创建+我的委托+撤单、状态/方向筛选写 URL、空委托与查询失败；人工执行记录固定在 `tests/manual/I18F.md`。
 
+## I23F 每日工作资金领取页面（2026-07-29）
+
+- `api/daily-work-funding-api.ts` 是仪表盘读取资格和提交领取的唯一入口。`DailyWorkFundingStatusDto` 的自然日、时区、金额、规则版本、领取记录和下一次时间均直接来自本地 API；查询键按用户隔离，挂载时强制重取，不把资格或日期放入 Zustand。
+- `useClaimDailyWorkFundingMutation` 对同一网络重试复用幂等键，并以同步提交锁阻断 React 禁用渲染前的双击。无论成功、冲突还是失败都失效每日资格、存档和账本查询；页面随后只接受服务端刷新后的可领取/已领取/未开放状态，绝不以浏览器自然日推导下一次资格。
+- `features/dashboard/player-dashboard-page.tsx` 只格式化 `nextEligibleAt` 等服务端 UTC 字段到服务端 IANA 时区，展示领取对应账本类型。`tests/e2e/daily-work-funding.spec.ts` 和 `tests/manual/I23F.md` 分别保存桌面/窄屏回归与人工验收。
+
 ## 不单独建层的内容
 
 - DTO、事件与 API 契约由共享 `packages/contracts` 提供，因此前端不建立会产生重复定义的 `types/` 层。
