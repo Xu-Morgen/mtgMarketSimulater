@@ -26,7 +26,7 @@
 - 首次导入前必须显式设置 `CATALOG_ENABLED_SET_CODES`（英文逗号分隔、系列代码大写）和持久化的 `CATALOG_DATA_DIR`；空系列配置会令任务失败而不会导入完整 Bulk Data。`SCRYFALL_BULK_ENDPOINT` 默认指向 Scryfall `default-cards` 元数据端点，`SCRYFALL_USER_AGENT` 必须标识本服务（建议带运维联系邮箱），两者只允许由 API 进程后台任务访问。Scryfall 会拒绝 Node 默认 User-Agent 并返回 `400 generic_user_agent`。
 - `BRO-BASE` 与 `SOS-BASE` 依赖对应目录；部署基础包时应设置 `CATALOG_ENABLED_SET_CODES=BRO,SOS`，再由管理员投递 `catalog.sync`。同步成功前商品显示“等待 BRO/SOS 目录同步”且不可购买；成功后同一事务发布新规则快照并启用。不要手工编辑候选 SKU、商品启用状态或规则 JSON。
 - 管理员通过 `POST /v1/admin/catalog/sync` 携带 `Idempotency-Key` 投递任务，再以 `GET /v1/admin/catalog/sync` 或通用任务 API 观察状态。排障必须查看 `catalog_sync_runs` 的版本、SHA-256、差异和失败摘要以及 `job_runs`；不得手工删除目录行、图片或修改任务状态。
-- 同步会先下载并校验整个 Bulk 文件（兼容 Scryfall 声明的 gzip 编码），以对象级扫描解析顶层数组而不转换完整文件为 JavaScript 字符串，并在读取时只保留启用系列；下载/解析失败最多重试三次、校验未压缩响应长度，再在短事务中替换 Scryfall 来源目录。任何 checksum、JSON 截断、Schema、重复印刷、图片或 SQLite 错误均保留最近成功目录和 `catalog_sync_state` 指针。修复外部问题后使用新的幂等键重新投递；不要将外部 URL 交给浏览器重试。
+- 同步会先下载并校验整个 Bulk 文件：兼容旧版 `download_uri` 顶层数组，以及 Scryfall 新版 `jsonl_download_uri` gzip JSONL；元数据可为直接 `default_cards` 描述器或 `/bulk-data` 列表，后者只选择 `default_cards`。它按对象/行扫描而不转换完整文件为 JavaScript 字符串，并在读取时只保留启用系列；下载/解析失败最多重试三次、校验未压缩响应长度，再在短事务中按 Scryfall 印刷 ID 和 `(printing_id, finish)` 更新目录。已被库存、价格、订单或历史记录引用的 SKU 不会删除，来源快照不再包含的行只在同步差异中记为 `removed`。任何 checksum、JSON 截断、Schema、重复印刷、图片或 SQLite 错误均保留最近成功目录和 `catalog_sync_state` 指针。修复外部问题后使用新的幂等键重新投递；不要将外部 URL 交给浏览器重试。
 - 卡图通过独立 `catalog.image-cache` 任务下载并写入 `CATALOG_DATA_DIR/images`。管理员可按 SKU 或系列投递任务；它仅补齐已有目录的 `missing`/`failed` 图片，不会重新下载 Bulk 或替换目录。持久化卷必须包含该目录；读取仅通过受保护的本地 `/v1/catalog/images/:imageName` 路径，禁止使用目录路径或 Scryfall 图片 URL 作公开静态根。
 
 ## I13B MTGJSON Cardmarket 价格同步
