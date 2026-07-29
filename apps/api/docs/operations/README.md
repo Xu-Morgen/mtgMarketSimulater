@@ -82,6 +82,13 @@
 - 用请求 ID 或订单 ID 查询 `order_risk_decisions` 与 `audit_logs(entity_type='order_risk_decision')`；`blocked` 发生在资产预占前，禁止通过直接改订单、余额、库存或决策行“放行”。
 - `self_trade`、`price_out_of_band`、`cooldown`、`order_frequency`、`quantity_limit` 均拒绝；`cancellation_frequency` 是只读复核标记，撤单资产已按原事务释放。
 
+## I22B P2P 全链路一致性与恢复
+
+- **异常订单定位**：从订单 ID、成交 ID、请求 ID 或幂等键开始，只读关联 `bilateral_orders`、`bilateral_trades`、`fund_holds`、`inventory_holds`、`ledger_entries`、`inventory_entries`、`fact_events`、`jobs`、`job_runs` 与 `audit_logs`。部分成交必须分别核对未成交委托的 `remaining_quantity`/active hold 与每笔待履约成交的 hold；不可只按订单汇总金额判断正确性。
+- **对账恒等式**：账户始终满足 `total_amount = available_amount + frozen_amount`；买单的 active `order_buy`/`order_fulfillment` hold 与订单剩余/待履约金额一致；卖单的 active inventory hold 与未成交锁定数量一致，已 capture 的数量只可由已完成、取消或到期成交解释；保证金只能是 active、released 或 captured，取消/到期的 captured 保证金必须有 `ledger_entries(reason=order_fulfillment_deposit, correlation_id=p2p-deposit-forfeited:{tradeId})`。正常履约必须有唯一 `p2p.trade.settled`，取消或到期则不得有该事实事件。
+- **重启与任务恢复**：重启前保留 SQLite WAL 及数据库文件；新进程启动时 task runner 会恢复租约过期的 job，并以 `(type, unique_key)` 继续收敛 `order.expire`。检查 `jobs.status/attempts/locked_until` 与 `job_runs` 后让 worker 正常领取；不得通过直接更新订单状态、hold、库存或余额来“补偿”到期任务。已终态订单/成交被重复领取必须是无副作用跳过。
+- **人工冻结与处置边界**：发生疑似漂移时，先停止相关写流量并保留数据库/WAL、请求 ID、任务和审计证据；在 I30B 的受审计玩家冻结命令上线前，不存在授权的按玩家数据库手工冻结路径。不得以删任务、修改 `bilateral_orders`、`bilateral_trades`、`fund_holds`、`inventory_holdings` 或账户最终值代替冻结。恢复或补偿只能由所属 application 命令在同一短事务写新流水、原因和审计；无法安全处置时保持冻结并升级。
+
 ## I30B 管理活动与玩家补偿（计划）
 
 以下是 I30B 实现时必须细化为可执行手册的边界；当前尚未实现，不授权通过数据库手工操作替代后台能力。

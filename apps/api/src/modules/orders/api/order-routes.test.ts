@@ -5,6 +5,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openSqliteDatabase } from "@mtg-market/database";
 import { createApiApp } from "../../../app.js";
 import { loadApiConfig } from "../../../config/environment.js";
+import { createTaskRegistry } from "../../../task-runner.js";
+import { TaskWorker } from "../../jobs/application/task-service.js";
+import { SqliteJobRepository } from "../../jobs/infrastructure/sqlite-job-repository.js";
 
 const directories: string[] = [];
 const ids = {
@@ -21,9 +24,10 @@ afterEach(() => directories.splice(0).forEach((directory) => rmSync(directory, {
 async function createTestApp() {
   const directory = mkdtempSync(join(tmpdir(), "mtg-orders-"));
   directories.push(directory);
-  const database = openSqliteDatabase(join(directory, "test.db"));
-  const config = loadApiConfig({ APP_ENV: "test", SQLITE_PATH: join(directory, "test.db"), AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters" });
-  return { app: await createApiApp(config, database), database };
+  const databasePath = join(directory, "test.db");
+  const database = openSqliteDatabase(databasePath);
+  const config = loadApiConfig({ APP_ENV: "test", SQLITE_PATH: databasePath, AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters" });
+  return { app: await createApiApp(config, database), config, database, databasePath };
 }
 
 function seedTradableQuote(database: ReturnType<typeof openSqliteDatabase>, validUntil = "2099-01-01T00:00:00.000Z") {
@@ -761,5 +765,78 @@ describe("I20B 模拟履约、取消与到期", () => {
     expect((database.prepare("SELECT COUNT(*) AS count FROM fact_events WHERE event_type = 'p2p.trade.settled'").get() as { count: number }).count).toBe(0);
     expect((database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'bilateral_trade.fulfilled'").get() as { count: number }).count).toBe(0);
     await app.close(); database.close();
+  });
+});
+
+describe("I22B P2P 全链路一致性与恢复", () => {
+  it("部分成交在服务重启后取消并撤回剩余委托：资金、库存、保证金、持有、账本和审计保持可对账", async () => {
+    const { config, databasePath, ...initial } = await createTestApp();
+    let { app, database } = initial;
+    seedTradableQuote(database);
+
+    const sellerAuth = await player(app, `i22b-partial-seller-${Math.random()}@example.test`, "部分成交卖方");
+    expect((await app.inject({ method: "POST", url: `/v1/npc-trades/buy/${ids.sku}`, headers: { authorization: sellerAuth, "idempotency-key": "i22b-partial-seed" }, payload: { quoteId: ids.quote, quoteVersion: "market/v1", quantity: 5, maxUnitPrice: 250 } })).statusCode).toBe(201);
+    const sellPreview = await previewSell(app, sellerAuth, 5);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/sell/${ids.sku}`, headers: { authorization: sellerAuth, "idempotency-key": "i22b-partial-sell" }, payload: createBody(sellPreview.data.preview, 200, 5) })).statusCode).toBe(201);
+
+    const buyerAuth = await player(app, `i22b-partial-buyer-${Math.random()}@example.test`, "部分成交买方");
+    const buyPreview = await previewBuy(app, buyerAuth, 2);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization: buyerAuth, "idempotency-key": "i22b-partial-buy" }, payload: createBody(buyPreview.data.preview, 210, 2) })).statusCode).toBe(201);
+
+    const trade = database.prepare("SELECT id FROM bilateral_trades").get() as { id: string };
+    const sellerOrder = database.prepare("SELECT id FROM bilateral_orders WHERE side = 'sell'").get() as { id: string };
+    expect(database.prepare("SELECT quantity, available_quantity, order_locked_quantity FROM inventory_holdings WHERE user_id = (SELECT user_id FROM bilateral_orders WHERE id = ?)").get(sellerOrder.id)).toEqual({ quantity: 3, available_quantity: 0, order_locked_quantity: 3 });
+
+    // 关闭并以相同 SQLite 文件重新创建应用，模拟 API 进程重启；不得依赖进程内缓存恢复订单真相。
+    await app.close();
+    database.close();
+    database = openSqliteDatabase(databasePath);
+    app = await createApiApp(config, database);
+
+    expect((await app.inject({ method: "POST", url: `/v1/orders/trades/${trade.id}/cancel`, headers: { authorization: sellerAuth, "idempotency-key": "i22b-partial-cancel-trade" } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/${sellerOrder.id}/cancel`, headers: { authorization: sellerAuth, "idempotency-key": "i22b-partial-cancel-order" } })).statusCode).toBe(200);
+
+    // 买方的待履约资金完整释放；卖方仅损失已成交两张对应的保证金 40。
+    expect(database.prepare("SELECT total_amount, available_amount, frozen_amount FROM accounts WHERE user_id = (SELECT buyer_user_id FROM bilateral_trades WHERE id = ?)").get(trade.id)).toEqual({ total_amount: 10000, available_amount: 10000, frozen_amount: 0 });
+    expect(database.prepare("SELECT total_amount, available_amount, frozen_amount FROM accounts WHERE user_id = (SELECT seller_user_id FROM bilateral_trades WHERE id = ?)").get(trade.id)).toEqual({ total_amount: 8710, available_amount: 8710, frozen_amount: 0 });
+    expect(database.prepare("SELECT quantity, available_quantity, order_locked_quantity FROM inventory_holdings WHERE user_id = (SELECT seller_user_id FROM bilateral_trades WHERE id = ?)").get(trade.id)).toEqual({ quantity: 5, available_quantity: 5, order_locked_quantity: 0 });
+    expect(database.prepare("SELECT status FROM bilateral_trades WHERE id = ?").get(trade.id)).toEqual({ status: "cancelled" });
+    expect(database.prepare("SELECT status, remaining_quantity FROM bilateral_orders WHERE id = ?").get(sellerOrder.id)).toEqual({ status: "cancelled", remaining_quantity: 3 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM fund_holds WHERE status = 'active' AND entity_type = 'bilateral_order'").get()).toEqual({ count: 0 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM inventory_holds WHERE status = 'active'").get()).toEqual({ count: 0 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM ledger_entries WHERE correlation_id = ? AND direction = 'debit' AND amount = 40").get(`p2p-deposit-forfeited:${trade.id}`)).toEqual({ count: 1 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE entity_id = ? AND action IN ('bilateral_trade.cancelled', 'bilateral_order.cancelled')").get(trade.id)).toEqual({ count: 2 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM fact_events WHERE event_type = 'p2p.trade.settled'").get()).toEqual({ count: 0 });
+    await app.close(); database.close();
+  });
+
+  it("重启后的 worker 恢复到期委托任务，重复领取不产生第二次释放或审计", async () => {
+    const { app, config, databasePath, database: initialDatabase } = await createTestApp();
+    let database = initialDatabase;
+    seedTradableQuote(database);
+    const buyerAuth = await player(app, `i22b-expire-buyer-${Math.random()}@example.test`, "到期买方");
+    const preview = await previewBuy(app, buyerAuth, 2);
+    expect((await app.inject({ method: "POST", url: `/v1/orders/buy/${ids.sku}`, headers: { authorization: buyerAuth, "idempotency-key": "i22b-expire-buy" }, payload: createBody(preview.data.preview, 100, 2) })).statusCode).toBe(201);
+    const order = database.prepare("SELECT id, reserved_funds_amount FROM bilateral_orders").get() as { id: string; reserved_funds_amount: number };
+
+    await app.close();
+    database.close();
+    database = openSqliteDatabase(databasePath);
+    // 用确定的未来时钟让持久化的 order.expire job 在新进程中可领取。
+    const recoveredAt = new Date("2100-01-01T00:00:00.000Z");
+    // 业务用例使用服务器当前时钟判断订单到期；任务领取使用注入的未来时钟。
+    database.prepare("UPDATE bilateral_orders SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(order.id);
+    database.prepare("UPDATE jobs SET run_after = ?, updated_at = ? WHERE type = 'order.expire' AND unique_key = ?").run(recoveredAt.toISOString(), recoveredAt.toISOString(), `order-expire:${order.id}`);
+    const worker = new TaskWorker(new SqliteJobRepository(database), createTaskRegistry(config, database), () => recoveredAt);
+    worker.recover();
+    expect(await worker.runOne()).toBe(true);
+    expect(await worker.runOne()).toBe(false);
+
+    expect(database.prepare("SELECT status FROM bilateral_orders WHERE id = ?").get(order.id)).toEqual({ status: "expired" });
+    expect(database.prepare("SELECT available_amount, frozen_amount FROM accounts WHERE user_id = (SELECT user_id FROM bilateral_orders WHERE id = ?)").get(order.id)).toEqual({ available_amount: 10000, frozen_amount: 0 });
+    expect(database.prepare("SELECT status FROM fund_holds WHERE entity_id = ?").get(order.id)).toEqual({ status: "released" });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE entity_id = ? AND action = 'bilateral_order.expired'").get(order.id)).toEqual({ count: 1 });
+    expect(database.prepare("SELECT status, attempts FROM jobs WHERE type = 'order.expire' AND unique_key = ?").get(`order-expire:${order.id}`)).toEqual({ status: "succeeded", attempts: 1 });
+    database.close();
   });
 });
