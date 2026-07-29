@@ -1,12 +1,12 @@
 # MTG Market Simulator
 
-轻量单机版卡牌市场模拟器 workspace。适用于 5–10 名玩家：本地 SQLite、Scryfall Bulk Data 卡池、MTGJSON 每日价格快照，以及可选 AI 比赛叙事。
+轻量单机版卡牌市场模拟器 workspace。适用于 5–10 名玩家：本地 SQLite、Scryfall Bulk Data 卡池、MTGJSON 每日价格快照，以及 **I33 发布后才可启用的可选 AI 比赛叙事**。
 
 ## 项目结构
 
 - `apps/web`：Next.js 前端，只负责展示与提交用户意图。
 - `apps/api`：Fastify API、本地 SQLite 与持久化任务循环，唯一的经济结算入口。
-- `apps/ai`：AI 赛事叙事模块，只输出经过结构校验的文本，不拥有经济系统权限。
+- `apps/ai`：I33 发布后可选启用的 AI 赛事叙事模块，只输出经过结构校验的文本，不拥有经济系统权限。
 - `packages/contracts`：前后端与 AI 共用的类型和事件契约。
 - `packages/rules`：纯规则函数，后续放置开包、报价、比赛、订单和成就计算。
 
@@ -25,7 +25,7 @@ cp apps/web/.env.example apps/web/.env.local
 cp apps/ai/.env.example apps/ai/.env
 ```
 
-`apps/api` 与 `apps/ai` 只在启动边界解析其服务器配置；`apps/web` 只允许 `NEXT_PUBLIC_*` 配置。`OPENAI_API_KEY` 仅在需要启用 AI 叙事时配置在 `apps/ai/.env`，绝不能发送给浏览器或写入 `apps/web`。
+`apps/api` 与 `apps/ai` 只在启动边界解析其服务器配置；`apps/web` 只允许 `NEXT_PUBLIC_*` 配置。I33 发布前无需配置 AI；I33 后决定启用 I34 AI 叙事时，才将 `OPENAI_API_KEY` 配置在 `apps/ai/.env`，绝不能发送给浏览器或写入 `apps/web`。
 
 ## 环境与质量门禁
 
@@ -39,4 +39,4 @@ cp apps/ai/.env.example apps/ai/.env
 
 详细职责边界见[技术栈与模块职责边界.md](技术栈与模块职责边界.md)。
 
-开发模式下，`pnpm dev` 会同时启动 API（默认 `http://localhost:3001`）和前端（默认 `http://localhost:3000`）。AI 模块不单独监听端口：它会由 API 的本地任务循环在比赛结算后调用。
+开发模式下，`pnpm dev` 会同时启动 API（默认 `http://localhost:3001`）和前端（默认 `http://localhost:3000`）。I33 发布后若启用 AI，AI 模块不单独监听端口：它会由 API 的本地任务循环在比赛结算后调用。

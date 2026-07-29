@@ -1,4 +1,6 @@
-# AI 赛事叙事架构
+# AI 赛事叙事架构（I33 发布后可选）
+
+本架构仅在 I33 发布后、产品决定启用 I34 时生效。首发与 I33 发布不投递、领取或验收 `narrative.generate`，现有目录和 Schema 仅作为保留骨架。
 
 ## 范围
 
@@ -40,7 +42,7 @@ shared ← 所有层（不得反向依赖业务层）
 
 ## 任务与降级流
 
-1. 权威赛事结算完成后，以 `tournamentId + narrativeVersion` 写入唯一的 `narrative.generate` 任务。
+1. I34 启用后，权威赛事结算完成才以 `tournamentId + narrativeVersion` 写入唯一的 `narrative.generate` 任务。
 2. `worker` 串行领取任务，并由 `application` 组装允许字段的摘要；未结算数据与敏感数据一律拒绝。
 3. `infrastructure/openai` 使用 Structured Outputs 发起无工具调用。
 4. `domain/policy` 校验 Schema、字段长度、语言、敏感内容和赛事标识。
