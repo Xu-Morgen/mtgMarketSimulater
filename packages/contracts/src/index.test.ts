@@ -8,6 +8,7 @@ import {
   type ApiResponse,
   type BilateralFulfillmentType,
   type DailyWorkFundingStatusDto,
+  type DeckPowerSnapshotDto,
   type EconomicFactEvent,
   type PlayerBilateralTradeDto
 } from "./index.js";
@@ -99,7 +100,11 @@ describe("共享契约", () => {
     expect(serializedBuyer).not.toHaveProperty("buyerFundsHoldId");
     expect(serializedBuyer).not.toHaveProperty("sellerInventoryHoldId");
     expect(serializedBuyer).not.toHaveProperty("sellerDepositHoldId");
-    expect(serializedBuyer).toMatchObject({ role: "buyer", myOrderId: "my-buy-order", pendingInventoryQuantity: null });
+    expect(serializedBuyer).toMatchObject({
+      role: "buyer",
+      myOrderId: "my-buy-order",
+      pendingInventoryQuantity: null
+    });
     expect(serializedSeller).toMatchObject({ role: "seller", pendingInventoryQuantity: 2 });
   });
 
@@ -133,6 +138,50 @@ describe("共享契约", () => {
     expect(fulfillmentType).toBe("simulated");
   });
 
+  it("I24R 强度快照明确来源、版本、输入摘要、可用性与降级原因", () => {
+    const primary: DeckPowerSnapshotDto = {
+      source: "leyline",
+      sourceVersion: "leyline-adapter/v1",
+      providerAlgorithmVersion: "undeclared",
+      score: 58,
+      inputSummarySha256: "a".repeat(64),
+      computedAt: "2026-07-29T00:00:00.000Z",
+      availability: "available",
+      degradationReason: null,
+      responseSha256: "b".repeat(64)
+    };
+    const degraded: DeckPowerSnapshotDto = {
+      ...primary,
+      source: "local",
+      sourceVersion: "local-deck-power/v1",
+      providerAlgorithmVersion: null,
+      availability: "degraded",
+      degradationReason: "provider_timeout",
+      responseSha256: null
+    };
+    expect(JSON.parse(JSON.stringify(primary))).toMatchObject({
+      source: "leyline",
+      providerAlgorithmVersion: "undeclared",
+      availability: "available"
+    });
+    expect(JSON.parse(JSON.stringify(degraded))).toMatchObject({
+      source: "local",
+      degradationReason: "provider_timeout",
+      responseSha256: null
+    });
+    const machineLearning: DeckPowerSnapshotDto = {
+      ...primary,
+      source: "ml",
+      sourceVersion: "deck-power-ml/v1.0.0",
+      providerAlgorithmVersion: null,
+      responseSha256: null
+    };
+    expect(JSON.parse(JSON.stringify(machineLearning))).toMatchObject({
+      source: "ml",
+      sourceVersion: "deck-power-ml/v1.0.0"
+    });
+  });
+
   it("I23B 每日工作资金状态只承载服务端快照的日期、时区、规则和金额", () => {
     const status: DailyWorkFundingStatusDto = {
       naturalDate: "2026-07-29",
@@ -144,6 +193,9 @@ describe("共享契约", () => {
       nextEligibleAt: "2026-07-29T16:00:00.000Z",
       claim: null
     };
-    expect(JSON.parse(JSON.stringify(status))).toMatchObject({ status: "available", amount: { amount: 1000 } });
+    expect(JSON.parse(JSON.stringify(status))).toMatchObject({
+      status: "available",
+      amount: { amount: 1000 }
+    });
   });
 });

@@ -5,7 +5,8 @@ import { gunzipSync } from "node:zlib";
 
 export type ScryfallBulkCard = {
   id: string; set: string; set_name: string; released_at?: string; name: string; collector_number: string;
-  oracle_text?: string; rarity?: string; legalities?: Record<string, string>; artist?: string;
+  oracle_id?: string; oracle_text?: string; rarity?: string; legalities?: Record<string, string>; artist?: string;
+  color_identity?: string[]; type_line?: string; keywords?: string[]; cmc?: number;
   finishes?: string[]; image_uris?: { normal?: string; large?: string }; card_faces?: Array<{ image_uris?: { normal?: string; large?: string } }>;
 };
 

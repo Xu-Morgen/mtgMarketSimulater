@@ -87,6 +87,12 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 - `prices.backfill` 是独立注册任务类型，下载独立的 `MTGJSON_ALLPRICES_ENDPOINT`（`AllPrices`）。`PriceBackfillService` 以每 SKU 最新成功映射为准，按 `(sku_id, 自然日)` 只追加缺失的历史快照：监督 run（`mapping_uri='supervisor'`，`run_kind='backfill'`）汇总统计与日期范围，每个历史日期独立子 run（`mapping_uri='sub-run'`）复用 `UNIQUE(sync_run_id, sku_id)`。它绝不更新 `price_sync_state`/`price_sync_schedule_state`、不为历史日投递 `market.reprice`；解析/校验/写入在一笔短事务内完成，失败整笔回滚。
 - `PriceSyncRunDto.runKind` 区分 `daily`/`backfill`；`PublicPriceStatusDto.disclaimer` 由服务端固定数据源与资产性质说明，浏览器只展示。
 
+## Commander 草稿、合法性与报名评分预备（I24B）
+
+- `modules/decks` 是 `commander-100/v1` 草稿、当前合法性投影和未来报名评分源记录的唯一入口。`DeckService` 只读本地目录/库存可用量并调用 `@mtg-market/rules` 的纯函数；草稿保存不调用 Provider、不收费，也不创建任何 `inventory_holds`。比赛报名及 tournament hold 继续属于 I25B Tournament application。
+- 目录在 `card_printings` 同步 `oracle_id`、颜色标识、类别行、关键词和 mana value，单例以 `oracle_id`（回退到稳定印刷身份）判定，绝不以 SKU/工艺当作不同卡。`commander_banlist_versions` 是持久化、版本化的官方禁牌输入；历史草稿和未来报名快照永不被禁牌表更新原地覆盖。
+- `leyline-client` 是服务器专用适配器：仅接受规范化 `decklistText` 与 `format=commander`，有受配置控制的超时/重试和允许 schema。完整响应将由 I25B 报名事务以 AES-256-GCM 密文写入 `deck_leyline_source_records`，连接响应 SHA-256、输入摘要、适配器版本和 `deck_power_snapshots`；玩家 DTO 永不包含密文、nonce、原始响应、端点或密钥。结算只能读取已持久化快照，不联网。
+
 ## 市场报价投影（I14B）
 
 - `modules/market/application/MarketService` 只读取 `price_snapshot_entries`、已结算 `fact_events` 和版本化市场配置，使用 `@mtg-market/rules` 的 `market/v1` 物化 `market_quotes`。它不是余额、库存或外部价的写入者；外部快照保持只追加，经济事实仅被聚合消费。

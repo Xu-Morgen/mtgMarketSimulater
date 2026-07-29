@@ -14,6 +14,64 @@ export type CardFinish = "nonfoil" | "foil" | "etched";
 /** 目录资料的来源；人工例外不得伪装成外部同步资料或价格。 */
 export type CatalogSource = "scryfall" | "manual-test";
 export type InventoryLockReason = "order" | "tournament";
+/** I24R/I33B 的候选报名评分来源；结算只能读取报名时已持久化的快照。 */
+export type DeckPowerSource = "leyline" | "local" | "ml";
+/** 快照可用但使用了已批准的 Provider 降级策略时明确标记为 degraded。 */
+export type DeckPowerAvailability = "available" | "degraded";
+export type DeckPowerDegradationReason =
+  | "provider_unavailable"
+  | "provider_timeout"
+  | "provider_schema_invalid"
+  | "provider_response_invalid";
+
+/**
+ * 报名时的不可变卡组强度快照候选契约。
+ * `sourceVersion` 对 local 为规则/参数版本，对 leyline 为本地适配器版本，对 ml 为不可变
+ * 模型工件版本；Provider 未声明算法版本时保留字面值 `undeclared`，而不是由浏览器或服务端猜测。
+ */
+export interface DeckPowerSnapshotDto {
+  source: DeckPowerSource;
+  sourceVersion: string;
+  providerAlgorithmVersion: string | null;
+  score: number;
+  inputSummarySha256: string;
+  computedAt: string;
+  availability: DeckPowerAvailability;
+  degradationReason: DeckPowerDegradationReason | null;
+  responseSha256: string | null;
+}
+export type DeckZone = "commander" | "main" | "companion" | "virtual_basic";
+export type VirtualBasicLandDto = "plains" | "island" | "swamp" | "mountain" | "forest";
+export interface DeckCardEntryDto {
+  zone: DeckZone;
+  skuId: string | null;
+  /** virtual_basic 使用固定枚举，永远不引用库存 SKU。 */
+  virtualBasic: VirtualBasicLandDto | null;
+  quantity: number;
+  name: string;
+  cardIdentity: string;
+}
+export interface DeckLegalityDto {
+  valid: boolean;
+  totalCards: number;
+  colorIdentity: Array<"W" | "U" | "B" | "R" | "G">;
+  issues: string[];
+  ruleVersion: string;
+  banlistVersion: string;
+  checkedAt: string;
+}
+export interface DeckDto {
+  id: string;
+  name: string;
+  format: "commander-100/v1";
+  ruleVersion: string;
+  banlistVersion: string;
+  cards: DeckCardEntryDto[];
+  legality: DeckLegalityDto;
+  strengthSnapshot: DeckPowerSnapshotDto | null;
+  createdAt: string;
+  updatedAt: string;
+}
 export type OrderSide = "buy" | "sell";
 export type OrderStatus =
   | "open"

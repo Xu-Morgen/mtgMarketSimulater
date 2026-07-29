@@ -1,4 +1,5 @@
 /** I11B：概率、候选池和种子均为显式输入，规则包不访问 CSPRNG、数据库或环境变量。 */
+export * from "./deck-rules.js";
 export interface PackCandidate {
   skuId: string;
   weight: number;
@@ -619,3 +620,5 @@ export function evaluateCancellationRisk(input: { ruleVersion: string; cancellat
   const flagged = input.cancellationsInWindow >= input.config.maxCancellationsPerWindow;
   return { ruleVersion: input.ruleVersion, outcome: flagged ? "flagged" : "allowed", score: flagged ? input.config.reviewScoreThreshold : 0, reasons: flagged ? ["cancellation_frequency"] : [] };
 }
+export * from "./local-deck-power.js";
+export * from "./deck-feature-tags.js";

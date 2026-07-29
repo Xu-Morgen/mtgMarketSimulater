@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+const defaultDeckResponseEncryptionKey = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
 const environmentSchema = z.object({
   APP_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3001),
@@ -21,6 +22,14 @@ const environmentSchema = z.object({
   ,MTGJSON_PRINTINGS_ENDPOINT: z.string().url().default("https://mtgjson.com/api/v5/AllPrintings.json.gz")
   ,MTGJSON_ALLPRICES_ENDPOINT: z.string().url().default("https://mtgjson.com/api/v5/AllPrices.json.gz")
   ,MTGJSON_USER_AGENT: z.string().trim().min(1).max(256).default("MTG-Market-Simulator/0.1 (local deployment)")
+  ,LEYLINE_ENDPOINT: z.string().url().default("https://api.leyline.gg/v1/evaluate")
+  ,LEYLINE_TIMEOUT_MS: z.coerce.number().int().min(100).max(30_000).default(5_000)
+  ,LEYLINE_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(1)
+  // 默认值仅便于本地测试；生产部署必须通过受控环境覆盖为随机 32 字节密钥。
+  ,DECK_RESPONSE_ENCRYPTION_KEY: z.string().trim().min(43).default(defaultDeckResponseEncryptionKey)
+}).superRefine((value, context) => {
+  if (Buffer.from(value.DECK_RESPONSE_ENCRYPTION_KEY, "base64").length !== 32) context.addIssue({ code: "custom", path: ["DECK_RESPONSE_ENCRYPTION_KEY"], message: "DECK_RESPONSE_ENCRYPTION_KEY 必须是 32 字节 base64 密钥" });
+  if (value.APP_ENV === "production" && value.DECK_RESPONSE_ENCRYPTION_KEY === defaultDeckResponseEncryptionKey) context.addIssue({ code: "custom", path: ["DECK_RESPONSE_ENCRYPTION_KEY"], message: "生产环境必须设置随机 DECK_RESPONSE_ENCRYPTION_KEY" });
 });
 
 export type ApiConfig = Omit<z.infer<typeof environmentSchema>, "CORS_ORIGINS" | "CATALOG_ENABLED_SET_CODES"> & {

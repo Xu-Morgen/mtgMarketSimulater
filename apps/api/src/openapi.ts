@@ -27,7 +27,10 @@ export const publicApiPaths = [
   "/v1/orders/{orderId}",
     "/v1/orders/{orderId}/cancel",
     "/v1/orders/book/{skuId}",
-    "/v1/orders/{skuId}/match",
+  "/v1/orders/{skuId}/match",
+  "/v1/decks",
+  "/v1/decks/validate",
+  "/v1/decks/{deckId}",
   "/v1/auth/register",
   "/v1/auth/login",
   "/v1/auth/refresh",
@@ -193,6 +196,17 @@ export const openApiDocument = {
         summary: "管理员显式触发某个 SKU 的双边委托撮合（价格—时间优先）",
         responses: { "200": { description: "撮合结果与成交列表" }, "401": { description: "认证无效或过期" }, "403": { description: "需要管理员权限" } }
       }
+    },
+    "/v1/decks": {
+      get: { summary: "列出当前玩家已保存的 Commander 草稿", responses: { "200": { description: "卡组列表" }, "401": { description: "认证无效或过期" } } },
+      post: { summary: "以幂等键保存 Commander 草稿；服务端返回合法性，不锁库存", responses: { "201": { description: "草稿已保存" }, "400": { description: "参数无效或缺少幂等键" }, "409": { description: "幂等冲突" } } }
+    },
+    "/v1/decks/validate": {
+      post: { summary: "只读验证 Commander 草稿及可用库存，不写入或锁定", responses: { "200": { description: "合法性结果" }, "400": { description: "参数无效" }, "401": { description: "认证无效或过期" } } }
+    },
+    "/v1/decks/{deckId}": {
+      get: { summary: "读取当前玩家的一份 Commander 草稿", responses: { "200": { description: "卡组详情" }, "404": { description: "卡组不存在" } } },
+      put: { summary: "以幂等键更新 Commander 草稿；不锁库存", responses: { "200": { description: "草稿已更新" }, "400": { description: "参数无效或缺少幂等键" }, "404": { description: "卡组不存在" }, "409": { description: "幂等冲突" } } }
     },
     "/v1/auth/register": {
       post: {

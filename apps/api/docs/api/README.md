@@ -89,6 +89,14 @@
 - `POST /v1/npc-trades/sell/{skuId}` 要求有效玩家会话、格式正确的 `Idempotency-Key`，且请求体严格为 `{ quoteId, quoteVersion, quantity, minUnitPrice }`。`minUnitPrice` 是玩家确认的保护下限，服务端只读取 `quoteId` 指向的持久化 NPC 收购价和费用，并校验可交易、版本、有效期、最低价、可用库存及单笔/当日额度。
 - 成功以 `201` 返回成交、服务端余额与持仓；同键同参重放为 `200`，同键异参为 `409 IDEMPOTENCY_CONFLICT`。无报价、报价/最低价过期、可用库存不足与交易量限制分别使用 `PRICE_UNAVAILABLE`、`VERSION_STALE`、`INSUFFICIENT_INVENTORY`、`RULE_VIOLATION`；成交在一笔短事务同时追加 `npc_sell` credit 账本、库存流水、成交、事实/outbox、重定价任务与审计，未处理异常回滚经济写入和幂等占位。
 
+## I24B Commander 草稿与合法性协议
+
+- `GET /v1/decks`、`GET /v1/decks/{deckId}` 仅返回当前玩家草稿、固定 `commander-100/v1` 规则/禁牌表版本、服务端合法性结果和 `strengthSnapshot: null`。草稿阶段不评分、不报名、不收费、不建立 `inventory_holds`；已保存响应只含卡组可读摘要，不含 Provider 完整响应或密钥材料。
+- `POST /v1/decks/validate` 接收 `{ name, banlistVersion?, cards[] }` 并只返回服务端合法性和可用库存提示，不写状态。`cards` 只允许本地 `skuId` 的 `commander|main|companion` 项，或固定 `virtual_basic`（`plains|island|swamp|mountain|forest`）；虚拟基本地没有 SKU、库存、持仓、市场或锁定记录。
+- `POST /v1/decks` 与 `PUT /v1/decks/{deckId}` 使用同一请求体并要求 `Idempotency-Key`。合法性不足、库存不足或禁牌不妨碍保存草稿，但结果明确 `legality.valid=false` 和问题列表；同键同参返回首次完整结果，同键异参返回 `409 IDEMPOTENCY_CONFLICT`。保存/编辑不会替浏览器或 Provider 判定最终报名资格，I25B 报名时仍须重新读取已保存卡表、可用库存与版本快照。
+- `commander-100/v1` 只接受单指挥官 `1+99` 或官方允许双指挥官 `2+98`，以 Oracle 身份判定单例，检查颜色标识、当前持久化官方禁牌表、Companion 限制和虚拟基本地颜色。禁牌表版本是草稿事实的一部分；新版本只影响显式采用它的后续构筑，旧草稿/未来报名快照不会被后台覆写。
+- Leyline 端点、超时和重试只由服务端 `LEYLINE_*` 配置控制。I24B 提供 `leyline-adapter/v1` 的 `decklistText` 正规化与允许 schema/AES-GCM 源记录工具，但依 ADR-003，草稿端点绝不调用 Provider；I25B 只能在报名事务的收费/锁卡/创建报名之前调用，失败时不得改写任何历史快照或资产。
+
 ## I18B P2P 双边委托预览与创建协议
 
 - `GET /v1/orders/buy|sell/{skuId}/preview?quantity=` 要求有效玩家会话，返回 `BilateralOrderPreviewDto`：以当前 `market_quotes.market_price` 为锚点的限价带 `limitBand{min,max}`、服务端 `fees[order_fee, fulfillment_deposit]`、`reservedFunds`、`estimatedAmount`、可用资金/库存、`previewVersion` 与有效期。没有可交易报价返回 `404 PRICE_UNAVAILABLE`，报价过期返回 `409 VERSION_STALE`。

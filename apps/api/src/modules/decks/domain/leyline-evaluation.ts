@@ -1,0 +1,2 @@
+/** 已通过 Provider schema 校验的最小评分结果；不含用户、资产或报名数据。 */
+export type LeylineEvaluation = { score: number; providerAlgorithmVersion: "undeclared"; decklistText: string; inputSummarySha256: string; responseSha256: string; details: { scores: Record<string, unknown>; bracket: string | number | null; tiers: unknown; combos: unknown; computedAt: string | null; resolvedCount: number | null; missingCards: string[]; isStale: boolean | null }; rawResponse: Record<string, unknown> };

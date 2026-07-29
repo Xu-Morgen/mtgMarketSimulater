@@ -53,13 +53,14 @@ export class CatalogSyncService {
     this.database.prepare("DELETE FROM card_image_cache WHERE printing_id IN (SELECT id FROM card_printings WHERE source = 'scryfall')").run();
     this.database.prepare("DELETE FROM card_skus WHERE source = 'scryfall'").run(); this.database.prepare("DELETE FROM card_printings WHERE source = 'scryfall'").run(); this.database.prepare("DELETE FROM card_sets WHERE source = 'scryfall'").run();
     const insertSet = this.database.prepare("INSERT INTO card_sets (id, code, name, released_at, source, source_reference, created_at) VALUES (?, ?, ?, ?, 'scryfall', ?, ?)");
-    const insertPrinting = this.database.prepare("INSERT INTO card_printings (id, set_id, name, collector_number, scryfall_id, oracle_text, rarity, legalities_json, artist, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'scryfall', ?, 0, ?, ?)");
+    const insertPrinting = this.database.prepare("INSERT INTO card_printings (id, set_id, name, collector_number, scryfall_id, oracle_id, oracle_text, rarity, legalities_json, artist, color_identity_json, type_line, keywords_json, mana_value, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scryfall', ?, 0, ?, ?)");
     const insertSku = this.database.prepare("INSERT INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, ?, 0, 'scryfall', ?, 0, ?, ?)");
     const insertImage = this.database.prepare("INSERT INTO card_image_cache (id, printing_id, source_url, cache_path, status, checksum, cached_at, failure_reason, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
     const sets = new Map<string, string>(); let skus = 0;
     for (const card of cards) {
       const setCode = card.set.toUpperCase(); let setId = sets.get(setCode); if (!setId) { setId = randomUUID(); sets.set(setCode, setId); insertSet.run(setId, setCode, card.set_name, card.released_at ?? null, `${version}:${setCode}`, startedAt); }
-      const printingId = scryfallPrintingId(card.id); insertPrinting.run(printingId, setId, card.name, card.collector_number, card.id, card.oracle_text ?? null, card.rarity ?? "unknown", JSON.stringify(card.legalities ?? {}), card.artist ?? null, card.id, startedAt, startedAt);
+      const printingId = scryfallPrintingId(card.id); const manaValue = Number.isSafeInteger(card.cmc) && card.cmc! >= 0 ? card.cmc! : 0;
+      insertPrinting.run(printingId, setId, card.name, card.collector_number, card.id, card.oracle_id ?? card.id, card.oracle_text ?? null, card.rarity ?? "unknown", JSON.stringify(card.legalities ?? {}), card.artist ?? null, JSON.stringify(card.color_identity ?? []), card.type_line ?? "", JSON.stringify(card.keywords ?? []), manaValue, card.id, startedAt, startedAt);
       const finishes = (card.finishes ?? []).filter((finish): finish is "nonfoil" | "foil" | "etched" => finish === "nonfoil" || finish === "foil" || finish === "etched");
       if (finishes.length === 0) throw new Error(`Scryfall 卡牌 Schema 缺少可支持工艺：${card.id}`);
       for (const finish of finishes) { insertSku.run(randomUUID(), printingId, finish, card.id, startedAt, startedAt); skus += 1; }

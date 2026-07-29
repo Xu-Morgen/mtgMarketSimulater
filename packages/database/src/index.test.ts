@@ -20,7 +20,7 @@ describe("database foundation", () => {
     const database = openSqliteDatabase(join(directory, "test.db"));
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
     expect(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get()).toEqual({
-      count: 23
+      count: 24
     });
     expect(
       database

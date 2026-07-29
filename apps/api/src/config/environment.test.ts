@@ -21,7 +21,11 @@ describe("loadApiConfig", () => {
       MTGJSON_PRICES_ENDPOINT: "https://mtgjson.com/api/v5/AllPricesToday.json.gz",
       MTGJSON_PRINTINGS_ENDPOINT: "https://mtgjson.com/api/v5/AllPrintings.json.gz",
       MTGJSON_ALLPRICES_ENDPOINT: "https://mtgjson.com/api/v5/AllPrices.json.gz",
-      MTGJSON_USER_AGENT: "MTG-Market-Simulator/0.1 (local deployment)"
+      MTGJSON_USER_AGENT: "MTG-Market-Simulator/0.1 (local deployment)",
+      LEYLINE_ENDPOINT: "https://api.leyline.gg/v1/evaluate",
+      LEYLINE_TIMEOUT_MS: 5000,
+      LEYLINE_MAX_RETRIES: 1,
+      DECK_RESPONSE_ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
     });
   });
 
@@ -31,6 +35,8 @@ describe("loadApiConfig", () => {
     expect(() => loadApiConfig({ AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters", APP_TIMEZONE: "not/a-time-zone" })).toThrow();
     expect(() => loadApiConfig({})).toThrow();
     expect(() => loadApiConfig({ AUTH_JWT_SECRET: "replace-with-a-random-secret-at-least-32-characters" })).toThrow();
+    expect(() => loadApiConfig({ AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters", DECK_RESPONSE_ENCRYPTION_KEY: "too-short" })).toThrow();
+    expect(() => loadApiConfig({ APP_ENV: "production", AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters" })).toThrow();
   });
 
   it("normalizes the explicit CORS allowlist", () => {
