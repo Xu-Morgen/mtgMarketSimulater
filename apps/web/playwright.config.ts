@@ -5,6 +5,7 @@ const apiBaseUrl = process.env.PLAYWRIGHT_API_BASE_URL ?? "http://localhost:3001
 const webBaseUrl = process.env.PLAYWRIGHT_WEB_BASE_URL ?? "http://localhost:3000";
 const apiPort = new URL(apiBaseUrl).port || "3001";
 const webPort = new URL(webBaseUrl).port || "3000";
+const e2eDatabasePath = process.env.E2E_DATABASE_PATH ?? "/tmp/mtg-i06f-playwright.db";
 const systemChromium = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ?? (["/usr/bin/chromium-browser", "/usr/bin/chromium"].find(existsSync));
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -14,7 +15,7 @@ export default defineConfig({
   use: { baseURL: webBaseUrl, screenshot: "only-on-failure", trace: "retain-on-failure" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], launchOptions: systemChromium ? { executablePath: systemChromium } : {} } }, { name: "narrow-chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 }, launchOptions: systemChromium ? { executablePath: systemChromium } : {} } }],
   ...(process.env.PLAYWRIGHT_EXTERNAL_SERVERS ? {} : { webServer: [
-    { command: "pnpm --filter @mtg-market/api dev", url: `${apiBaseUrl}/health`, reuseExistingServer: !process.env.CI, env: { ...process.env, PORT: apiPort, SQLITE_PATH: "/tmp/mtg-i06f-playwright.db", AUTH_JWT_SECRET: "playwright-only-secret-with-at-least-32-characters", WEB_ORIGIN: webBaseUrl, CORS_ORIGINS: webBaseUrl } },
+    { command: "pnpm --filter @mtg-market/api dev", url: `${apiBaseUrl}/health`, reuseExistingServer: !process.env.CI, env: { ...process.env, PORT: apiPort, SQLITE_PATH: e2eDatabasePath, AUTH_JWT_SECRET: "playwright-only-secret-with-at-least-32-characters", WEB_ORIGIN: webBaseUrl, CORS_ORIGINS: webBaseUrl } },
     { command: `pnpm --filter @mtg-market/web exec next dev --port ${webPort}`, url: webBaseUrl, reuseExistingServer: !process.env.CI, env: { ...process.env, NEXT_PUBLIC_API_BASE_URL: apiBaseUrl } }
   ] })
 });

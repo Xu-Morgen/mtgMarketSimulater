@@ -34,6 +34,17 @@ function limitWithinBand(preview: BilateralOrderPreviewDto, limitPrice: number):
   return Number.isInteger(limitPrice) && limitPrice >= preview.limitBand.min.amount && limitPrice <= preview.limitBand.max.amount;
 }
 
+/** 风控由服务端裁决；这里仅将稳定的拒绝理由转换为玩家可执行的下一步。 */
+function riskRejectionHint(error: ApiClientError | null): string | null {
+  if (!error || error.code !== "RULE_VIOLATION" || !error.message.startsWith("订单风控已拦截：")) return null;
+  if (error.message.includes("下单冷却中")) return "风控拒绝：下单冷却尚未结束。请稍后重新获取服务端预览；不要反复提交同一请求。";
+  if (error.message.includes("下单频率过高")) return "风控拒绝：短时间内下单次数过多。请等待后重新获取服务端预览。";
+  if (error.message.includes("交易数量超限")) return "风控拒绝：数量超过服务端单笔或当日额度。请按下方“服务端额度”减少数量后重新预览。";
+  if (error.message.includes("检测到可能自买自卖")) return "风控拒绝：该限价可能与自己的反向委托成交。请撤销或调整自己的反向委托后重新预览。";
+  if (error.message.includes("限价越界")) return "风控拒绝：限价不在服务端允许范围。请使用当前服务端限价带重新预览后提交。";
+  return "风控拒绝：当前委托不符合服务器规则。请重新获取服务端预览并按显示的限价带与额度调整。";
+}
+
 function PreviewDetails({ preview, side, limitPrice, limitError }: { preview: BilateralOrderPreviewDto; side: OrderSide; limitPrice: number; limitError: string | null }) {
   const orderFee = feeAmount(preview, "order_fee");
   const fulfillmentDeposit = feeAmount(preview, "fulfillment_deposit");
@@ -78,7 +89,9 @@ export function CreateOrderDialog({ sku, initialSide, onClose, onSettled }: { sk
 
   const limitPrice = useMemo(() => Number(limitText), [limitText]);
   const limitValid = previewValue ? limitWithinBand(previewValue, limitPrice) : false;
-  const mutationError = create.error instanceof ApiClientError ? create.error.message : create.isError ? "挂单请求未完成，请重新获取预览后再试。" : null;
+  const apiMutationError = create.error instanceof ApiClientError ? create.error : null;
+  const mutationError = apiMutationError ? apiMutationError.message : create.isError ? "挂单请求未完成，请重新获取预览后再试。" : null;
+  const riskHint = riskRejectionHint(apiMutationError);
   const staleFromMutation = create.error instanceof ApiClientError && create.error.code === "VERSION_STALE";
 
   const resetConfirmation = () => {
@@ -167,7 +180,7 @@ export function CreateOrderDialog({ sku, initialSide, onClose, onSettled }: { sk
           <small className={styles.secondary}>限价必须在限价带 {formatMoney(previewValue.limitBand.min)} 至 {formatMoney(previewValue.limitBand.max)} 之间；最终边界由服务端按 order/v1 校验。</small>
         </label>
       </> : null}
-      {mutationError ? <section className={styles.inlineError} role="alert"><p>{mutationError}</p>{staleFromMutation ? <p className={styles.secondary}>报价或预览已过期，请重新获取服务端预览后再确认。</p> : null}<button className="button secondary" type="button" onClick={refreshPreview}>重新预览</button></section> : null}
+      {mutationError ? <section className={styles.inlineError} role="alert"><p>{mutationError}</p>{riskHint ? <p>{riskHint}</p> : null}{staleFromMutation ? <p className={styles.secondary}>报价或预览已过期，请重新获取服务端预览后再确认。</p> : null}<button className="button secondary" type="button" onClick={refreshPreview}>重新预览</button></section> : null}
       <div className="actions">
         <button className="button secondary" type="button" disabled={create.isPending || confirmationPending} onClick={onClose}>取消</button>
         <button className="button" type="button" disabled={confirmDisabled} onClick={confirm}>{create.isPending || confirmationPending ? "正在由服务端创建…" : `确认挂${requestedSide === "buy" ? "买单" : "卖单"}`}</button>

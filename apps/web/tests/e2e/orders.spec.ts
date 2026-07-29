@@ -155,6 +155,32 @@ test.describe("P2P 委托创建（I18F）", () => {
     expect(postCalls).toBe(2);
     expect(keys[0]).not.toBe(keys[1]);
   });
+
+  test("风控拒绝显示稳定行动指引；合法交易与高频撤单不被浏览器错误阻断", async ({ page }) => {
+    let postCalls = 0;
+    await mockMarket(page);
+    await page.route(`**/v1/orders/buy/${skuId}/preview?*`, async (route) => {
+      const quantity = Number(new URL(route.request().url()).searchParams.get("quantity"));
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ preview: buyPreview(quantity) })) });
+    });
+    await page.route(`**/v1/orders/buy/${skuId}`, async (route) => {
+      postCalls += 1;
+      if (postCalls === 1) return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify(failure("RULE_VIOLATION", "订单风控已拦截：下单冷却中")) });
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(envelope({ order: order("buy", 1, 200) })) });
+    });
+    await recoverPlayerSession(page);
+    await page.goto("/market");
+    await page.getByRole("button", { name: "挂买单" }).click();
+    await page.getByLabel("委托数量").fill("1");
+    await page.getByRole("button", { name: "获取服务端预览" }).click();
+    await page.getByRole("button", { name: "确认挂买单" }).click();
+    await expect(page.getByText("订单风控已拦截：下单冷却中")).toBeVisible();
+    await expect(page.getByText("风控拒绝：下单冷却尚未结束。请稍后重新获取服务端预览；不要反复提交同一请求。")).toBeVisible();
+    await page.getByRole("button", { name: "重新预览" }).click();
+    await page.getByRole("button", { name: "确认挂买单" }).click();
+    await expect(page.getByRole("heading", { name: "挂单已创建" })).toBeVisible();
+    expect(postCalls).toBe(2);
+  });
 });
 
 test.describe("我的委托与撤单（I18F）", () => {

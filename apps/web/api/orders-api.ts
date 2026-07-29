@@ -6,6 +6,7 @@ import type {
   BilateralOrderDto,
   BilateralOrderPreviewDto,
   BilateralTradeDto,
+  OrderRiskDecisionDto,
   OrderSide,
   OrderStatus,
   Page,
@@ -27,6 +28,12 @@ export type OrdersFilters = {
 /** 玩家成交只读过滤；skuId 可选，cursor/limit 控制分页。 */
 export type PlayerTradesFilters = {
   skuId?: string | undefined;
+  cursor?: string | undefined;
+  limit?: number | undefined;
+};
+
+export type OrderRiskDecisionFilters = {
+  outcome?: "blocked" | "flagged" | undefined;
   cursor?: string | undefined;
   limit?: number | undefined;
 };
@@ -87,7 +94,9 @@ export const bilateralOrderApi = {
   fulfillTrade: (accessToken: string, tradeId: string, idempotencyKey: string) =>
     apiRequest<{ trade: BilateralTradeDto; balance: AccountBalanceDto }>(`/v1/orders/trades/${tradeId}/fulfill`, { method: "POST", accessToken, idempotencyKey }),
   cancelTrade: (accessToken: string, tradeId: string, idempotencyKey: string) =>
-    apiRequest<{ trade: BilateralTradeDto; balance: AccountBalanceDto }>(`/v1/orders/trades/${tradeId}/cancel`, { method: "POST", accessToken, idempotencyKey })
+    apiRequest<{ trade: BilateralTradeDto; balance: AccountBalanceDto }>(`/v1/orders/trades/${tradeId}/cancel`, { method: "POST", accessToken, idempotencyKey }),
+  riskDecisions: (accessToken: string, filters: OrderRiskDecisionFilters) =>
+    apiRequest<Page<OrderRiskDecisionDto>>(`/v1/admin/orders/risk-decisions?${riskDecisionQueryString(filters)}`, { accessToken })
 };
 
 function tradesQueryString(filters: PlayerTradesFilters): string {
@@ -95,6 +104,24 @@ function tradesQueryString(filters: PlayerTradesFilters): string {
   if (filters.skuId) parameters.set("skuId", filters.skuId);
   if (filters.cursor) parameters.set("cursor", filters.cursor);
   return parameters.toString();
+}
+
+function riskDecisionQueryString(filters: OrderRiskDecisionFilters): string {
+  const parameters = new URLSearchParams({ limit: String(filters.limit ?? 20) });
+  if (filters.outcome) parameters.set("outcome", filters.outcome);
+  if (filters.cursor) parameters.set("cursor", filters.cursor);
+  return parameters.toString();
+}
+
+/** 管理端只读异常订单复核；DTO 不含用户身份、资产、hold 或请求体。 */
+export function useOrderRiskDecisionsQuery(filters: OrderRiskDecisionFilters) {
+  const { accessToken, user } = useSession();
+  return useQuery({
+    queryKey: ["admin", "orders", "risk-decisions", user?.id ?? "anonymous", filters],
+    queryFn: () => bilateralOrderApi.riskDecisions(accessToken!, filters),
+    enabled: Boolean(accessToken && user?.role === "admin"),
+    retry: false
+  });
 }
 
 /** 每次数量或方向变化都强制重新读取当前服务端预览，不能复用旧报价版本或限价带。 */
