@@ -161,6 +161,23 @@ export function resolveInitialFunding(version: string): typeof INITIAL_FUNDING {
   return INITIAL_FUNDING;
 }
 
+/** I23B：每日工作资金只能由服务端按已快照的规则版本发放。 */
+export const DAILY_WORK_FUNDING_RULE_VERSION = "daily-work-funds/v1" as const;
+export const DAILY_WORK_FUNDING = { amount: 1_000, currency: "GAME_CREDIT" as const };
+/** 已发布的后续示例版本用于验证配置切换不会改写已开放自然日。 */
+export const DAILY_WORK_FUNDING_RULE_VERSION_V2 = "daily-work-funds/v2" as const;
+export const DAILY_WORK_FUNDING_V2 = { amount: 1_200, currency: "GAME_CREDIT" as const };
+
+/**
+ * 规则包只解析版本化的固定输入；自然日、时区、用户资格和幂等由 API 的 application
+ * 用例负责，避免把运行时配置或数据库依赖带入可重放规则。
+ */
+export function resolveDailyWorkFunding(version: string): typeof DAILY_WORK_FUNDING {
+  if (version === DAILY_WORK_FUNDING_RULE_VERSION) return DAILY_WORK_FUNDING;
+  if (version === DAILY_WORK_FUNDING_RULE_VERSION_V2) return DAILY_WORK_FUNDING_V2;
+  throw new RangeError(`不支持的每日工作资金规则版本：${version}`);
+}
+
 /** I14B：市场规则的所有金额与系数均为整数，避免浮点结算漂移。 */
 export const MARKET_RULE_VERSION = "market/v1" as const;
 export const MARKET_FACTOR_MIN_BPS = 5_000;

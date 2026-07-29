@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { openSqliteDatabase } from "@mtg-market/database";
-import { ensureDailyPriceSyncScheduled, TaskRegistry, TaskWorker } from "./application/task-service.js";
+import { ensureDailyPriceSyncScheduled, ensureDailyRolloverScheduled, TaskRegistry, TaskWorker } from "./application/task-service.js";
 import { SqliteJobRepository } from "./infrastructure/sqlite-job-repository.js";
 import { startTaskRunner } from "../../task-runner.js";
 
@@ -98,6 +98,22 @@ describe("I17B 每日价格同步调度", () => {
     ensureDailyPriceSyncScheduled(database, new Date("2026-07-29T00:00:00.000Z")); // 停机 3 天后
     const jobs = database.prepare("SELECT unique_key FROM jobs WHERE type = 'prices.sync' ORDER BY unique_key").all() as Array<{ unique_key: string }>;
     expect(jobs).toEqual([{ unique_key: "prices.sync:daily:2026-07-26" }, { unique_key: "prices.sync:daily:2026-07-29" }]);
+    database.close();
+  });
+});
+
+describe("I23B 每日日切调度", () => {
+  it("按服务器时区投递日期/规则快照；同日与停机补跑都不会重复投递", () => {
+    const { database } = fixture();
+    const config = { timezone: "America/Los_Angeles", ruleVersion: "daily-work-funds/v1" };
+    ensureDailyRolloverScheduled(database, config, new Date("2026-01-01T00:30:00.000Z"));
+    ensureDailyRolloverScheduled(database, config, new Date("2026-01-01T07:59:00.000Z"));
+    ensureDailyRolloverScheduled(database, config, new Date("2026-01-04T12:00:00.000Z"));
+    const rows = database.prepare("SELECT unique_key, payload_json FROM jobs WHERE type = 'daily.rollover' ORDER BY unique_key").all() as Array<{ unique_key: string; payload_json: string }>;
+    expect(rows.map((row) => ({ uniqueKey: row.unique_key, payload: JSON.parse(row.payload_json) }))).toEqual([
+      { uniqueKey: "daily.rollover:2025-12-31", payload: { naturalDate: "2025-12-31", timezone: "America/Los_Angeles", workFundingRuleVersion: "daily-work-funds/v1" } },
+      { uniqueKey: "daily.rollover:2026-01-04", payload: { naturalDate: "2026-01-04", timezone: "America/Los_Angeles", workFundingRuleVersion: "daily-work-funds/v1" } }
+    ]);
     database.close();
   });
 });

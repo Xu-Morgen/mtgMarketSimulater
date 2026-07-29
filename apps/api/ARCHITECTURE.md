@@ -78,7 +78,12 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 ## 价格历史、每日同步与历史回填（I17B）
 
 - 价格历史天然只追加：`price_sync_runs`/`price_snapshot_entries` 与 `market_quotes` 从不 UPDATE/DELETE，每次每日同步与重定价都产生新行。`MarketService.history`/`indexHistory` 按自然日（`substr(captured_at,1,10)`）采样，同日多次同步/重定价取该日最新值；任一价格缺失为 `null`，空历史返回空数组。历史查询是纯只读投影，不为历史另建存储表，避免与 append-only 设计漂移。
-- 每日同步由 `ensureDailyPriceSyncScheduled`（jobs application）在 `startTaskRunner` 的 5 分钟节流轮询中以 UTC 自然日唯一键调度。`price_sync_schedule_state` 单例独立于 `price_sync_state`（最近成功运行指针）：前者记录“已为该自然日投递过 `prices.sync`”，后者记录“最近一次成功的快照运行”。停机多日只补投一次而非逐日补投；`daily.rollover` 的发钱/赛事刷新延后至 I23B/I25B。
+- 每日同步由 `ensureDailyPriceSyncScheduled`（jobs application）在 `startTaskRunner` 的 5 分钟节流轮询中以 UTC 自然日唯一键调度。`price_sync_schedule_state` 单例独立于 `price_sync_state`（最近成功运行指针）：前者记录“已为该自然日投递过 `prices.sync`”，后者记录“最近一次成功的快照运行”。停机多日只补投一次而非逐日补投。
+
+## 每日工作资金与日切（I23B）
+
+- `daily.rollover` 由 jobs application 按 `APP_TIMEZONE` 的自然日投递；payload 快照 `{ naturalDate, timezone, workFundingRuleVersion }`，`daily_rollover_runs.natural_date` 唯一。任务只开放资格并写一次审计，绝不批量给用户入账；I25B 可在同一日期执行记录附加赛事刷新子处理器。
+- Users application 的领取用例在短事务中读取当日快照，并同步追加 `daily_work_funding_claims`、`daily_work_funding` 账本、审计和幂等响应。`UNIQUE(user_id,natural_date)` 是独立于请求重试的最终防线；`GET /v1/daily-work-funding` 的下一次资格时间也只由服务器时区计算。
 - `prices.backfill` 是独立注册任务类型，下载独立的 `MTGJSON_ALLPRICES_ENDPOINT`（`AllPrices`）。`PriceBackfillService` 以每 SKU 最新成功映射为准，按 `(sku_id, 自然日)` 只追加缺失的历史快照：监督 run（`mapping_uri='supervisor'`，`run_kind='backfill'`）汇总统计与日期范围，每个历史日期独立子 run（`mapping_uri='sub-run'`）复用 `UNIQUE(sync_run_id, sku_id)`。它绝不更新 `price_sync_state`/`price_sync_schedule_state`、不为历史日投递 `market.reprice`；解析/校验/写入在一笔短事务内完成，失败整笔回滚。
 - `PriceSyncRunDto.runKind` 区分 `daily`/`backfill`；`PublicPriceStatusDto.disclaimer` 由服务端固定数据源与资产性质说明，浏览器只展示。
 

@@ -6,7 +6,10 @@ const environmentSchema = z.object({
   SQLITE_PATH: z.string().trim().min(1).default("./data/market-simulator.db"),
   WEB_ORIGIN: z.string().url().default("http://localhost:3000"),
   CORS_ORIGINS: z.string().trim().optional(),
-  APP_TIMEZONE: z.string().trim().min(1).default("Asia/Shanghai"),
+  APP_TIMEZONE: z.string().trim().min(1).refine((value) => {
+    try { new Intl.DateTimeFormat("en-CA", { timeZone: value }); return true; } catch { return false; }
+  }, "APP_TIMEZONE 必须是有效 IANA 时区").default("Asia/Shanghai"),
+  DAILY_WORK_FUNDING_RULE_VERSION: z.string().trim().min(1).default("daily-work-funds/v1"),
   AUTH_JWT_SECRET: z.string().min(32).refine((value) => value !== "replace-with-a-random-secret-at-least-32-characters", "AUTH_JWT_SECRET 必须替换示例值"),
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
   REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().min(3_600).max(2_592_000).default(604_800)

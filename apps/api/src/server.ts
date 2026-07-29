@@ -11,7 +11,7 @@ const environment = loadApiConfig(process.env);
 
 const database = openDatabase(environment.SQLITE_PATH);
 const app = await createApiApp(environment, database);
-const taskRunner = startTaskRunner(database, 1_000, createTaskRegistry(environment, database, app.log));
+const taskRunner = startTaskRunner(database, 1_000, createTaskRegistry(environment, database, app.log), undefined, environment);
 
 const close = async () => {
   await taskRunner.stop();

@@ -5,7 +5,7 @@
  * 这里的事件只描述已经提交的业务事实，绝不能被当作结算命令消费。
  */
 
-export const CONTRACTS_VERSION = "2026-07-27" as const;
+export const CONTRACTS_VERSION = "2026-07-29" as const;
 
 export type CurrencyCode = "EUR" | "GAME_CREDIT";
 export type PriceSource = "mtgjson-cardmarket" | "manual-test";
@@ -307,6 +307,27 @@ export interface AccountBalanceDto {
   available: Money;
   frozen: Money;
   updatedAt: string;
+}
+
+/** I23B：每日工作资金资格和领取结果均为服务端时区下的自然日快照。 */
+export interface DailyWorkFundingDto {
+  id: string;
+  naturalDate: string;
+  timezone: string;
+  amount: Money;
+  ruleVersion: string;
+  claimedAt: string;
+}
+
+export interface DailyWorkFundingStatusDto {
+  naturalDate: string;
+  timezone: string;
+  status: "available" | "claimed" | "not_open" | "archive_required";
+  amount: Money | null;
+  ruleVersion: string | null;
+  openedAt: string | null;
+  nextEligibleAt: string;
+  claim: DailyWorkFundingDto | null;
 }
 
 export interface GameArchiveSummaryDto {

@@ -6,6 +6,7 @@ import { openSqliteDatabase, withinTransaction } from "@mtg-market/database";
 import { createApiApp } from "../../../app.js";
 import { loadApiConfig } from "../../../config/environment.js";
 import { UserService } from "../application/user-service.js";
+import { DailyRolloverService } from "../application/daily-rollover-service.js";
 
 const directories: string[] = [];
 afterEach(() => directories.splice(0).forEach((directory) => rmSync(directory, { recursive: true, force: true })));
@@ -81,5 +82,30 @@ describe("I07B 存档、账本与资金冻结", () => {
     expect(database.prepare("SELECT COUNT(*) AS count FROM accounts WHERE user_id = 'user-2'").get()).toEqual({ count: 0 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM idempotency_requests WHERE actor_id = 'user-2'").get()).toEqual({ count: 0 });
     database.close();
+  });
+});
+
+describe("I23B 每日工作资金 API", () => {
+  it("只接受服务端日切开放的资格，领取需要幂等键且成功后只返回服务端账本结果", async () => {
+    const { app, database } = await createTestApp();
+    const authorization = await playerAuthorization(app);
+    const now = new Date();
+    const format = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+    const local = (type: Intl.DateTimeFormatPartTypes) => format.find((part) => part.type === type)!.value;
+    const naturalDate = `${local("year")}-${local("month")}-${local("day")}`;
+    const unopened = await app.inject({ method: "POST", url: "/v1/daily-work-funding/claim", headers: { authorization, "idempotency-key": "daily-api-claim-0001" }, payload: {} });
+    const archive = await app.inject({ method: "POST", url: "/v1/archive", headers: { authorization, "idempotency-key": "daily-api-archive-0001" }, payload: {} });
+    new DailyRolloverService(database).rollover({ naturalDate, timezone: "Asia/Shanghai", workFundingRuleVersion: "daily-work-funds/v1" }, now);
+    const status = await app.inject({ method: "GET", url: "/v1/daily-work-funding", headers: { authorization } });
+    const claimed = await app.inject({ method: "POST", url: "/v1/daily-work-funding/claim", headers: { authorization, "idempotency-key": "daily-api-claim-0002" }, payload: {} });
+    const replay = await app.inject({ method: "POST", url: "/v1/daily-work-funding/claim", headers: { authorization, "idempotency-key": "daily-api-claim-0002" }, payload: {} });
+    expect(unopened.json()).toMatchObject({ ok: false, error: { code: "RESOURCE_CONFLICT" } });
+    expect(archive.statusCode).toBe(201);
+    expect(status.json()).toMatchObject({ ok: true, data: { status: { naturalDate, status: "available", amount: { amount: 1000 }, ruleVersion: "daily-work-funds/v1" } } });
+    expect(claimed.statusCode).toBe(201);
+    expect(claimed.json()).toMatchObject({ ok: true, data: { funding: { naturalDate, amount: { amount: 1000 }, ruleVersion: "daily-work-funds/v1" } } });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toEqual(claimed.json());
+    await app.close(); database.close();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { INITIAL_FUNDING, INITIAL_FUNDING_RULE_VERSION, MARKET_RULE_VERSION, ORDER_FULFILLMENT_RULE_VERSION, ORDER_MATCH_RULE_VERSION, ORDER_PREVIEW_VERSION, ORDER_RISK_RULE_VERSION, ORDER_RULE_VERSION, calculateMarketQuote, calculateOrderFees, checkSelfTrade, evaluateCancellationRisk, evaluateOrderRisk, isFulfillmentOverdue, isWithinOrderLimitBand, marketQuoteValidUntil, matchOrders, openPack, packSlotProbabilities, propagateMarketPressure, resolveFulfillmentDeadline, resolveInitialFunding, resolveOrderLimitBand, validateOrderCancellation, validateTradeCancellation, validateTradeFulfillment, type MatchOrderInput, type PackRuleInput } from "./index.js";
+import { DAILY_WORK_FUNDING, DAILY_WORK_FUNDING_RULE_VERSION, DAILY_WORK_FUNDING_RULE_VERSION_V2, DAILY_WORK_FUNDING_V2, INITIAL_FUNDING, INITIAL_FUNDING_RULE_VERSION, MARKET_RULE_VERSION, ORDER_FULFILLMENT_RULE_VERSION, ORDER_MATCH_RULE_VERSION, ORDER_PREVIEW_VERSION, ORDER_RISK_RULE_VERSION, ORDER_RULE_VERSION, calculateMarketQuote, calculateOrderFees, checkSelfTrade, evaluateCancellationRisk, evaluateOrderRisk, isFulfillmentOverdue, isWithinOrderLimitBand, marketQuoteValidUntil, matchOrders, openPack, packSlotProbabilities, propagateMarketPressure, resolveDailyWorkFunding, resolveFulfillmentDeadline, resolveInitialFunding, resolveOrderLimitBand, validateOrderCancellation, validateTradeCancellation, validateTradeFulfillment, type MatchOrderInput, type PackRuleInput } from "./index.js";
 
 const PACK_RULE: PackRuleInput = {
   version: "pack/v1",
@@ -18,6 +18,18 @@ describe("初始资金规则", () => {
 
   it("拒绝未知规则版本", () => {
     expect(() => resolveInitialFunding("v0")).toThrow("不支持的初始资金规则版本");
+  });
+});
+
+describe("I23B 每日工作资金规则", () => {
+  it("以版本化、整数最小单位的固定结果解析", () => {
+    expect(resolveDailyWorkFunding(DAILY_WORK_FUNDING_RULE_VERSION)).toEqual(DAILY_WORK_FUNDING);
+    expect(resolveDailyWorkFunding(DAILY_WORK_FUNDING_RULE_VERSION_V2)).toEqual(DAILY_WORK_FUNDING_V2);
+    expect(Number.isSafeInteger(DAILY_WORK_FUNDING.amount)).toBe(true);
+  });
+
+  it("拒绝未知规则版本", () => {
+    expect(() => resolveDailyWorkFunding("daily-work-funds/v0")).toThrow("不支持的每日工作资金规则版本");
   });
 });
 

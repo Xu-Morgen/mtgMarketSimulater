@@ -10,6 +10,7 @@ describe("loadApiConfig", () => {
       WEB_ORIGIN: "http://localhost:3000",
       CORS_ORIGINS: ["http://localhost:3000"],
       APP_TIMEZONE: "Asia/Shanghai",
+      DAILY_WORK_FUNDING_RULE_VERSION: "daily-work-funds/v1",
       AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters",
       ACCESS_TOKEN_TTL_SECONDS: 900,
       REFRESH_TOKEN_TTL_SECONDS: 604800,
@@ -27,6 +28,7 @@ describe("loadApiConfig", () => {
   it("rejects invalid runtime configuration before the server starts", () => {
     expect(() => loadApiConfig({ AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters", PORT: "0" })).toThrow();
     expect(() => loadApiConfig({ AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters", WEB_ORIGIN: "not-a-url" })).toThrow();
+    expect(() => loadApiConfig({ AUTH_JWT_SECRET: "test-only-secret-must-be-at-least-32-characters", APP_TIMEZONE: "not/a-time-zone" })).toThrow();
     expect(() => loadApiConfig({})).toThrow();
     expect(() => loadApiConfig({ AUTH_JWT_SECRET: "replace-with-a-random-secret-at-least-32-characters" })).toThrow();
   });

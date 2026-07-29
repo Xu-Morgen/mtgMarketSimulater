@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type {
   AccountBalanceDto,
+  DailyWorkFundingDto,
   GameArchiveSummaryDto,
   LedgerEntryDto,
   Page
@@ -43,6 +44,22 @@ type LedgerRow = {
   correlation_id: string;
   occurred_at: string;
 };
+type DailyRolloverRow = {
+  id: string;
+  natural_date: string;
+  timezone: string;
+  work_funding_rule_version: string;
+  work_funding_amount: number;
+  opened_at: string;
+};
+type DailyWorkFundingRow = {
+  id: string;
+  natural_date: string;
+  timezone: string;
+  rule_version: string;
+  amount: number;
+  claimed_at: string;
+};
 
 function balance(row: BalanceRow): AccountBalanceDto {
   return {
@@ -61,6 +78,17 @@ function archiveSummary(row: ArchiveRow): GameArchiveSummaryDto {
     createdAt: row.archive_created_at,
     balance: balance(row),
     netWorth: null
+  };
+}
+
+function dailyWorkFunding(row: DailyWorkFundingRow): DailyWorkFundingDto {
+  return {
+    id: row.id,
+    naturalDate: row.natural_date,
+    timezone: row.timezone,
+    amount: { amount: row.amount, currency: "GAME_CREDIT" },
+    ruleVersion: row.rule_version,
+    claimedAt: row.claimed_at
   };
 }
 
@@ -144,6 +172,57 @@ export class SqliteUserRepository {
       })),
       page: { hasMore, nextCursor: hasMore ? String(offset + limit) : null }
     };
+  }
+
+  /** 日切行是日期配置快照；同一自然日冲突时绝不改写已开放规则。 */
+  openDailyRollover(input: {
+    naturalDate: string;
+    timezone: string;
+    ruleVersion: string;
+    amount: number;
+    openedAt: string;
+  }): DailyRolloverRow {
+    const id = randomUUID();
+    this.database.prepare(
+      `INSERT INTO daily_rollover_runs (id, natural_date, timezone, work_funding_rule_version, work_funding_amount, opened_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(natural_date) DO NOTHING`
+    ).run(id, input.naturalDate, input.timezone, input.ruleVersion, input.amount, input.openedAt);
+    return this.findDailyRollover(input.naturalDate)!;
+  }
+
+  findDailyRollover(naturalDate: string): DailyRolloverRow | null {
+    const row = this.database.prepare(
+      "SELECT id, natural_date, timezone, work_funding_rule_version, work_funding_amount, opened_at FROM daily_rollover_runs WHERE natural_date = ?"
+    ).get(naturalDate) as DailyRolloverRow | undefined;
+    return row ?? null;
+  }
+
+  findDailyWorkFunding(userId: string, naturalDate: string): DailyWorkFundingDto | null {
+    const row = this.database.prepare(
+      `SELECT c.id, c.natural_date, r.timezone, c.rule_version, c.amount, c.claimed_at
+       FROM daily_work_funding_claims c JOIN daily_rollover_runs r ON r.id = c.rollover_id
+       WHERE c.user_id = ? AND c.natural_date = ?`
+    ).get(userId, naturalDate) as DailyWorkFundingRow | undefined;
+    return row ? dailyWorkFunding(row) : null;
+  }
+
+  createDailyWorkFunding(input: {
+    rolloverId: string;
+    userId: string;
+    naturalDate: string;
+    ruleVersion: string;
+    amount: number;
+    idempotencyKey: string;
+    claimedAt: string;
+  }): DailyWorkFundingDto {
+    const id = randomUUID();
+    this.database.prepare(
+      `INSERT INTO daily_work_funding_claims
+       (id, rollover_id, user_id, natural_date, rule_version, amount, idempotency_key, claimed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, input.rolloverId, input.userId, input.naturalDate, input.ruleVersion, input.amount, input.idempotencyKey, input.claimedAt);
+    return this.findDailyWorkFunding(input.userId, input.naturalDate)!;
   }
 
   reserveFunds(
@@ -287,7 +366,7 @@ export class SqliteUserRepository {
   }
 
   writeAudit(
-    actorId: string,
+    actorId: string | null,
     action: string,
     entityType: string,
     entityId: string,

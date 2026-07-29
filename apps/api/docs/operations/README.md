@@ -14,6 +14,13 @@
 - `GET /v1/admin/jobs` 查询任务，`POST /v1/admin/jobs` 投递去重任务，`POST /v1/admin/jobs/{id}/retry` 仅重试 `failed` 或 `dead`。两个写接口要求 `Idempotency-Key`；I06B 上线前该管理接口只应在受控的内网运维环境使用，随后必须接入 admin RBAC。
 - 排障先查看任务的 `last_error` 与 `job_runs` 按 attempt 的运行历史。不要直接修改 `jobs` 状态；确认外部依赖恢复后使用手动重试。租约频繁过期应先检查处理器超时和进程终止原因。
 
+## I23B 每日工作资金与日切处置
+
+- 部署前设置有效 IANA `APP_TIMEZONE` 与已发布的 `DAILY_WORK_FUNDING_RULE_VERSION`。启动及每 5 分钟轮询会投递当前自然日的 `daily.rollover:<YYYY-MM-DD>`；payload 已快照日期、时区与规则版本，排队任务不得因后来配置变更而被手工改写。
+- 日切成功只在 `daily_rollover_runs` 创建资格行；资金实际在玩家 `POST /v1/daily-work-funding/claim` 成功的同一事务中写 `daily_work_funding_claims`、`ledger_entries(reason=daily_work_funding)`、审计和幂等响应。不要通过手工插入领取记录、改账户余额、删除唯一约束或重置任务来“补钱”。
+- 排障以请求 ID、幂等键或领取记录 ID 关联 `idempotency_requests`、领取记录、账本和 `daily_work_funding.claimed` 审计；以自然日关联日切任务、`job_runs`、`daily_rollover_runs` 与 `daily.rollover.opened` 审计。停机后只补当前日；先前未执行的任务若恢复，必须保留其 payload 的原日期，不能改成今天。
+- I25B 前 `daily.rollover` 不刷新赛事。看到赛事未刷新不是资金任务故障，不得手工重置或创建赛事。
+
 ## I09B Scryfall 目录同步
 
 - 首次导入前必须显式设置 `CATALOG_ENABLED_SET_CODES`（英文逗号分隔、系列代码大写）和持久化的 `CATALOG_DATA_DIR`；空系列配置会令任务失败而不会导入完整 Bulk Data。`SCRYFALL_BULK_ENDPOINT` 默认指向 Scryfall `default-cards` 元数据端点，`SCRYFALL_USER_AGENT` 必须标识本服务（建议带运维联系邮箱），两者只允许由 API 进程后台任务访问。Scryfall 会拒绝 Node 默认 User-Agent 并返回 `400 generic_user_agent`。

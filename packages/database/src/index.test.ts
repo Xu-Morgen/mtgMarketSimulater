@@ -20,7 +20,7 @@ describe("database foundation", () => {
     const database = openSqliteDatabase(join(directory, "test.db"));
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
     expect(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get()).toEqual({
-      count: 22
+      count: 23
     });
     expect(
       database
@@ -39,6 +39,16 @@ describe("database foundation", () => {
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'game_archives'")
         .get()
     ).toEqual({ name: "game_archives" });
+    expect(
+      database
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'daily_rollover_runs'")
+        .get()
+    ).toEqual({ name: "daily_rollover_runs" });
+    expect(
+      database
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'daily_work_funding_claims'")
+        .get()
+    ).toEqual({ name: "daily_work_funding_claims" });
     expect(
       database
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'card_skus'")

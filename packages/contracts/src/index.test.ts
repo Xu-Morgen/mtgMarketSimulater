@@ -7,6 +7,7 @@ import {
   isValidRequestId,
   type ApiResponse,
   type BilateralFulfillmentType,
+  type DailyWorkFundingStatusDto,
   type EconomicFactEvent,
   type PlayerBilateralTradeDto
 } from "./index.js";
@@ -130,5 +131,19 @@ describe("共享契约", () => {
     // 客户端只能展示服务端返回的类型，不可自行推导或扩展为实体物流状态。
     const fulfillmentType: BilateralFulfillmentType = "simulated";
     expect(fulfillmentType).toBe("simulated");
+  });
+
+  it("I23B 每日工作资金状态只承载服务端快照的日期、时区、规则和金额", () => {
+    const status: DailyWorkFundingStatusDto = {
+      naturalDate: "2026-07-29",
+      timezone: "Asia/Shanghai",
+      status: "available",
+      amount: { amount: 1000, currency: "GAME_CREDIT" },
+      ruleVersion: "daily-work-funds/v1",
+      openedAt: "2026-07-28T16:00:00.000Z",
+      nextEligibleAt: "2026-07-29T16:00:00.000Z",
+      claim: null
+    };
+    expect(JSON.parse(JSON.stringify(status))).toMatchObject({ status: "available", amount: { amount: 1000 } });
   });
 });

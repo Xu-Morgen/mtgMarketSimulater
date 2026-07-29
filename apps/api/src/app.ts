@@ -100,7 +100,7 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
   });
 
   await registerAuthRoutes(app, config, database);
-  await registerUserRoutes(app, database);
+  await registerUserRoutes(app, database, config);
   await registerCatalogRoutes(app, config, database);
   await registerInventoryRoutes(app, database);
   await registerPackRoutes(app, database);

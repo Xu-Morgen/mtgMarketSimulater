@@ -2,6 +2,8 @@ import type { JobDto } from "@mtg-market/contracts";
 import { withinTransaction } from "@mtg-market/database";
 import { errorSummary, retryDelayMs, registeredJobTypes, type JobHandler, type PersistedJob } from "../domain/job.js";
 import { SqliteJobRepository } from "../infrastructure/sqlite-job-repository.js";
+import { dailyRolloverPayload } from "../../users/application/daily-rollover-service.js";
+import type { DailyWorkFundingConfig } from "../../users/application/user-service.js";
 
 /** 业务模块经由 jobs application 投递重定价，不直接操作 jobs 表。 */
 export function enqueueMarketRepriceJob(database: ConstructorParameters<typeof SqliteJobRepository>[0], triggerKey: string, now: string, priceSyncRunId?: string): void {
@@ -38,6 +40,26 @@ export function ensureDailyPriceSyncScheduled(database: ConstructorParameters<ty
     new SqliteJobRepository(database).enqueue({ type: "prices.sync", payload: {}, uniqueKey: `prices.sync:daily:${today}`, runAfter: iso, maxAttempts: 3 }, iso);
     database.prepare("UPDATE price_sync_schedule_state SET last_scheduled_date = ?, last_attempted_run_after = ?, updated_at = ? WHERE singleton = 1").run(today, iso, iso);
   });
+}
+
+/**
+ * I23B：按服务器 IANA 时区为当前自然日投递一个日切任务。payload 在投递时快照日期、
+ * 时区与规则版本；停机补跑只补投当前日，已排队的旧日任务仍保留自己的正确输入。
+ */
+export function ensureDailyRolloverScheduled(
+  database: ConstructorParameters<typeof SqliteJobRepository>[0],
+  config: DailyWorkFundingConfig,
+  now: Date
+): void {
+  const payload = dailyRolloverPayload(config, now);
+  const iso = now.toISOString();
+  new SqliteJobRepository(database).enqueue({
+    type: "daily.rollover",
+    payload,
+    uniqueKey: `daily.rollover:${payload.naturalDate}`,
+    runAfter: iso,
+    maxAttempts: 5
+  }, iso);
 }
 
 export class TaskRegistry {

@@ -122,6 +122,12 @@
 - `POST /v1/orders/buy|sell/{skuId}` 在既有基础资产校验后、预占前执行 `order-risk/v1`；异常价格、冷却、窗口频率、数量限额与潜在自买自卖返回 `409 RULE_VIOLATION`，同键重放仍遵循既有幂等协议。
 - 高频撤单完成原子释放后追加 `flagged` 决策。`GET /v1/admin/orders/risk-decisions?outcome=blocked|flagged&cursor=&limit=`（admin）仅返回脱敏 `OrderRiskDecisionDto`，不提供放行或写资产命令。
 
+## I23B 每日工作资金协议
+
+- `GET /v1/daily-work-funding`（player）返回 `DailyWorkFundingStatusDto`：服务端 `naturalDate`、`timezone`、资格状态、已快照的规则/金额、领取记录和 `nextEligibleAt`。状态仅为 `available`、`claimed`、`not_open` 或 `archive_required`；浏览器不得以本地日期自行判断。
+- `POST /v1/daily-work-funding/claim`（player）请求体必须是 `{}`，要求格式正确的 `Idempotency-Key`。当日已由 `daily.rollover` 开放且已建档时，返回 `201 { funding }`；同键同参返回首次 `200`，同键异参为 `409 IDEMPOTENCY_CONFLICT`，未开放/未建档/同日换键重复领取为 `409 RESOURCE_CONFLICT`。成功结果包含金额、自然日、时区、规则版本和领取时间。
+- `daily.rollover` 的 job payload 是服务端内部协议，不暴露给浏览器；它固定日期、IANA 时区和工作资金规则版本，仅创建资格快照，不直接给任何用户入账。
+
 ## I17B 价格历史、每日同步与 AllPrices 回填协议
 
 - `GET /v1/market/quotes/{skuId}/history?range=7d|30d|all` 与 `GET /v1/market/index/history?range=7d|30d|all` 要求有效会话，按自然日采样返回 `PriceHistoryDto`/`MarketIndexHistoryDto`。历史来自只追加的 `price_snapshot_entries`（reference）与 `market_quotes`（game），同日多次同步/重定价取该日最新值；任一价格缺失为 null，空历史返回空 `points` 数组而非 `404`，确保失败同步仍能展示旧价或空态。浏览器不得自行计算曲线或推断缺失值。

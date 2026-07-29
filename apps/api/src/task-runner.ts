@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { ensureDailyPriceSyncScheduled, TaskRegistry, TaskWorker } from "./modules/jobs/application/task-service.js";
+import { ensureDailyPriceSyncScheduled, ensureDailyRolloverScheduled, TaskRegistry, TaskWorker } from "./modules/jobs/application/task-service.js";
 import { SqliteJobRepository } from "./modules/jobs/infrastructure/sqlite-job-repository.js";
 import type { ApiConfig } from "./config/environment.js";
 import { createCatalogSyncService } from "./modules/catalog/api/catalog-routes.js";
@@ -10,13 +10,14 @@ import type { PriceSyncLogger } from "./modules/pricing/application/price-sync-s
 import type { PriceBackfillLogger } from "./modules/pricing/application/price-backfill-service.js";
 import { MarketService } from "./modules/market/application/market-service.js";
 import { OrderService } from "./modules/orders/application/order-service.js";
+import { DailyRolloverService, type DailyRolloverPayload } from "./modules/users/application/daily-rollover-service.js";
 
 export interface TaskRunner {
   stop(): Promise<void>;
 }
 
 /** 单进程串行调度器；SQLite 租约也使意外双实例只能条件领取一次。 */
-export function startTaskRunner(database: Database.Database, intervalMs = 1_000, registry = new TaskRegistry(), now: () => Date = () => new Date()): TaskRunner {
+export function startTaskRunner(database: Database.Database, intervalMs = 1_000, registry = new TaskRegistry(), now: () => Date = () => new Date(), dailyWorkFundingConfig?: Pick<ApiConfig, "APP_TIMEZONE" | "DAILY_WORK_FUNDING_RULE_VERSION">): TaskRunner {
   const worker = new TaskWorker(new SqliteJobRepository(database), registry);
   let stopping = false;
   let inFlight: Promise<void> | null = null;
@@ -26,7 +27,12 @@ export function startTaskRunner(database: Database.Database, intervalMs = 1_000,
     if (stopping || inFlight) return;
     // 日切检查以 5 分钟为节流，避免每秒查询；自然日唯一键保证补跑至多一次。
     const current = now().getTime();
-    if (current - lastDailyCheck >= 5 * 60_000) { lastDailyCheck = current; ensureDailyPriceSyncScheduled(database, now()); }
+    if (current - lastDailyCheck >= 5 * 60_000) {
+      lastDailyCheck = current;
+      const checkedAt = now();
+      ensureDailyPriceSyncScheduled(database, checkedAt);
+      if (dailyWorkFundingConfig) ensureDailyRolloverScheduled(database, { timezone: dailyWorkFundingConfig.APP_TIMEZONE, ruleVersion: dailyWorkFundingConfig.DAILY_WORK_FUNDING_RULE_VERSION }, checkedAt);
+    }
     inFlight = worker.runOne().then(() => undefined).finally(() => { inFlight = null; });
   };
 
@@ -57,5 +63,7 @@ export function createTaskRegistry(config: ApiConfig, database: Database.Databas
   // I20B：到期回收委托（转 expired）或成交（转取消履约）。状态机条件 UPDATE 保证幂等与重复迁移防护。
   const orders = new OrderService(database);
   registry.register("order.expire", async (payload) => { orders.expireByPayload(payload); });
+  const dailyRollover = new DailyRolloverService(database);
+  registry.register("daily.rollover", async (payload) => { dailyRollover.rollover(payload as DailyRolloverPayload); });
   return registry;
 }
