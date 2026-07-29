@@ -5,7 +5,7 @@ import { failure, success } from "../../../shared/http/api-response.js";
 import { requireRole } from "../../auth/api/auth-routes.js";
 import { InventoryService } from "../application/inventory-service.js";
 
-const listQuerySchema = z.object({ query: z.string().trim().min(1).max(120).optional(), setCode: z.string().trim().min(1).max(20).transform((value) => value.toUpperCase()).optional(), finish: z.enum(["nonfoil", "foil", "etched"]).optional(), locked: z.enum(["any", "locked", "available"]).default("any"), sort: z.enum(["updatedAt", "name", "quantity", "availableQuantity"]).default("updatedAt"), direction: z.enum(["asc", "desc"]).default("desc"), cursor: z.string().regex(/^\d+$/).optional(), limit: z.coerce.number().int().min(1).max(100).default(20) }).strict();
+const listQuerySchema = z.object({ query: z.string().trim().min(1).max(120).optional(), setCode: z.string().trim().min(1).max(20).transform((value) => value.toUpperCase()).optional(), finish: z.enum(["nonfoil", "foil", "etched"]).optional(), locked: z.enum(["any", "locked", "available"]).default("any"), sort: z.enum(["updatedAt", "name", "quantity", "availableQuantity", "marketValue"]).default("updatedAt"), direction: z.enum(["asc", "desc"]).default("desc"), cursor: z.string().regex(/^\d+$/).optional(), limit: z.coerce.number().int().min(1).max(100).default(20) }).strict();
 const skuParamsSchema = z.object({ skuId: z.string().uuid() }).strict();
 const entriesQuerySchema = z.object({ cursor: z.string().regex(/^\d+$/).optional(), limit: z.coerce.number().int().min(1).max(100).default(20) }).strict();
 

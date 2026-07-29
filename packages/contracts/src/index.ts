@@ -386,7 +386,7 @@ export interface NpcTradeDto {
 
 /** I14F 市场列表的只读投影；价格、可交易资格和禁用原因均由 API 判定。 */
 export interface MarketQuoteListItemDto {
-  sku: Pick<CatalogSkuDto, "id" | "name" | "setCode" | "setName" | "collectorNumber" | "finish" | "rarity">;
+  sku: Pick<CatalogSkuDto, "id" | "name" | "setCode" | "setName" | "collectorNumber" | "finish" | "rarity" | "imagePath">;
   quote: QuoteDto | null;
   tradable: boolean;
   tradeDisabledReason: "no_valid_reference_price" | "quote_unavailable" | null;

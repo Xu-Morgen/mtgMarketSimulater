@@ -11,6 +11,8 @@ export type MarketFilters = {
   rarity?: string | undefined;
   finish?: CardFinish | undefined;
   tradable?: "any" | "tradable" | "untradable" | undefined;
+  sort?: "name" | "marketPrice" | "referencePrice" | undefined;
+  direction?: "asc" | "desc" | undefined;
   cursor?: string | undefined;
   limit?: number | undefined;
 };

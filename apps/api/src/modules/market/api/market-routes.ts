@@ -11,6 +11,8 @@ const listQuerySchema = z.object({
   rarity: z.string().trim().min(1).max(40).optional(),
   finish: z.enum(["nonfoil", "foil", "etched"]).optional(),
   tradable: z.enum(["any", "tradable", "untradable"]).default("any"),
+  sort: z.enum(["name", "marketPrice", "referencePrice"]).default("name"),
+  direction: z.enum(["asc", "desc"]).default("asc"),
   cursor: z.string().regex(/^\d+$/).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20)
 }).strict();

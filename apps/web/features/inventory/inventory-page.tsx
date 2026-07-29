@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { type InventoryFilters, useInventoryQuery } from "../../api/inventory-api";
 import { usePublicPriceStatusQuery } from "../../api/pricing-api";
+import { CardImagePopover } from "../../components/card-image-popover";
 import { PriceStatus } from "../../components/price-status";
 import { EmptyState, ErrorState, FilterBar, PageSkeleton } from "../../components/ui";
 import { formatMoney } from "../../utils/money";
@@ -29,7 +30,7 @@ function filtersFromSearch(search: URLSearchParams | null): InventoryFilters {
     query: value.get("query") || undefined, setCode: value.get("setCode") || undefined,
     finish: finish === "nonfoil" || finish === "foil" || finish === "etched" ? finish : undefined,
     locked: locked === "locked" || locked === "available" ? locked : "any",
-    sort: sort === "name" || sort === "quantity" || sort === "availableQuantity" ? sort : "updatedAt",
+    sort: sort === "name" || sort === "quantity" || sort === "availableQuantity" || sort === "marketValue" ? sort : "updatedAt",
     direction: direction === "asc" ? "asc" : "desc", cursor: value.get("cursor") || undefined,
     limit: pageSizeOptions.includes(requestedLimit) ? requestedLimit : defaultPageSize
   };
@@ -50,7 +51,23 @@ export function InventoryPage() {
   const [completedOrder, setCompletedOrder] = useState<BilateralOrderDto | null>(null);
   const pageSize = filters.limit ?? defaultPageSize; const currentPage = Math.floor(Number.parseInt(filters.cursor ?? "0", 10) / pageSize) + 1;
   const columns = useMemo<ColumnsType<InventoryHoldingDto>>(() => [
-    { title: "SKU / 印刷", key: "sku", render: (_, holding) => <div><strong>{holding.sku.name}</strong><br /><span className={styles.secondary}>{holding.sku.setCode} · #{holding.sku.collectorNumber} · {finishLabel(holding.sku.finish)}</span></div> },
+    { title: "SKU / 印刷", key: "sku", render: (_, holding) => (
+      <div>
+        <div className={styles.skuName}>
+          <strong>{holding.sku.name}</strong>
+          <CardImagePopover imagePath={holding.sku.imagePath} name={holding.sku.name}>
+            <button type="button" className={styles.previewTrigger} aria-label={`预览 ${holding.sku.name} 卡图`} title="悬浮查看卡图">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+            </button>
+          </CardImagePopover>
+        </div>
+        <span className={styles.secondary}>{holding.sku.setCode} · #{holding.sku.collectorNumber} · {finishLabel(holding.sku.finish)}</span>
+      </div>
+    ) },
     { title: "持有", dataIndex: "quantity", key: "quantity" }, { title: "可用", dataIndex: "availableQuantity", key: "available" },
     { title: "订单锁定", dataIndex: "orderLockedQuantity", key: "orderLocked" }, { title: "比赛锁定", dataIndex: "tournamentLockedQuantity", key: "tournamentLocked" },
     { title: "平均成本", key: "averageCost", render: (_, holding) => formatMoney(holding.averageCost) },
@@ -72,7 +89,7 @@ export function InventoryPage() {
       <label>系列<input aria-label="库存系列筛选" value={draft.setCode} onChange={(event) => setDraft({ ...draft, setCode: event.target.value })} placeholder="例如 ONE" /></label>
       <label>工艺<select aria-label="库存工艺筛选" value={draft.finish} onChange={(event) => setDraft({ ...draft, finish: event.target.value as CardFinish | "" })}><option value="">全部</option>{finishes.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label>
       <label>可用状态<select aria-label="库存锁定筛选" value={draft.locked} onChange={(event) => setDraft({ ...draft, locked: event.target.value as "any" | "locked" | "available" })}><option value="any">全部</option><option value="available">有可用量</option><option value="locked">存在锁定</option></select></label>
-      <label>排序<select aria-label="库存排序" value={`${filters.sort}:${filters.direction}`} onChange={(event) => { const [sort, direction] = event.target.value.split(":") as [InventoryFilters["sort"], InventoryFilters["direction"]]; router.push(toUrl({ ...filters, sort, direction, cursor: undefined })); }}><option value="updatedAt:desc">最近更新</option><option value="name:asc">名称（升序）</option><option value="quantity:desc">持有数量（降序）</option><option value="availableQuantity:desc">可用数量（降序）</option></select></label>
+      <label>排序<select aria-label="库存排序" value={`${filters.sort}:${filters.direction}`} onChange={(event) => { const [sort, direction] = event.target.value.split(":") as [InventoryFilters["sort"], InventoryFilters["direction"]]; router.push(toUrl({ ...filters, sort, direction, cursor: undefined })); }}><option value="updatedAt:desc">最近更新</option><option value="name:asc">名称（升序）</option><option value="quantity:desc">持有数量（降序）</option><option value="availableQuantity:desc">可用数量（降序）</option><option value="marketValue:desc">游戏币价值（降序）</option><option value="marketValue:asc">游戏币价值（升序）</option></select></label>
       <button className="button" type="submit">应用筛选</button><button className="button secondary" type="button" onClick={() => { setDraft({ query: "", setCode: "", finish: "", locked: "any" }); router.push("/inventory"); }}>清除</button><Button onClick={() => void inventory.refetch()}>刷新</Button>
     </FilterBar></form>
     {page.items.length === 0 ? <EmptyState title="库存为空">尚未持有符合当前条件的卡牌。获得卡牌后会由服务端更新库存。</EmptyState> : <><div className={styles.tableWrap}><Table columns={columns} dataSource={page.items} rowKey="skuId" pagination={false} scroll={{ x: 1300 }} /></div><div className={styles.pagination}><AntPagination current={currentPage} pageSize={pageSize} total={total} showSizeChanger showQuickJumper pageSizeOptions={pageSizeOptions} showTotal={(count, range) => `第 ${range[0]}–${range[1]} 项，共 ${count} 项`} onChange={(nextPage, nextPageSize) => { const nextLimit = Number(nextPageSize); const changedSize = nextLimit !== pageSize; router.push(toUrl({ ...filters, limit: nextLimit, cursor: changedSize || nextPage === 1 ? undefined : String((nextPage - 1) * nextLimit) })); }} /></div></>}

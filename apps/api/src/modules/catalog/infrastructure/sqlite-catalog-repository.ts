@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
-import { basename } from "node:path";
 import type { CatalogSkuDetailDto, CatalogSkuDto, Page } from "@mtg-market/contracts";
+import { publicImagePath } from "../../../shared/catalog/image-path.js";
 
 type CatalogRow = {
   sku_id: string; printing_id: string; scryfall_id: string | null; name: string; set_code: string; set_name: string;
@@ -12,9 +12,6 @@ type CatalogRow = {
 
 export type CatalogFilters = { query?: string | undefined; setCode?: string | undefined; rarity?: string | undefined; finish?: "nonfoil" | "foil" | "etched" | undefined; cursor?: string | undefined; limit: number };
 
-function publicImagePath(cachePath: string | null): string | null {
-  return cachePath ? `/v1/catalog/images/${basename(cachePath)}` : null;
-}
 function image(row: CatalogRow): CatalogSkuDto["image"] {
   return { path: publicImagePath(row.image_path), sourceUrl: row.image_source_url, status: row.image_status ?? "missing", cachedAt: row.image_cached_at };
 }

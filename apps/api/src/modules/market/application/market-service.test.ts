@@ -160,3 +160,66 @@ describe("I17B 价格历史按自然日采样", () => {
     database.close();
   });
 });
+
+describe("I18 卡牌预览", () => {
+  it("市场列表把本地图片 cache_path 投影为 /v1/catalog/images 相对路径，无缓存时为 null", () => {
+    const database = fixture();
+    // 主 SKU 的印刷已缓存图片；cache_path 带子目录前缀，应只取 basename 暴露给浏览器。
+    database.prepare("INSERT INTO card_image_cache (id, printing_id, source_url, cache_path, status, checksum, cached_at, updated_at) VALUES (?, ?, 'https://scryfall.example/x', 'images/30000000-0000-4000-8000-000000000001.jpg', 'cached', 'sha', ?, ?)").run("img-1", printingId, now, now);
+    // 第二张卡用独立印刷，不缓存图片，用于验证无缓存分支。
+    const uncachedPrinting = "20000000-0000-4000-8000-000000000002";
+    const uncachedSku = "30000000-0000-4000-8000-000000000002";
+    database.prepare("INSERT INTO card_printings (id, set_id, name, collector_number, scryfall_id, rarity, legalities_json, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, '无图测试卡', '2', ?, 'common', '{}', 'scryfall', ?, 0, ?, ?)").run(uncachedPrinting, setId, uncachedPrinting, uncachedPrinting, now, now);
+    database.prepare("INSERT INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, 'nonfoil', 1, 'scryfall', ?, 0, ?, ?)").run(uncachedSku, uncachedPrinting, uncachedPrinting, now, now);
+    const market = new MarketService(database);
+    const items = market.list({ sort: "name", direction: "asc", limit: 20 }).items;
+    const bySku = new Map(items.map((item) => [item.sku.id, item.sku.imagePath]));
+    expect(bySku.get(skuId)).toBe("/v1/catalog/images/30000000-0000-4000-8000-000000000001.jpg");
+    expect(bySku.get(uncachedSku)).toBe(null);
+    database.close();
+  });
+});
+
+describe("I19 市场排序", () => {
+  /** 给指定 SKU 插入一条报价；market_quotes 各列经 LEFT JOIN 可为 null，排序时需垫后。entryId 已有则复用，否则新建独立 snapshot。 */
+  function seedQuoteFor(database: ReturnType<typeof fixture>, sku: string, referenceCents: number, marketAmount: number, index: number, reuseEntryId?: string) {
+    const entryId = reuseEntryId ?? `41000000-0000-4000-8001-${String(index).padStart(12, "0")}`;
+    const quoteId = `80000000-0000-4000-8001-${String(index).padStart(12, "0")}`;
+    if (!reuseEntryId) database.prepare("INSERT INTO price_snapshot_entries (id, sync_run_id, sku_id, mapping_id, mtgjson_uuid, finish, price_type, currency, price_amount, availability, unavailable_reason, captured_at, created_at) VALUES (?, ?, ?, NULL, NULL, 'nonfoil', 'normal', 'EUR', ?, 'priced', NULL, ?, ?)").run(entryId, runId, sku, referenceCents, now, now);
+    database.prepare("INSERT INTO market_quotes (id, sku_id, price_snapshot_entry_id, trigger_key, rule_version, reference_price_eur_cents, market_price_amount, npc_buy_price_amount, npc_sell_price_amount, npc_buy_fee_amount, npc_sell_fee_amount, parameters_json, reasons_json, calculated_at, valid_until) VALUES (?, ?, ?, ?, 'market/v1', ?, ?, 90, 110, 0, 0, '{}', '[]', ?, ?)").run(quoteId, sku, entryId, `sort:${index}`, referenceCents, marketAmount, now, now);
+  }
+  /** 新增一个独立印刷/SKU，可选不插报价（用于验证无报价垫后）。 */
+  function addSku(database: ReturnType<typeof fixture>, index: number, name: string): string {
+    const printing = `20000000-0000-4000-8002-${String(index).padStart(12, "0")}`;
+    const sku = `30000000-0000-4000-8002-${String(index).padStart(12, "0")}`;
+    database.prepare("INSERT INTO card_printings (id, set_id, name, collector_number, scryfall_id, rarity, legalities_json, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'common', '{}', 'scryfall', ?, 0, ?, ?)").run(printing, setId, name, String(index), printing, printing, now, now);
+    database.prepare("INSERT INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, 'nonfoil', 1, 'scryfall', ?, 0, ?, ?)").run(sku, printing, printing, now, now);
+    return sku;
+  }
+
+  it("按游戏内中间价与 EUR 参考价排序时，无报价的 SKU 在升降序下都垫后", () => {
+    const database = fixture();
+    // 甲 marketPrice=500/refCents=200，乙 marketPrice=300/refCents=100，丙无报价。
+    seedQuoteFor(database, skuId, 200, 500, 1, snapshotId);
+    const skuB = addSku(database, 2, "排序测试卡乙");
+    seedQuoteFor(database, skuB, 100, 300, 2);
+    const skuC = addSku(database, 3, "排序测试卡丙"); // 不插报价
+    const market = new MarketService(database);
+    const ids = (opts: { sort: "marketPrice" | "referencePrice"; direction: "asc" | "desc" }) => market.list({ sort: opts.sort, direction: opts.direction, limit: 20 }).items.map((item) => item.sku.id);
+    // 有报价者按金额排，无报价的丙在两种方向下都垫后。
+    expect(ids({ sort: "marketPrice", direction: "desc" })).toEqual([skuId, skuB, skuC]);
+    expect(ids({ sort: "marketPrice", direction: "asc" })).toEqual([skuB, skuId, skuC]);
+    expect(ids({ sort: "referencePrice", direction: "desc" })).toEqual([skuId, skuB, skuC]);
+    expect(ids({ sort: "referencePrice", direction: "asc" })).toEqual([skuB, skuId, skuC]);
+    database.close();
+  });
+
+  it("默认按名称升序，与历史行为一致", () => {
+    const database = fixture();
+    const skuB = addSku(database, 2, "排序测试卡乙");
+    const market = new MarketService(database);
+    // fixture 主卡名为"测试卡"，乙名为"排序测试卡乙"；按名称升序，乙（排）应在甲（测）之前。
+    expect(market.list({ sort: "name", direction: "asc", limit: 20 }).items.map((item) => item.sku.id)).toEqual([skuB, skuId]);
+    database.close();
+  });
+});

@@ -27,6 +27,23 @@ function seedMarketQuote(database: ReturnType<typeof openSqliteDatabase>, skuId:
   database.prepare("INSERT INTO market_quotes (id, sku_id, price_snapshot_entry_id, trigger_key, rule_version, reference_price_eur_cents, market_price_amount, npc_buy_price_amount, npc_sell_price_amount, npc_buy_fee_amount, npc_sell_fee_amount, parameters_json, reasons_json, calculated_at, valid_until) VALUES ('quote-1', ?, 'snapshot-1', 'fixture', 'market/v1', 100, 150, 135, 165, 15, 15, '{}', '[]', ?, '2026-07-27T00:15:00.000Z')").run(skuId, now);
 }
 
+/** 种子一个额外印刷/SKU，可选是否给定报价，用于市值排序用例。 */
+function seedExtraSku(database: ReturnType<typeof openSqliteDatabase>, suffix: "a" | "b" | "c", marketPriceAmount: number | null): string {
+  const now = "2026-07-27T00:00:00.000Z";
+  const skuIds: Record<"a" | "b" | "c", string> = { a: "11111111-1111-4111-8111-111111111111", b: "22222222-2222-4222-8222-222222222222", c: "33333333-3333-4333-8333-333333333333" };
+  const printingIds: Record<"a" | "b" | "c", string> = { a: "printing-1", b: "printing-2", c: "printing-3" };
+  const names: Record<"a" | "b" | "c", string> = { a: "库存测试卡甲", b: "库存测试卡乙", c: "库存测试卡丙" };
+  const skuId = skuIds[suffix]; const printingId = printingIds[suffix];
+  database.prepare("INSERT INTO card_printings (id, set_id, name, collector_number, scryfall_id, oracle_text, rarity, legalities_json, artist, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, 'set-1', ?, ?, NULL, NULL, 'common', '{}', NULL, 'manual-test', NULL, 1, ?, ?)").run(printingId, names[suffix], suffix, now, now);
+  database.prepare("INSERT INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, 'nonfoil', 1, 'manual-test', NULL, 1, ?, ?)").run(skuId, printingId, now, now);
+  if (marketPriceAmount === null) return skuId;
+  const runId = `run-${suffix}`; const snapshotId = `snapshot-${suffix}`; const quoteId = `quote-${suffix}`;
+  database.prepare("INSERT INTO price_sync_runs (id, source, source_version, prices_uri, mapping_uri, prices_checksum_sha256, mapping_checksum_sha256, status, mapped_skus, priced_skus, unpriced_skus, mapping_failed_skus, failure_reason, started_at, completed_at, checksum_verification, failure_code) VALUES (?, 'mtgjson-cardmarket', 'fixture', 'https://example.test/prices', 'https://example.test/mapping', ?, ?, 'succeeded', 1, 1, 0, 0, NULL, ?, ?, 'verified', NULL)").run(runId, suffix, suffix, now, now);
+  database.prepare("INSERT INTO price_snapshot_entries (id, sync_run_id, sku_id, mapping_id, mtgjson_uuid, finish, price_type, currency, price_amount, availability, unavailable_reason, captured_at, created_at) VALUES (?, ?, ?, NULL, NULL, 'nonfoil', 'normal', 'EUR', 100, 'priced', NULL, ?, ?)").run(snapshotId, runId, skuId, now, now);
+  database.prepare("INSERT INTO market_quotes (id, sku_id, price_snapshot_entry_id, trigger_key, rule_version, reference_price_eur_cents, market_price_amount, npc_buy_price_amount, npc_sell_price_amount, npc_buy_fee_amount, npc_sell_fee_amount, parameters_json, reasons_json, calculated_at, valid_until) VALUES (?, ?, ?, 'fixture', 'market/v1', 100, ?, 135, 165, 15, 15, '{}', '[]', ?, '2026-07-27T00:15:00.000Z')").run(quoteId, skuId, snapshotId, marketPriceAmount, now);
+  return skuId;
+}
+
 describe("I10B 库存、锁定与对账", () => {
   it("并发锁定、释放与扣减均不产生负数、超额锁定或幽灵库存", () => {
     const database = testDatabase(); const inventory = new InventoryService(database); const skuId = "11111111-1111-4111-8111-111111111111";
@@ -83,5 +100,29 @@ describe("I10B 库存、锁定与对账", () => {
     expect(detail.json()).toMatchObject({ ok: true, data: { holding: { skuId, marketUnitPrice: null, marketValue: null, unrealizedProfitLoss: null, marketValueUnavailableReason: "no_snapshot" } } });
     expect(reconciliation.json()).toMatchObject({ ok: true, data: { skuId, reconciled: true, entries: { items: [expect.objectContaining({ reason: "api_fixture" })] } } });
     await app.close(); database.close();
+  });
+
+  it("按游戏币价值排序时，无价格快照的持仓在升降序下都垫后", () => {
+    const database = testDatabase(); const inventory = new InventoryService(database);
+    // 甲市值 150×2=300、乙市值 60×1=60、丙无报价（市值=null）。丙持有量与乙相同，以排除数量干扰。
+    const skuA = "11111111-1111-4111-8111-111111111111"; const skuB = seedExtraSku(database, "b", 60); const skuC = seedExtraSku(database, "c", null);
+    inventory.acquire({ userId: "player-1", skuId: skuA, quantityDelta: 2, unitCostAmount: 100, reason: "fixture", correlationId: "valued-a", now: "2026-07-27T00:01:00.000Z" });
+    inventory.acquire({ userId: "player-1", skuId: skuB, quantityDelta: 1, unitCostAmount: 100, reason: "fixture", correlationId: "valued-b", now: "2026-07-27T00:01:00.000Z" });
+    inventory.acquire({ userId: "player-1", skuId: skuC, quantityDelta: 1, unitCostAmount: 100, reason: "fixture", correlationId: "valued-c", now: "2026-07-27T00:01:00.000Z" });
+    seedMarketQuote(database, skuA);
+    const descending = inventory.list("player-1", { sort: "marketValue", direction: "desc", limit: 20 }).items.map((item) => item.skuId);
+    const ascending = inventory.list("player-1", { sort: "marketValue", direction: "asc", limit: 20 }).items.map((item) => item.skuId);
+    // 有市值者按金额排（降序甲→乙，升序乙→甲），无市值的丙在两种方向下都垫后。
+    expect(descending).toEqual([skuA, skuB, skuC]);
+    expect(ascending).toEqual([skuB, skuA, skuC]);
+    database.close();
+  });
+
+  it("库存卡图路径由 cache_path 投影为 /v1/catalog/images 相对路径，不再泄露裸路径", () => {
+    const database = testDatabase(); const inventory = new InventoryService(database); const skuId = "11111111-1111-4111-8111-111111111111";
+    inventory.acquire({ userId: "player-1", skuId, quantityDelta: 1, unitCostAmount: 100, reason: "fixture", correlationId: "image-fixture", now: "2026-07-24T00:01:00.000Z" });
+    database.prepare("INSERT INTO card_image_cache (id, printing_id, source_url, cache_path, status, checksum, cached_at, updated_at) VALUES ('img-1', 'printing-1', 'https://scryfall.example/x', 'images/11111111-1111-4111-8111-111111111111.jpg', 'cached', 'sha', ?, ?)").run("2026-07-24T00:00:00.000Z", "2026-07-24T00:00:00.000Z");
+    expect(inventory.holding("player-1", skuId)?.sku.imagePath).toBe("/v1/catalog/images/11111111-1111-4111-8111-111111111111.jpg");
+    database.close();
   });
 });

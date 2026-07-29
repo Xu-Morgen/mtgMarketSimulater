@@ -1,0 +1,20 @@
+.popoverContent {
+  padding: 4px;
+}
+
+.image {
+  display: block;
+  border-radius: 8px;
+  max-height: 360px;
+  max-width: 240px;
+}
+
+.placeholder {
+  background: #f3f2e8;
+  border: 1px dashed #9b9a8e;
+  border-radius: 8px;
+  color: #596153;
+  font-size: .82rem;
+  max-width: 220px;
+  padding: 12px;
+}

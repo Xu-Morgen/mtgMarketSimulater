@@ -10,7 +10,7 @@ export type InventoryFilters = {
   setCode?: string | undefined;
   finish?: CardFinish | undefined;
   locked?: "any" | "locked" | "available" | undefined;
-  sort?: "updatedAt" | "name" | "quantity" | "availableQuantity" | undefined;
+  sort?: "updatedAt" | "name" | "quantity" | "availableQuantity" | "marketValue" | undefined;
   direction?: "asc" | "desc" | undefined;
   cursor?: string | undefined;
   limit?: number | undefined;
