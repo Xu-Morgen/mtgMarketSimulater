@@ -623,3 +623,121 @@ test.describe("P2P 模拟履约确认与取消窄屏（390 × 844）", () => {
     await expect(page.getByText("不涉及实体卡牌物流、发货或退货").first()).toBeVisible();
   });
 });
+
+test.describe("P2P 全链路恢复（I22F）", () => {
+  const buyerId = "10000000-0000-4000-8000-000000000221";
+  const sellerId = "10000000-0000-4000-8000-000000000222";
+  const buyOrderId = "order-i22f-buy";
+  const sellOrderId = "order-i22f-sell";
+  const tradeId = "trade-i22f-partial";
+
+  type RecoveryState = {
+    phase: "matched" | "fulfilled" | "cancelled" | "expired";
+    sellerOrderCancelled: boolean;
+  };
+
+  function tradeFor(role: "buyer" | "seller", state: RecoveryState) {
+    const pending = state.phase === "matched";
+    return {
+      id: tradeId, skuId, role, myOrderId: role === "buyer" ? buyOrderId : sellOrderId,
+      quantity: 2, executionPrice: { amount: 200, currency: "GAME_CREDIT" }, fee: { amount: 8, currency: "GAME_CREDIT" },
+      pendingFunds: pending ? { amount: role === "buyer" ? 408 : 40, currency: "GAME_CREDIT" } : null,
+      pendingInventoryQuantity: pending && role === "seller" ? 2 : null,
+      ruleVersion: "order-matching/v1", status: pending ? "matched_pending_fulfillment" : state.phase,
+      fulfillmentDeadline: "2026-07-29T08:00:00.000Z", createdAt: now, updatedAt: now
+    };
+  }
+
+  function ordersFor(role: "buyer" | "seller", state: RecoveryState) {
+    if (role === "buyer") return [{ ...order("buy", 3, 200, "partially_filled", 2), id: buyOrderId, remainingQuantity: 1 }];
+    return [{ ...order("sell", 3, 200, state.sellerOrderCancelled ? "cancelled" : "partially_filled", state.sellerOrderCancelled ? 3 : 2), id: sellOrderId, remainingQuantity: state.sellerOrderCancelled ? 1 : 1 }];
+  }
+
+  async function installRecoveryApi(page: Page, role: "buyer" | "seller", state: RecoveryState) {
+    const userId = role === "buyer" ? buyerId : sellerId;
+    await mockMarket(page);
+    await page.context().addCookies([{ name: "mtg_csrf", value: `i22f-${userId}`, url: webBaseUrl }]);
+    await page.route("**/v1/auth/refresh", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ accessToken: `i22f-${role}-token`, user: { id: userId, email: `i22f-${role}@example.test`, displayName: role === "buyer" ? "恢复买方" : "恢复卖方", role: "player", createdAt: now } })) }));
+    await page.route("**/v1/archive", async (route) => {
+      const frozen = state.phase === "matched" ? (role === "buyer" ? 612 : 60) : 0;
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ archive: { id: `archive-${role}`, userId, initialFundingRuleVersion: "initial-funding/v1", createdAt: now, balance: { total: { amount: 10000, currency: "GAME_CREDIT" }, available: { amount: 10000 - frozen, currency: "GAME_CREDIT" }, frozen: { amount: frozen, currency: "GAME_CREDIT" }, updatedAt: now } } })) });
+    });
+    await page.route("**/v1/ledger?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+    await page.route("**/v1/orders?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: ordersFor(role, state), page: { total: 1, hasMore: false, nextCursor: null } })) }));
+    await page.route("**/v1/orders/trades?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [tradeFor(role, state)], page: { total: 1, hasMore: false, nextCursor: null } })) }));
+    await page.route(`**/v1/orders/book/${skuId}`, async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ book: { skuId, bids: [{ limitPrice: { amount: 200, currency: "GAME_CREDIT" }, remainingQuantity: 1, orderCount: 1 }], asks: state.sellerOrderCancelled ? [] : [{ limitPrice: { amount: 200, currency: "GAME_CREDIT" }, remainingQuantity: 1, orderCount: 1 }], capturedAt: now } })) }));
+  }
+
+  test("两个玩家在部分成交、撤单与履约后刷新，均只恢复服务端持久状态", async ({ browser }) => {
+    const state: RecoveryState = { phase: "matched", sellerOrderCancelled: false };
+    const buyerContext = await browser.newContext();
+    const sellerContext = await browser.newContext();
+    const buyerPage = await buyerContext.newPage();
+    const sellerPage = await sellerContext.newPage();
+    await installRecoveryApi(buyerPage, "buyer", state);
+    await installRecoveryApi(sellerPage, "seller", state);
+    let fulfillCalls = 0;
+    let cancelOrderCalls = 0;
+    await buyerPage.route(`**/v1/orders/trades/${tradeId}/fulfill`, async (route) => {
+      fulfillCalls += 1;
+      state.phase = "fulfilled";
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ trade: { id: tradeId, status: "fulfilled", updatedAt: now } })) });
+    });
+    await sellerPage.route(`**/v1/orders/${sellOrderId}/cancel`, async (route) => {
+      cancelOrderCalls += 1;
+      state.sellerOrderCancelled = true;
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ order: ordersFor("seller", state)[0] })) });
+    });
+
+    await Promise.all([buyerPage.goto("/orders"), sellerPage.goto("/orders")]);
+    await expect(buyerPage.getByText("待履约资金 408 游戏币")).toBeVisible();
+    await expect(sellerPage.getByText("待履约库存 2 张")).toBeVisible();
+
+    await sellerPage.getByRole("button", { name: "撤单" }).click();
+    await sellerPage.getByRole("button", { name: "确认", exact: true }).click();
+    await expect(sellerPage.getByRole("heading", { name: "撤单已完成" })).toBeVisible();
+    await buyerPage.getByRole("button", { name: "确认履约" }).click();
+    await buyerPage.getByRole("dialog").getByRole("button", { name: "确认履约" }).click();
+    await expect(buyerPage.getByRole("heading", { name: "履约已完成" })).toBeVisible();
+    expect(cancelOrderCalls).toBe(1);
+    expect(fulfillCalls).toBe(1);
+
+    // 刷新不会重放 mutation；两端仅重新读取已持久化的订单、成交和冻结状态。
+    await Promise.all([buyerPage.reload(), sellerPage.reload()]);
+    await expect(buyerPage.locator("table").getByText("已完成").first()).toBeVisible();
+    await expect(buyerPage.getByRole("button", { name: "确认履约" })).toHaveCount(0);
+    await expect(sellerPage.locator("table").getByText("已撤单")).toBeVisible();
+    await expect(sellerPage.getByRole("region", { name: "账户余额状态" }).locator("article").filter({ hasText: "冻结额" }).getByText("0 游戏币", { exact: true })).toBeVisible();
+    expect(cancelOrderCalls).toBe(1);
+    expect(fulfillCalls).toBe(1);
+    await buyerContext.close();
+    await sellerContext.close();
+  });
+
+  test("模拟服务重启后，取消履约和到期回收只呈现恢复后的单一终态", async ({ browser }) => {
+    const state: RecoveryState = { phase: "cancelled", sellerOrderCancelled: true };
+    // 新建上下文模拟浏览器在 Fastify/SQLite 重启后重新建连：不继承 TanStack Query 内存缓存。
+    const buyerContext = await browser.newContext();
+    const sellerContext = await browser.newContext();
+    const buyerPage = await buyerContext.newPage();
+    const sellerPage = await sellerContext.newPage();
+    await installRecoveryApi(buyerPage, "buyer", state);
+    await installRecoveryApi(sellerPage, "seller", state);
+    await Promise.all([buyerPage.goto("/orders"), sellerPage.goto("/orders")]);
+    await expect(buyerPage.locator("table").getByText("已取消").first()).toBeVisible();
+    await expect(sellerPage.locator("table").getByText("已取消").first()).toBeVisible();
+    await expect(buyerPage.getByRole("region", { name: "账户余额状态" }).locator("article").filter({ hasText: "冻结额" }).getByText("0 游戏币", { exact: true })).toBeVisible();
+    await expect(sellerPage.getByRole("region", { name: "账户余额状态" }).locator("article").filter({ hasText: "冻结额" }).getByText("0 游戏币", { exact: true })).toBeVisible();
+    await expect(buyerPage.getByRole("button", { name: "确认履约" })).toHaveCount(0);
+    await expect(sellerPage.getByRole("button", { name: "取消履约" })).toHaveCount(0);
+
+    // 到期任务重放后的服务端终态仍为 cancelled；页面不能出现幽灵待履约或重复释放提示。
+    await Promise.all([buyerPage.reload(), sellerPage.reload()]);
+    await expect(buyerPage.locator("table").getByText("已取消").first()).toBeVisible();
+    await expect(sellerPage.locator("table").getByText("已取消").first()).toBeVisible();
+    await expect(buyerPage.getByText(/你有 .* 笔待履约成交/)).toHaveCount(0);
+    await expect(sellerPage.getByText(/你有 .* 笔待履约成交/)).toHaveCount(0);
+    await buyerContext.close();
+    await sellerContext.close();
+  });
+});
