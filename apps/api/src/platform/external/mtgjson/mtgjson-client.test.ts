@@ -9,10 +9,22 @@ import { MtgjsonChecksumMismatchError, MtgjsonClient } from "./mtgjson-client.js
  * 复用 price-sync-service.test 的 fake fetcher 模式：返回 `new Response(bytes)` 与 `.sha256` hex。
  */
 const uuid = "30000000-0000-4000-8000-000000000001";
+const unpricedUuid = "30000000-0000-4000-8000-000000000002";
 const scryfallId = "20000000-0000-4000-8000-000000000001";
+const streamBoundaryPadding = "x".repeat(96 * 1024);
 
 function todayPrices() {
   return { data: { [uuid]: { paper: { cardmarket: { currency: "EUR", retail: { normal: { "2026-07-24": 1.01, "2026-07-25": 1.23 }, foil: { "2026-07-25": 4.56 }, etched: { "2026-07-25": 7.89 } } } } } }, meta: { date: "2026-07-25" } };
+}
+function todayPricesWithLeadingUnpricedEntry() {
+  return {
+    data: {
+      // 强制该无价 UUID 跨过默认读取块边界，覆盖此前“空队列即流结束”的实际触发条件。
+      [unpricedUuid]: { paper: { cardmarket: { currency: "EUR", retail: {} } }, ignored: streamBoundaryPadding },
+      ...todayPrices().data
+    },
+    meta: { date: "2026-07-25" }
+  };
 }
 function allPrices() {
   // 同一 UUID+工艺多个自然日正值（回填场景；这是原 0x1fffffe8 报错的入口）。
@@ -68,6 +80,18 @@ describe("MTGJSON 流式适配器", () => {
         expect(source.prices.get(`${uuid}:normal`)?.map((p) => p.date)).toEqual(["2026-07-23", "2026-07-24", "2026-07-25"]);
         expect(source.prices.get(`${uuid}:normal`)?.every((p) => p.currency === "EUR")).toBe(true);
         expect(source.prices.get(`${uuid}:foil`)?.length).toBe(1);
+      });
+
+      it("前序 UUID 没有 Cardmarket 正价时，仍继续解析后续有效价格", async () => {
+        const priceBytes = wrap(Buffer.from(JSON.stringify(todayPricesWithLeadingUnpricedEntry())));
+        const mappingBytes = wrap(Buffer.from(JSON.stringify(printings())));
+        const client = new MtgjsonClient("https://fixture.test/prices", "https://fixture.test/printings", "test", fakeFetcher({ "/prices": priceBytes, "/printings": mappingBytes }));
+
+        const source = await client.download();
+
+        expect(source.prices.get(`${unpricedUuid}:normal`)).toBeUndefined();
+        expect(source.prices.get(`${uuid}:normal`)).toMatchObject({ currency: "EUR", amount: 1.23 });
+        expect(source.prices.get(`${uuid}:foil`)).toMatchObject({ currency: "EUR", amount: 4.56 });
       });
     });
   }

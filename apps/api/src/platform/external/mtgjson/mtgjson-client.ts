@@ -156,26 +156,11 @@ function historicalPrices(retailByFinish: unknown, priceType: "normal" | "foil" 
  */
 async function* streamPriceDataEntries(filePath: string): AsyncGenerator<{ uuid: string; retail: UnknownRecord }> {
   const pipeline = chain([openDecodingStream(filePath), makeParser(), Pick({ filter: "data" }), StreamObject()]);
-  const queue: Array<{ uuid: string; retail: UnknownRecord }> = [];
-  let error: unknown;
-  let resolveWait: (() => void) | null = null;
-  pipeline.on("data", (chunk: { key: string; value: UnknownRecord }) => {
+  // 直接消费 Readable 的 async iterator：`data` 事件中遇到无 EUR 价格的 UUID 只是跳过该项，
+  // 绝不能被误判为整个源流结束。流的结束和解析错误由 async iterator 原样传递。
+  for await (const chunk of pipeline as AsyncIterable<{ key: string; value: UnknownRecord }>) {
     const retail = extractRetail(chunk.value);
-    if (retail) queue.push({ uuid: chunk.key, retail });
-    resolveWait?.();
-  });
-  pipeline.on("error", (err: unknown) => { error = err; resolveWait?.(); });
-  pipeline.on("end", () => { resolveWait?.(); });
-  while (true) {
-    if (queue.length > 0) yield queue.shift()!;
-    else if (error) throw error;
-    else {
-      await new Promise<void>((resolve) => { resolveWait = resolve; });
-      resolveWait = null;
-      if (queue.length > 0) yield queue.shift()!;
-      else if (error) throw error;
-      else return;
-    }
+    if (retail) yield { uuid: chunk.key, retail };
   }
 }
 
