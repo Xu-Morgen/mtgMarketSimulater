@@ -1,72 +1,262 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { withinTransaction } from "@mtg-market/database";
-import { type ScryfallBulkCard, type ScryfallBulkClient, scryfallPrintingId } from "../../../platform/external/scryfall/scryfall-bulk-client.js";
+import {
+  type ScryfallBulkCard,
+  type ScryfallBulkClient,
+  scryfallPrintingId
+} from "../../../platform/external/scryfall/scryfall-bulk-client.js";
 import { BasePackCatalogService } from "../../packs/application/base-pack-catalog-service.js";
 
 type SyncPayload = { expectedChecksumSha256?: string };
-type SyncRow = { id: string; source_version: string; checksum_sha256: string; enabled_sets_json: string; status: "running" | "succeeded" | "failed"; imported_printings: number; imported_skus: number; cached_images: number; diff_json: string; failure_reason: string | null; started_at: string; completed_at: string | null };
+type SyncRow = {
+  id: string;
+  source_version: string;
+  checksum_sha256: string;
+  enabled_sets_json: string;
+  status: "running" | "succeeded" | "failed";
+  imported_printings: number;
+  imported_skus: number;
+  cached_images: number;
+  diff_json: string;
+  failure_reason: string | null;
+  started_at: string;
+  completed_at: string | null;
+};
 
-export type CatalogSyncStatus = { latestSuccessful: Omit<SyncRow, "status"> | null; current: SyncRow | null };
+export type CatalogSyncStatus = {
+  latestSuccessful: Omit<SyncRow, "status"> | null;
+  current: SyncRow | null;
+};
 
-function requireCard(card: ScryfallBulkCard): Required<Pick<ScryfallBulkCard, "id" | "set" | "set_name" | "name" | "collector_number">> & ScryfallBulkCard {
-  if (!card || typeof card.id !== "string" || typeof card.set !== "string" || typeof card.set_name !== "string" || typeof card.name !== "string" || typeof card.collector_number !== "string") throw new Error("Scryfall 卡牌 Schema 缺少必要字段");
-  return card as Required<Pick<ScryfallBulkCard, "id" | "set" | "set_name" | "name" | "collector_number">> & ScryfallBulkCard;
+function requireCard(
+  card: ScryfallBulkCard
+): Required<Pick<ScryfallBulkCard, "id" | "set" | "set_name" | "name" | "collector_number">> &
+  ScryfallBulkCard {
+  if (
+    !card ||
+    typeof card.id !== "string" ||
+    typeof card.set !== "string" ||
+    typeof card.set_name !== "string" ||
+    typeof card.name !== "string" ||
+    typeof card.collector_number !== "string"
+  )
+    throw new Error("Scryfall 卡牌 Schema 缺少必要字段");
+  return card as Required<
+    Pick<ScryfallBulkCard, "id" | "set" | "set_name" | "name" | "collector_number">
+  > &
+    ScryfallBulkCard;
 }
-function normalImageUrl(card: ScryfallBulkCard): string | null { return card.image_uris?.normal ?? card.card_faces?.find((face) => face.image_uris?.normal)?.image_uris?.normal ?? null; }
+function normalImageUrl(card: ScryfallBulkCard): string | null {
+  return (
+    card.image_uris?.normal ??
+    card.card_faces?.find((face) => face.image_uris?.normal)?.image_uris?.normal ??
+    null
+  );
+}
 
-/** 同步先完整下载/解析，再在一个短事务替换 Scryfall 来源行；异常永远不会清空上个成功目录。 */
+/** 同步先完整下载/解析，再在一个短事务更新 Scryfall 目录；历史事实引用的本地 ID 永远不删除。 */
 export class CatalogSyncService {
   private readonly basePacks: BasePackCatalogService;
-  constructor(private readonly database: Database.Database, private readonly client: ScryfallBulkClient, private readonly enabledSetCodes: readonly string[]) { this.basePacks = new BasePackCatalogService(database); }
+  constructor(
+    private readonly database: Database.Database,
+    private readonly client: ScryfallBulkClient,
+    private readonly enabledSetCodes: readonly string[]
+  ) {
+    this.basePacks = new BasePackCatalogService(database);
+  }
 
   status(): CatalogSyncStatus {
-    const current = this.database.prepare("SELECT * FROM catalog_sync_runs ORDER BY started_at DESC, rowid DESC LIMIT 1").get() as SyncRow | undefined;
-    const latest = this.database.prepare("SELECT r.* FROM catalog_sync_state s JOIN catalog_sync_runs r ON r.id = s.latest_successful_run_id WHERE s.singleton = 1").get() as SyncRow | undefined;
-    const strip = (row: SyncRow | undefined) => row ? ({ id: row.id, source_version: row.source_version, checksum_sha256: row.checksum_sha256, enabled_sets_json: row.enabled_sets_json, imported_printings: row.imported_printings, imported_skus: row.imported_skus, cached_images: row.cached_images, diff_json: row.diff_json, failure_reason: row.failure_reason, started_at: row.started_at, completed_at: row.completed_at }) : null;
+    const current = this.database
+      .prepare("SELECT * FROM catalog_sync_runs ORDER BY started_at DESC, rowid DESC LIMIT 1")
+      .get() as SyncRow | undefined;
+    const latest = this.database
+      .prepare(
+        "SELECT r.* FROM catalog_sync_state s JOIN catalog_sync_runs r ON r.id = s.latest_successful_run_id WHERE s.singleton = 1"
+      )
+      .get() as SyncRow | undefined;
+    const strip = (row: SyncRow | undefined) =>
+      row
+        ? {
+            id: row.id,
+            source_version: row.source_version,
+            checksum_sha256: row.checksum_sha256,
+            enabled_sets_json: row.enabled_sets_json,
+            imported_printings: row.imported_printings,
+            imported_skus: row.imported_skus,
+            cached_images: row.cached_images,
+            diff_json: row.diff_json,
+            failure_reason: row.failure_reason,
+            started_at: row.started_at,
+            completed_at: row.completed_at
+          }
+        : null;
     return { latestSuccessful: strip(latest), current: current ?? null };
   }
 
   async synchronize(payload: SyncPayload = {}): Promise<void> {
-    const startedAt = new Date().toISOString(); const runId = randomUUID();
-    let sourceVersion = "unavailable"; let sourceUri = "unavailable"; let checksum = "unavailable";
+    const startedAt = new Date().toISOString();
+    const runId = randomUUID();
+    let sourceVersion = "unavailable";
+    let sourceUri = "unavailable";
+    let checksum = "unavailable";
     try {
-      if (this.enabledSetCodes.length === 0) throw new Error("未配置 CATALOG_ENABLED_SET_CODES，拒绝导入全部 Scryfall Bulk Data");
-      const source = await this.client.download(this.enabledSetCodes); sourceVersion = source.version; sourceUri = source.downloadUri; checksum = source.checksumSha256;
-      if (payload.expectedChecksumSha256 && payload.expectedChecksumSha256 !== checksum) throw new Error("Scryfall Bulk 文件 checksum 不匹配");
-      const cards = source.cards.filter((raw) => { const card = requireCard(raw); return this.enabledSetCodes.includes(card.set.toUpperCase()); }).map(requireCard);
+      if (this.enabledSetCodes.length === 0)
+        throw new Error("未配置 CATALOG_ENABLED_SET_CODES，拒绝导入全部 Scryfall Bulk Data");
+      const source = await this.client.download(this.enabledSetCodes);
+      sourceVersion = source.version;
+      sourceUri = source.downloadUri;
+      checksum = source.checksumSha256;
+      if (payload.expectedChecksumSha256 && payload.expectedChecksumSha256 !== checksum)
+        throw new Error("Scryfall Bulk 文件 checksum 不匹配");
+      const cards = source.cards
+        .filter((raw) => {
+          const card = requireCard(raw);
+          return this.enabledSetCodes.includes(card.set.toUpperCase());
+        })
+        .map(requireCard);
       if (cards.length === 0) throw new Error("启用系列在 Scryfall Bulk Data 中没有匹配印刷");
-      const seen = new Set<string>(); for (const card of cards) { scryfallPrintingId(card.id); if (seen.has(card.id)) throw new Error(`Scryfall Bulk Data 含重复印刷：${card.id}`); seen.add(card.id); }
-      const diff = withinTransaction(this.database, () => this.replaceCatalog(runId, sourceVersion, sourceUri, checksum, cards, startedAt));
-      this.database.prepare("UPDATE catalog_sync_runs SET status = 'succeeded', imported_printings = ?, imported_skus = ?, cached_images = 0, diff_json = ?, completed_at = ? WHERE id = ?").run(diff.printings, diff.skus, JSON.stringify(diff), new Date().toISOString(), runId);
-      this.database.prepare("INSERT INTO catalog_sync_state (singleton, latest_successful_run_id, updated_at) VALUES (1, ?, ?) ON CONFLICT(singleton) DO UPDATE SET latest_successful_run_id = excluded.latest_successful_run_id, updated_at = excluded.updated_at").run(runId, new Date().toISOString());
+      const seen = new Set<string>();
+      for (const card of cards) {
+        scryfallPrintingId(card.id);
+        if (seen.has(card.id)) throw new Error(`Scryfall Bulk Data 含重复印刷：${card.id}`);
+        seen.add(card.id);
+      }
+      const diff = withinTransaction(this.database, () =>
+        this.replaceCatalog(runId, sourceVersion, sourceUri, checksum, cards, startedAt)
+      );
+      this.database
+        .prepare(
+          "UPDATE catalog_sync_runs SET status = 'succeeded', imported_printings = ?, imported_skus = ?, cached_images = 0, diff_json = ?, completed_at = ? WHERE id = ?"
+        )
+        .run(diff.printings, diff.skus, JSON.stringify(diff), new Date().toISOString(), runId);
+      this.database
+        .prepare(
+          "INSERT INTO catalog_sync_state (singleton, latest_successful_run_id, updated_at) VALUES (1, ?, ?) ON CONFLICT(singleton) DO UPDATE SET latest_successful_run_id = excluded.latest_successful_run_id, updated_at = excluded.updated_at"
+        )
+        .run(runId, new Date().toISOString());
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.database.prepare("INSERT INTO catalog_sync_runs (id, source, source_version, source_uri, checksum_sha256, enabled_sets_json, status, diff_json, failure_reason, started_at, completed_at) VALUES (?, 'scryfall-bulk', ?, ?, ?, ?, 'failed', '{}', ?, ?, ?)").run(runId, sourceVersion, sourceUri, checksum, JSON.stringify(this.enabledSetCodes), message.slice(0, 1000), startedAt, new Date().toISOString());
+      this.database
+        .prepare(
+          "INSERT INTO catalog_sync_runs (id, source, source_version, source_uri, checksum_sha256, enabled_sets_json, status, diff_json, failure_reason, started_at, completed_at) VALUES (?, 'scryfall-bulk', ?, ?, ?, ?, 'failed', '{}', ?, ?, ?)"
+        )
+        .run(
+          runId,
+          sourceVersion,
+          sourceUri,
+          checksum,
+          JSON.stringify(this.enabledSetCodes),
+          message.slice(0, 1000),
+          startedAt,
+          new Date().toISOString()
+        );
       throw error;
     }
   }
 
-  private replaceCatalog(runId: string, version: string, uri: string, checksum: string, cards: ScryfallBulkCard[], startedAt: string): { printings: number; skus: number; added: number; removed: number } {
-    const before = (this.database.prepare("SELECT COUNT(*) AS count FROM card_printings WHERE source = 'scryfall'").get() as { count: number }).count;
-    this.database.prepare("INSERT INTO catalog_sync_runs (id, source, source_version, source_uri, checksum_sha256, enabled_sets_json, status, diff_json, started_at) VALUES (?, 'scryfall-bulk', ?, ?, ?, ?, 'running', '{}', ?)").run(runId, version, uri, checksum, JSON.stringify(this.enabledSetCodes), startedAt);
-    this.database.prepare("DELETE FROM card_image_cache WHERE printing_id IN (SELECT id FROM card_printings WHERE source = 'scryfall')").run();
-    this.database.prepare("DELETE FROM card_skus WHERE source = 'scryfall'").run(); this.database.prepare("DELETE FROM card_printings WHERE source = 'scryfall'").run(); this.database.prepare("DELETE FROM card_sets WHERE source = 'scryfall'").run();
-    const insertSet = this.database.prepare("INSERT INTO card_sets (id, code, name, released_at, source, source_reference, created_at) VALUES (?, ?, ?, ?, 'scryfall', ?, ?)");
-    const insertPrinting = this.database.prepare("INSERT INTO card_printings (id, set_id, name, collector_number, scryfall_id, oracle_id, oracle_text, rarity, legalities_json, artist, color_identity_json, type_line, keywords_json, mana_value, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scryfall', ?, 0, ?, ?)");
-    const insertSku = this.database.prepare("INSERT INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, ?, 0, 'scryfall', ?, 0, ?, ?)");
-    const insertImage = this.database.prepare("INSERT INTO card_image_cache (id, printing_id, source_url, cache_path, status, checksum, cached_at, failure_reason, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    const sets = new Map<string, string>(); let skus = 0;
+  private replaceCatalog(
+    runId: string,
+    version: string,
+    uri: string,
+    checksum: string,
+    cards: ScryfallBulkCard[],
+    startedAt: string
+  ): { printings: number; skus: number; added: number; removed: number } {
+    const priorPrintingIds = new Set(
+      (
+        this.database
+          .prepare("SELECT id FROM card_printings WHERE source = 'scryfall'")
+          .all() as Array<{ id: string }>
+      ).map((printing) => printing.id)
+    );
+    const incomingPrintingIds = new Set(cards.map((card) => card.id));
+    const added = cards.reduce((count, card) => count + (priorPrintingIds.has(card.id) ? 0 : 1), 0);
+    const removed = [...priorPrintingIds].reduce(
+      (count, printingId) => count + (incomingPrintingIds.has(printingId) ? 0 : 1),
+      0
+    );
+    this.database
+      .prepare(
+        "INSERT INTO catalog_sync_runs (id, source, source_version, source_uri, checksum_sha256, enabled_sets_json, status, diff_json, started_at) VALUES (?, 'scryfall-bulk', ?, ?, ?, ?, 'running', '{}', ?)"
+      )
+      .run(runId, version, uri, checksum, JSON.stringify(this.enabledSetCodes), startedAt);
+    const findSet = this.database.prepare("SELECT id, source FROM card_sets WHERE code = ?");
+    const insertSet = this.database.prepare(
+      "INSERT INTO card_sets (id, code, name, released_at, source, source_reference, created_at) VALUES (?, ?, ?, ?, 'scryfall', ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, released_at = excluded.released_at, source_reference = excluded.source_reference"
+    );
+    const insertPrinting = this.database.prepare(
+      "INSERT INTO card_printings (id, set_id, name, collector_number, scryfall_id, oracle_id, oracle_text, rarity, legalities_json, artist, color_identity_json, type_line, keywords_json, mana_value, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scryfall', ?, 0, ?, ?) ON CONFLICT(id) DO UPDATE SET set_id = excluded.set_id, name = excluded.name, collector_number = excluded.collector_number, scryfall_id = excluded.scryfall_id, oracle_id = excluded.oracle_id, oracle_text = excluded.oracle_text, rarity = excluded.rarity, legalities_json = excluded.legalities_json, artist = excluded.artist, color_identity_json = excluded.color_identity_json, type_line = excluded.type_line, keywords_json = excluded.keywords_json, mana_value = excluded.mana_value, source_reference = excluded.source_reference, updated_at = excluded.updated_at"
+    );
+    const insertSku = this.database.prepare(
+      "INSERT INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, ?, 0, 'scryfall', ?, 0, ?, ?) ON CONFLICT(printing_id, finish) DO UPDATE SET tradable = 0, source_reference = excluded.source_reference, updated_at = excluded.updated_at"
+    );
+    const insertImage = this.database.prepare(
+      "INSERT INTO card_image_cache (id, printing_id, source_url, cache_path, status, checksum, cached_at, failure_reason, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(printing_id) DO UPDATE SET source_url = excluded.source_url, cache_path = NULL, status = 'missing', checksum = NULL, cached_at = NULL, failure_reason = NULL, updated_at = excluded.updated_at"
+    );
+    const sets = new Map<string, string>();
+    let skus = 0;
     for (const card of cards) {
-      const setCode = card.set.toUpperCase(); let setId = sets.get(setCode); if (!setId) { setId = randomUUID(); sets.set(setCode, setId); insertSet.run(setId, setCode, card.set_name, card.released_at ?? null, `${version}:${setCode}`, startedAt); }
-      const printingId = scryfallPrintingId(card.id); const manaValue = Number.isSafeInteger(card.cmc) && card.cmc! >= 0 ? card.cmc! : 0;
-      insertPrinting.run(printingId, setId, card.name, card.collector_number, card.id, card.oracle_id ?? card.id, card.oracle_text ?? null, card.rarity ?? "unknown", JSON.stringify(card.legalities ?? {}), card.artist ?? null, JSON.stringify(card.color_identity ?? []), card.type_line ?? "", JSON.stringify(card.keywords ?? []), manaValue, card.id, startedAt, startedAt);
-      const finishes = (card.finishes ?? []).filter((finish): finish is "nonfoil" | "foil" | "etched" => finish === "nonfoil" || finish === "foil" || finish === "etched");
+      const setCode = card.set.toUpperCase();
+      let setId = sets.get(setCode);
+      if (!setId) {
+        const existing = findSet.get(setCode) as { id: string; source: string } | undefined;
+        if (existing && existing.source !== "scryfall")
+          throw new Error(`系列代码已被非 Scryfall 目录占用：${setCode}`);
+        setId = existing?.id ?? randomUUID();
+        sets.set(setCode, setId);
+        insertSet.run(
+          setId,
+          setCode,
+          card.set_name,
+          card.released_at ?? null,
+          `${version}:${setCode}`,
+          startedAt
+        );
+      }
+      const printingId = scryfallPrintingId(card.id);
+      const manaValue = Number.isSafeInteger(card.cmc) && card.cmc! >= 0 ? card.cmc! : 0;
+      insertPrinting.run(
+        printingId,
+        setId,
+        card.name,
+        card.collector_number,
+        card.id,
+        card.oracle_id ?? card.id,
+        card.oracle_text ?? null,
+        card.rarity ?? "unknown",
+        JSON.stringify(card.legalities ?? {}),
+        card.artist ?? null,
+        JSON.stringify(card.color_identity ?? []),
+        card.type_line ?? "",
+        JSON.stringify(card.keywords ?? []),
+        manaValue,
+        card.id,
+        startedAt,
+        startedAt
+      );
+      const finishes = (card.finishes ?? []).filter(
+        (finish): finish is "nonfoil" | "foil" | "etched" =>
+          finish === "nonfoil" || finish === "foil" || finish === "etched"
+      );
       if (finishes.length === 0) throw new Error(`Scryfall 卡牌 Schema 缺少可支持工艺：${card.id}`);
-      for (const finish of finishes) { insertSku.run(randomUUID(), printingId, finish, card.id, startedAt, startedAt); skus += 1; }
-      insertImage.run(randomUUID(), printingId, normalImageUrl(card), null, "missing", null, null, null, startedAt);
+      for (const finish of finishes) {
+        insertSku.run(randomUUID(), printingId, finish, card.id, startedAt, startedAt);
+        skus += 1;
+      }
+      insertImage.run(
+        randomUUID(),
+        printingId,
+        normalImageUrl(card),
+        null,
+        "missing",
+        null,
+        null,
+        null,
+        startedAt
+      );
     }
     this.basePacks.refreshAfterCatalogSync(version, runId, startedAt);
-    return { printings: cards.length, skus, added: cards.length, removed: before };
+    return { printings: cards.length, skus, added, removed };
   }
 }

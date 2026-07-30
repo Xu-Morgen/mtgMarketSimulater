@@ -57,8 +57,8 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 
 ## Scryfall 目录同步（I09B）
 
-- `platform/external/scryfall` 是唯一可访问 Scryfall Bulk Data 与卡图 URL 的适配器。适配器使用仅服务端可配的自定义 User-Agent，兼容 gzip Bulk 文件，并以对象级扫描避免将完整 Bulk 文件转为 JS 字符串；浏览器目录路由只读取 SQLite，任务下载完成后校验 JSON、启用系列、印刷 ID、工艺与可选 checksum，绝不把 Provider 原文转发给客户端。
-- `modules/catalog/application/CatalogSyncService` 先在内存中验证 Bulk 文件，再在一个 SQLite 短事务内替换 `scryfall` 来源的目录行；任何下载、解析、Schema、重复印刷或事务错误都只新增失败运行记录，不删除最近成功目录或其状态指针。`CatalogImageCacheService` 是独立的补图用例，只读取既有目录的图片地址并更新对应缓存元数据，不重导入目录。
+- `platform/external/scryfall` 是唯一可访问 Scryfall Bulk Data 与卡图 URL 的适配器。适配器使用仅服务端可配的自定义 User-Agent，兼容旧版 `download_uri` 数组文件与新版 `jsonl_download_uri` gzip JSONL 文件，并兼容直接 `default_cards` 描述器或 `/bulk-data` 列表中的该条目；它以对象/行级扫描避免将完整 Bulk 文件转为 JS 字符串。浏览器目录路由只读取 SQLite，任务下载完成后校验 JSON、启用系列、印刷 ID、工艺与可选 checksum，绝不把 Provider 原文转发给客户端。
+- `modules/catalog/application/CatalogSyncService` 先在内存中验证 Bulk 文件，再在一个 SQLite 短事务内按 Scryfall 印刷 ID 和 `(printing_id, finish)` 更新目录；SKU ID 及其被库存、价格、订单和历史记录引用的实体绝不因重同步删除。来源快照不再包含的行保留为历史目录记录，差异中的 `removed` 仅表示该次来源快照不再包含。任何下载、解析、Schema、重复印刷或事务错误都只新增失败运行记录，不移动最近成功目录状态指针。`CatalogImageCacheService` 是独立的补图用例，只读取既有目录的图片地址并更新对应缓存元数据，不重导入目录。
 - 迁移 `0013_base_bro_sos_packs.sql` 仅创建停用的 `BRO-BASE`、`SOS-BASE` 商品和可公示 bootstrap 卡位；`CatalogSyncService` 在目录替换短事务内调用 packs application 的 `BasePackCatalogService`，从当前 `BRO`/`SOS` 非闪 Scryfall SKU 生成新规则版本、退休旧快照并启用完整卡池。候选 SKU 不写死在迁移中，目录同步失败也不会改变现有基础包规则。
 - `catalog_sync_runs` 只追加来源版本、SHA-256、启用系列、导入差异与失败摘要；`catalog_sync_state` 只指向最近成功运行。`catalog.sync` 由 task runner 注册到 catalog application，而不是在 jobs 模块实现业务写入。
 - 图片仅能由 `catalog.image-cache` 任务写入 `CATALOG_DATA_DIR/images`，文件名由服务端打印 UUID 和受限扩展名产生；`/v1/catalog/images/:imageName` 认证后只提供该目录内的本地文件，拒绝路径穿越和外部图片 URL。
