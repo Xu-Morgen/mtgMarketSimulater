@@ -29,6 +29,36 @@ export class DeckService {
   get(userId: string, deckId: string): DeckDto | null { const row = this.database.prepare("SELECT * FROM decks WHERE id = ? AND user_id = ?").get(deckId, userId) as DeckRow | undefined; return row ? this.dto(row) : null; }
   validate(userId: string, cards: DraftCardInput[], banlistVersion: string | undefined = COMMANDER_BANLIST_VERSION): DeckLegalityDto { return this.legality(userId, cards, banlistVersion, new Date().toISOString()); }
 
+  /**
+   * 报名边界必须重跑当前禁牌表和可用库存校验，不能信任保存草稿时的 legality_json。
+   * 这仍是只读操作，真正锁卡由 Tournament application 的同一经济短事务完成。
+   */
+  revalidateForTournament(userId: string, deckId: string, checkedAt: string): DeckDto | null {
+    const row = this.database.prepare("SELECT * FROM decks WHERE id = ? AND user_id = ?").get(deckId, userId) as DeckRow | undefined;
+    if (!row) return null;
+    const deck = this.dto(row);
+    const entries: DraftCardInput[] = deck.cards.map((card) => card.skuId
+      ? { zone: card.zone as SkuDeckCardInput["zone"], skuId: card.skuId, quantity: card.quantity }
+      : { zone: "virtual_basic" as const, virtualBasic: card.virtualBasic!, quantity: card.quantity });
+    return { ...deck, legality: this.legality(userId, entries, row.banlist_version, checkedAt) };
+  }
+
+  /** 个人 NPC 报名的不可变卡表快照。 */
+  saveTournamentDeckSnapshotInTransaction(input: { registrationId: string; deck: DeckDto; now: string }): void {
+    const snapshot = this.tournamentDeckSnapshot(input.deck);
+    this.database.prepare(
+      "INSERT INTO tournament_deck_card_snapshots (id, registration_id, deck_id, deck_rule_version, banlist_version, cards_json, cards_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(randomUUID(), input.registrationId, input.deck.id, input.deck.ruleVersion, input.deck.banlistVersion, snapshot.cardsJson, snapshot.cardsSha256, input.now);
+  }
+
+  /** 玩家游戏内赛事使用独立外键，绝不能把报名快照写入个人 NPC 赛事表。 */
+  savePlayerTournamentDeckSnapshotInTransaction(input: { registrationId: string; deck: DeckDto; now: string }): void {
+    const snapshot = this.tournamentDeckSnapshot(input.deck);
+    this.database.prepare(
+      "INSERT INTO player_tournament_deck_card_snapshots (id, registration_id, deck_id, deck_rule_version, banlist_version, cards_json, cards_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(randomUUID(), input.registrationId, input.deck.id, input.deck.ruleVersion, input.deck.banlistVersion, snapshot.cardsJson, snapshot.cardsSha256, input.now);
+  }
+
   create(input: { userId: string; name: string; cards: DraftCardInput[]; banlistVersion?: string | undefined; idempotencyKey: string; requestId: string }): DeckCommandResult {
     return this.write({ ...input, kind: "create" });
   }
@@ -39,13 +69,21 @@ export class DeckService {
   /** I25B 报名在收费/锁卡前调用：此处只追加快照和服务器专用密文，不触及经济资产。 */
   saveLeylineSnapshot(input: { userId: string; deckId: string; registrationId: string; evaluation: LeylineEvaluation; encryptionKey: string; now?: string }): DeckPowerSnapshotDto {
     const now = input.now ?? new Date().toISOString();
-    return withinTransaction(this.database, () => {
+    return withinTransaction(this.database, () => this.saveLeylineSnapshotInTransaction({ ...input, now }));
+  }
+  /** I25B 报名经济短事务的协作入口；调用者必须已持有同一 SQLite 事务。 */
+  saveLeylineSnapshotInTransaction(input: { userId: string; deckId: string; registrationId: string; evaluation: LeylineEvaluation; encryptionKey: string; now: string }): DeckPowerSnapshotDto {
       const deck = this.get(input.userId, input.deckId); if (!deck) throw new Error("卡组不存在"); if (!deck.legality.valid) throw new Error("非法卡组不可生成报名评分快照");
       const snapshotId = randomUUID(); const encrypted = encryptJsonPayload(input.evaluation.rawResponse, input.encryptionKey);
-      this.database.prepare("INSERT INTO deck_power_snapshots (id, deck_id, registration_id, source, source_version, provider_algorithm_version, score, input_summary_sha256, computed_at, availability, degradation_reason, response_sha256, details_json, created_at) VALUES (?, ?, ?, 'leyline', ?, 'undeclared', ?, ?, ?, 'available', NULL, ?, ?, ?)").run(snapshotId, input.deckId, input.registrationId, LEYLINE_ADAPTER_VERSION, input.evaluation.score, input.evaluation.inputSummarySha256, now, input.evaluation.responseSha256, JSON.stringify(input.evaluation.details), now);
-      this.database.prepare("INSERT INTO deck_leyline_source_records (id, power_snapshot_id, adapter_version, request_decklist_sha256, response_sha256, encrypted_response, encryption_nonce, encryption_tag, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(randomUUID(), snapshotId, LEYLINE_ADAPTER_VERSION, input.evaluation.inputSummarySha256, input.evaluation.responseSha256, encrypted.ciphertext, encrypted.nonce, encrypted.tag, now);
-      return { source: "leyline", sourceVersion: LEYLINE_ADAPTER_VERSION, providerAlgorithmVersion: "undeclared", score: input.evaluation.score, inputSummarySha256: input.evaluation.inputSummarySha256, computedAt: now, availability: "available", degradationReason: null, responseSha256: input.evaluation.responseSha256 };
-    });
+      this.database.prepare("INSERT INTO deck_power_snapshots (id, deck_id, registration_id, source, source_version, provider_algorithm_version, score, input_summary_sha256, computed_at, availability, degradation_reason, response_sha256, details_json, created_at) VALUES (?, ?, ?, 'leyline', ?, 'undeclared', ?, ?, ?, 'available', NULL, ?, ?, ?)").run(snapshotId, input.deckId, input.registrationId, LEYLINE_ADAPTER_VERSION, input.evaluation.score, input.evaluation.inputSummarySha256, input.now, input.evaluation.responseSha256, JSON.stringify(input.evaluation.details), input.now);
+      this.database.prepare("INSERT INTO deck_leyline_source_records (id, power_snapshot_id, adapter_version, request_decklist_sha256, response_sha256, encrypted_response, encryption_nonce, encryption_tag, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(randomUUID(), snapshotId, LEYLINE_ADAPTER_VERSION, input.evaluation.inputSummarySha256, input.evaluation.responseSha256, encrypted.ciphertext, encrypted.nonce, encrypted.tag, input.now);
+      return { source: "leyline", sourceVersion: LEYLINE_ADAPTER_VERSION, providerAlgorithmVersion: "undeclared", score: input.evaluation.score, inputSummarySha256: input.evaluation.inputSummarySha256, computedAt: input.now, availability: "available", degradationReason: null, responseSha256: input.evaluation.responseSha256 };
+  }
+
+  private tournamentDeckSnapshot(deck: DeckDto): { cardsJson: string; cardsSha256: string } {
+    const cards = deck.cards.map((card) => ({ zone: card.zone, skuId: card.skuId, virtualBasic: card.virtualBasic, quantity: card.quantity, name: card.name, cardIdentity: card.cardIdentity }));
+    const cardsJson = canonicalizeRequest(cards);
+    return { cardsJson, cardsSha256: createHash("sha256").update(cardsJson).digest("hex") };
   }
 
   private write(input: ({ userId: string; name: string; cards: DraftCardInput[]; banlistVersion?: string | undefined; idempotencyKey: string; requestId: string; kind: "create" } | { userId: string; deckId: string; name: string; cards: DraftCardInput[]; banlistVersion?: string | undefined; idempotencyKey: string; requestId: string; kind: "update" })): DeckCommandResult {

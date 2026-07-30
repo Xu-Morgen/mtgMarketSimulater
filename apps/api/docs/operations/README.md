@@ -112,3 +112,11 @@
 - 回填使用独立的服务端配置 `MTGJSON_ALLPRICES_ENDPOINT`（默认 `AllPrices.json.gz`）和 `prices.backfill` 任务。管理员以新 `Idempotency-Key` 调用 `POST /v1/admin/prices/backfill`，再通过 `GET /v1/admin/prices/backfill` 或 jobs API 观察运行。可选的 `expectedPricesChecksumSha256` 仅用于已获准的版本固定回填；`allowChecksumMismatch` 仅在 Provider checksum 不匹配时作为最后手段。
 - 回填监督运行（`price_sync_runs.run_kind='backfill'` 且 `mapping_uri='supervisor'`）记录来源版本、SHA-256、日期范围、插入/跳过统计与审计；每个历史日期独立子 run（`mapping_uri='sub-run'`）复用 `UNIQUE(sync_run_id, sku_id)` 约束。它只补齐本地缺失的 `(sku_id, 自然日)`，绝不覆盖每日同步写入、移动 `price_sync_state`/`price_sync_schedule_state` 指针，或为历史日投递 `market.reprice`。
 - checksum、解析、映射或事务失败时整笔回滚，只追加一条 `failed` 监督运行并保留原有快照与每日同步状态；待修复后以新幂等键重试。每次失败在结构化日志输出 `price_backfill.validation_failed`（校验阶段）或 `price_backfill.failed`（写入阶段），包含批次 ID、任务 ID/尝试、来源版本、校验文件与预期/实际 SHA-256。禁止手工写入或覆盖 `price_snapshot_entries` 伪造历史。
+
+## I25B 比赛排障
+
+- 日切任务在打开工作资金资格后，为已有用户按 `(template_id, natural_date, owner_user_id)` 创建隔离赛事；重复领取或停机补跑由唯一约束收敛。核对 `daily_rollover_runs`、`tournaments.natural_date/timezone/seed_hash` 和模板版本；禁止手工新增、重置、改 seed 或改状态。
+- NPC 报名以请求 ID、幂等键或 `tournament_registrations.id` 关联 `tournament_deck_card_snapshots`、`deck_power_snapshots`/加密 Leyline 源记录、`inventory_holds(reason=tournament)`、`ledger_entries(reason=tournament_entry)`、审计和 `tournament-settle:registration:{registrationId}`。Provider/禁牌/库存失败时这些报名与经济记录都不应出现。
+- 结算从报名 ID 关联 `tournament_results`、`tournament_reward_draws`（seed、候选池、版本、命中项）、`tournament_rewards`/`tournament_pack_grants`、比赛 hold、`ledger_entries(reason=tournament_reward)`、`fact_events(event_type=tournament.settled)` 与审计。重领任务只读取既有结果；发现漂移时停止写流量、保留数据库/WAL/请求证据，绝不直接更新奖励、报名、库存、账本或结果。
+- 补充包奖励凭证由 `tournament_pack_grants` 的 `available → claimed` 条件更新消费；按 grant ID 关联 `pack_openings`、`pack_rule_replays`、入库流水、`pack.opened`、outbox 和两类审计。下架不取消已发凭证，但失效候选 SKU 会使领取完整回滚，待修复受控目录后用新幂等键重试。
+- 玩家游戏内赛事检查 `jobs.unique_key=tournament-settle:player:{tournamentId}`、`player_tournament_registration_holds`、`player_tournament_deck_card_snapshots`、`player_tournament_results`、`player_tournament_reward_draws`/`player_tournament_rewards` 与每个报名的 `tournament.settled`；现实桌检查 `player_tournament_rounds`（含 `stage=playoff`）、全桌 `player_tournament_round_confirmations` 和 `tournament_disputes`。玩家补充包凭证位于 `player_tournament_pack_grants`，按与 NPC 凭证相同的 `available → claimed` 条件更新和开包回滚规则处理。种子/完整 replay 仅可由 admin 读取；普通玩家查询不到即按权限边界处理，不得通过数据库导出补发。

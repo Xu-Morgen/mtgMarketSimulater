@@ -25,6 +25,18 @@ export function enqueueOrderExpireJob(
   new SqliteJobRepository(database).enqueue({ type: "order.expire", payload, uniqueKey, runAfter, maxAttempts: 5 }, now);
 }
 
+/** I25B：每个报名唯一投递一次结算；任务至少执行一次，报名状态和结果唯一约束收敛业务结果。 */
+export function enqueueTournamentSettleJob(
+  database: ConstructorParameters<typeof SqliteJobRepository>[0],
+  target: { registrationId: string } | { playerTournamentId: string },
+  runAfter: string
+): void {
+  const uniqueKey = "registrationId" in target
+    ? `tournament-settle:registration:${target.registrationId}`
+    : `tournament-settle:player:${target.playerTournamentId}`;
+  new SqliteJobRepository(database).enqueue({ type: "tournament.settle", payload: target, uniqueKey, runAfter, maxAttempts: 5 }, runAfter);
+}
+
 /**
  * I17B 每日价格同步调度。以 UTC 自然日为唯一键：`last_scheduled_date` 落后于今日时
  * 投递一次 `prices.sync`（uniqueKey=`prices.sync:daily:<date>`）。停机多日只补投一次

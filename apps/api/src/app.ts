@@ -20,6 +20,7 @@ import { registerMarketRoutes } from "./modules/market/api/market-routes.js";
 import { registerNpcTradeRoutes } from "./modules/orders/api/npc-trade-routes.js";
 import { registerOrderRoutes } from "./modules/orders/api/order-routes.js";
 import { registerDeckRoutes } from "./modules/decks/api/deck-routes.js";
+import { registerTournamentRoutes } from "./modules/tournaments/api/tournament-routes.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -110,6 +111,7 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
   await registerNpcTradeRoutes(app, database);
   await registerOrderRoutes(app, database);
   await registerDeckRoutes(app, database);
+  await registerTournamentRoutes(app, database, config);
 
   app.get("/health", async (request) => success(request.requestId, { status: "ok", database: databaseHealth(database) }));
 

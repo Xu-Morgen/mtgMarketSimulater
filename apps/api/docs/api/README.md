@@ -156,3 +156,12 @@
 - `POST /v1/packs/{packId}/open` 要求有效 Bearer 会话、格式正确的 `Idempotency-Key` 和 `{ ruleVersion }`。规则版本变化返回 `409 VERSION_STALE`；下架包、未建档、余额不足或包含失效 SKU 的规则包不会扣款，分别使用 `RESOURCE_CONFLICT`、`INSUFFICIENT_BALANCE` 或 `RULE_VIOLATION`。同键同体成功重放返回已持久化的开包结果（HTTP `200`），不同请求体返回 `409 IDEMPOTENCY_CONFLICT`。
 - 成功结算（`201`）在一个 SQLite 短事务中追加 `pack_rule_replays`、`pack_openings`、`pack_purchase` debit 账本、`pack_opened` 库存流水、`pack.opened` 事实事件/outbox 及审计记录；任一失败会回滚全部写入。`GET /v1/pack-openings?cursor=&limit=` 仅分页返回当前玩家的结果。
 - `PackOpeningDto` 仅包含 SKU、分摊成本和已结算时间；不返回候选池或随机种子。I17B 前每项和盈亏摘要均以 `priceStatus: "unavailable_until_i17"`、参考价/游戏内价/盈亏为 `null` 明确表示价格尚不可用，不提前生成报价。
+
+## I25B 比赛、报名与确定性结算协议
+
+- `GET /v1/tournaments` 只返回当前认证玩家、按 `APP_TIMEZONE` 自然日隔离的个人 NPC 赛事。受控模板冻结座位、报名条件、费用、难度、每日次数、开赛方式、开放/截止时间、规则版本和奖励池；`daily.rollover` 与延迟访问都以 `(template_id,natural_date,owner_user_id)` 唯一键补建，绝不重置已有赛事。`GET /v1/tournaments/{tournamentId}/registration`、`/result` 只允许读取自己的快照和 NPC 公开重放材料。
+- `POST /v1/tournaments/{tournamentId}/register` 接收 `{ deckId }` 与格式正确的 `Idempotency-Key`。先重新验证已保存 Commander 卡表、禁牌版本、Companion 和可用库存，再调用 Leyline；只有 Provider 成功后才在一个短事务追加加密源记录、评分/完整卡表快照、报名、所有非虚拟基本地（含 Companion）hold、报名费、审计和唯一 `tournament.settle` 任务。评分失败、卡组变化或库存冲突不会收费、锁卡或创建报名。
+- 单场、瑞士与预报名赛事由 `tournament/v1` 只消费报名评分快照和持久化 seed 结算。瑞士固定 4/1/0/1/0、公布人数轮次和晋级线；NPC 填满空座、不会领取奖励，只有冠军奖励位同分才进行 seed 驱动的加赛。结算在一个短事务释放 hold（不 capture 卡牌）、写结果/奖励/随机池候选与命中项、`tournament.settled` 和审计；重复领取任务或重放报名不会再次收费、解锁或奖励。
+- 奖励池可原子授予 `GAME_CREDIT`、本地 SKU 或当时在售补充包。NPC 奖励使用 `GET /v1/tournament-pack-grants` 与 `POST /v1/tournament-pack-grants/{grantId}/claim`；玩家赛事奖励使用对应的 `/v1/player-tournament-pack-grants` 路径。两类领取均以幂等键一次性消费凭证，并把入库、开包事实、审计与凭证状态放在同一事务。
+- 玩家赛事：`POST /v1/player-tournaments` 创建受控 Commander 游戏内或现实桌赛事，并绑定服务器发布的奖励配置（编辑能力留给 I30B）；`GET /v1/player-tournaments/{id}`、`/registrations`、`/rounds`、`/result` 只对创建者或报名者可读。游戏内报名提交 `{ deckId }` 并按上述服务端快照/hold 规则执行，`POST /start` 投递唯一结算任务；现实桌报名只接受 `{ deckName }`，不保存或锁定实体卡组。现实桌配对、结果提交、全桌确认、退出、争议和最终结算分别走 `/rounds`、`/result`、`/confirm`、`/withdraw`、`/disputes`、`/settle`，所有写请求都需幂等键。
+- 现实桌的服务端规则为目标每桌 4–8 人（人数不足时不拒绝赛事）、胜 4、平局全桌 1、弃权/退出 0；未获同桌全体确认前不记分。只有跨越不同奖励配置的同分名次会生成 `stage=playoff` 的额外同桌，且仍须全桌确认至分出名次。争议只可由 `POST /v1/admin/tournament-disputes/{disputeId}/resolve`（admin、理由、赋分、幂等键）结案。非 NPC seed、完整配对和重放不向玩家返回，仅 `GET /v1/admin/player-tournaments/{tournamentId}/replay` 可读。

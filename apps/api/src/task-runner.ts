@@ -11,6 +11,7 @@ import type { PriceBackfillLogger } from "./modules/pricing/application/price-ba
 import { MarketService } from "./modules/market/application/market-service.js";
 import { OrderService } from "./modules/orders/application/order-service.js";
 import { DailyRolloverService, type DailyRolloverPayload } from "./modules/users/application/daily-rollover-service.js";
+import { createTournamentService } from "./modules/tournaments/api/tournament-routes.js";
 
 export interface TaskRunner {
   stop(): Promise<void>;
@@ -64,6 +65,22 @@ export function createTaskRegistry(config: ApiConfig, database: Database.Databas
   const orders = new OrderService(database);
   registry.register("order.expire", async (payload) => { orders.expireByPayload(payload); });
   const dailyRollover = new DailyRolloverService(database);
-  registry.register("daily.rollover", async (payload) => { dailyRollover.rollover(payload as DailyRolloverPayload); });
+  const tournaments = createTournamentService(database, config);
+  registry.register("daily.rollover", async (payload) => {
+    const day = dailyRollover.rollover(payload as DailyRolloverPayload);
+    tournaments.refreshDaily(day.natural_date, day.timezone);
+  });
+  registry.register("tournament.settle", async (payload) => {
+    const parsed = payload as { registrationId?: string; playerTournamentId?: string };
+    if (parsed.registrationId) {
+      tournaments.settleRegistration(parsed.registrationId);
+      return;
+    }
+    if (parsed.playerTournamentId) {
+      tournaments.settleScheduledGameTournament(parsed.playerTournamentId);
+      return;
+    }
+    throw new Error("赛事结算任务缺少报名或玩家赛事 ID");
+  });
   return registry;
 }

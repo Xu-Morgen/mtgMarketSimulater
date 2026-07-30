@@ -68,10 +68,19 @@ export class InventoryService {
       )
     );
   }
+  /** 比赛/订单的外层经济短事务协作入口；不得在已有事务内再开启事务。 */
+  lockInLedgerTransaction(input: { userId: string; skuId: string; quantity: number; target: InventoryLockTarget; correlationId: string; now: string }) {
+    assertPositiveQuantity(input.quantity);
+    return this.inventory.lock(input.userId, input.skuId, input.quantity, input.target, input.correlationId, input.now);
+  }
   release(input: { userId: string; holdId: string; correlationId: string; now: string }) {
     return this.withLedgerTransaction((inventory) =>
       inventory.release(input.userId, input.holdId, input.correlationId, input.now)
     );
+  }
+  /** 赛事结算等外层已持有经济事务时释放库存；避免嵌套事务掩盖原子边界。 */
+  releaseInLedgerTransaction(input: { userId: string; holdId: string; correlationId: string; now: string }) {
+    return this.inventory.release(input.userId, input.holdId, input.correlationId, input.now);
   }
   capture(input: { userId: string; holdId: string; correlationId: string; now: string }) {
     return this.withLedgerTransaction((inventory) =>

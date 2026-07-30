@@ -195,6 +195,10 @@ export class UserService {
   spendAvailableFunds(userId: string, amount: number, now: string, correlationId: string) {
     return this.users.spendAvailableFunds(userId, amount, now, correlationId);
   }
+  /** 比赛报名费仅由 Tournament application 在同一经济事务内调用。 */
+  spendForTournamentEntry(userId: string, amount: number, now: string, correlationId: string) {
+    return this.users.spendAvailableFunds(userId, amount, now, correlationId, "tournament_entry");
+  }
   /** NPC 买入的命名补偿入口；账本仍只由 users 模块写入。 */
   spendForNpcBuy(userId: string, amount: number, now: string, correlationId: string) {
     return this.users.spendAvailableFunds(userId, amount, now, correlationId, "npc_buy");

@@ -776,6 +776,18 @@ export interface TournamentResult {
   settledAt?: string;
 }
 
+export type TournamentStatus = "open" | "settling" | "settled" | "cancelled";
+export type TournamentKind = "single" | "swiss" | "prereg";
+export interface TournamentDto { id: string; templateId: string; naturalDate: string; kind: TournamentKind; totalSeats: number; entryFee: Money; difficulty: number; entryCondition: "valid_commander_deck"; dailyRegistrationLimit: number; startMode: "on_registration" | "at_cutoff"; opensAt: string; cutoffAt: string | null; status: TournamentStatus; ruleVersion: string; registered: boolean; createdAt: string; settledAt: string | null; }
+export interface TournamentRegistrationDto { id: string; tournamentId: string; deckId: string; powerSnapshot: DeckPowerSnapshotDto; status: "registered" | "settled" | "eliminated"; registeredAt: string; }
+export interface TournamentRewardDetailDto { kind: "GAME_CREDIT" | "pack" | "sku" | "none"; amount: number; packId: string | null; skuId: string | null; }
+export interface TournamentSettlementDto { tournamentId: string; registrationId: string; rank: number; wins: number; draws: number; losses: number; byes: number; forfeits: number; points: number; reward: Money; rewardDetail: TournamentRewardDetailDto; ruleVersion: string; settledAt: string; replay: { seed: string; playerScore: number; npcScores: Array<{ id: string; score: number }>; swissCut: number; standings: Array<{ id: string; points: number; opponentPoints: number }>; rounds: Array<{ round: number; opponentName: string; outcome: "win" | "draw" | "loss" | "bye" | "forfeit"; stage: "single" | "swiss" | "elimination" | "playoff" }> }; }
+
+export interface PlayerTournamentDto { id: string; creatorUserId: string; mode: "game" | "tabletop"; name: string; status: "open" | "in_progress" | "settled" | "disputed" | "cancelled"; ruleVersion: string; createdAt: string; settledAt: string | null; }
+export interface PlayerTournamentRegistrationDto { id: string; tournamentId: string; deckName: string; mode: "game" | "tabletop"; status: "registered" | "withdrawn" | "eliminated"; points: number; registeredAt: string; }
+export interface PlayerTournamentRoundDto { id: string; tournamentId: string; roundNumber: number; tableNumber: number; stage: "normal" | "playoff"; status: "pending" | "submitted" | "confirmed" | "disputed"; registrationIds: string[]; submittedByUserId: string | null; confirmedAt: string | null; }
+export interface PlayerTournamentResultDto { tournamentId: string; registrationId: string; rank: number; points: number; opponentPoints: number; reward: Money; rewardDetail: TournamentRewardDetailDto; settledAt: string; }
+
 export interface NarrativePayload {
   headline: string;
   summary: string;

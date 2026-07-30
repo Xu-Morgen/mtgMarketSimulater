@@ -292,13 +292,75 @@ export class PackService {
     });
   }
 
+  /**
+   * 受控奖励的无扣费开包协作入口。调用方必须已在自己的经济短事务内验证并消费
+   * 不可重放的奖励凭证；本方法只执行 Pack 模块拥有的随机审计、入库、事实和审计。
+   */
+  openTournamentGrantInLedgerTransaction(input: {
+    userId: string;
+    packId: string;
+    grantId: string;
+    requestId: string;
+    now: string;
+  }): PackOpeningDto {
+    const pack = this.packs.find(input.packId);
+    if (!pack) throw new Error("奖励补充包不存在");
+    if (!this.packs.hasAllCandidateSkus(pack.definition)) throw new Error("奖励补充包配置已失效");
+    // 凭证在发奖时只允许选择在售包；后续下架不会取消既有奖励，仍以已发布规则开包。
+    const generated = this.generateAuditedResultInTransaction(pack.id, input.now, true);
+    if (typeof generated === "string") throw new Error("奖励补充包不可开封");
+    const openingId = randomUUID();
+    const received = summarizeReceived(generated.result, 0);
+    for (const card of received) {
+      for (const unitCostAmount of allocateUnitCosts(0, card.quantity)) {
+        const holding = this.inventory.acquireInLedgerTransaction({
+          userId: input.userId,
+          skuId: card.skuId,
+          quantityDelta: 1,
+          unitCostAmount,
+          reason: "tournament_reward",
+          correlationId: openingId,
+          now: input.now
+        });
+        if (holding === "insufficient") throw new Error("奖励开包入库失败");
+      }
+    }
+    const opening = toOpeningDto(openingId, pack.id, generated.result.ruleVersion, 0, received, input.now);
+    this.packs.createOpening({ id: openingId, userId: input.userId, packId: pack.id, replayId: generated.replayId, ruleVersion: generated.result.ruleVersion, spentAmount: 0, resultSummary: opening, now: input.now });
+    const eventId = randomUUID();
+    const event = {
+      id: eventId,
+      type: "pack.opened" as const,
+      version: 1 as const,
+      occurredAt: input.now,
+      correlationId: input.grantId,
+      payload: {
+        userId: input.userId,
+        packId: pack.id,
+        packRuleVersion: generated.result.ruleVersion,
+        spent: { amount: 0, currency: "GAME_CREDIT" as const },
+        received: received.map((card) => ({ skuId: card.skuId, quantity: card.quantity }))
+      }
+    };
+    this.database.prepare(
+      "INSERT INTO fact_events (id, event_type, aggregate_type, aggregate_id, version, payload_json, occurred_at) VALUES (?, 'pack.opened', 'pack_opening', ?, 1, ?, ?)"
+    ).run(eventId, openingId, JSON.stringify(event), input.now);
+    this.database.prepare(
+      "INSERT INTO outbox (id, event_id, destination, payload_json, status, created_at, dispatched_at) VALUES (?, ?, 'market.fact-event', ?, 'pending', ?, NULL)"
+    ).run(randomUUID(), eventId, JSON.stringify(event), input.now);
+    enqueueMarketRepriceJob(this.database, `fact-event:${eventId}`, input.now);
+    this.users.writeEconomicAudit(input.userId, "tournament_reward.pack_opened", "pack_opening", openingId, input.requestId, { packId: pack.id, grantId: input.grantId, received: event.payload.received }, input.now);
+    return opening;
+  }
+
   private generateAuditedResultInTransaction(
     packId: string,
-    now: string
+    now: string,
+    allowDisabled = false
   ): PackRuleReplayResult | "not-found" | "disabled" {
     const pack = this.packs.find(packId);
     if (!pack) return "not-found";
-    if (pack.enabled !== 1) return "disabled";
+    if (!allowDisabled && pack.enabled !== 1) return "disabled";
     const randomSeed = this.createSeed();
     if (!/^[a-f0-9]{64}$/i.test(randomSeed)) throw new Error("CSPRNG 返回了无效随机种子");
     const result = openPack({ ...pack.definition, randomSeed });
