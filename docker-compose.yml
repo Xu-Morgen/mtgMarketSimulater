@@ -1,0 +1,56 @@
+# MTG Market Simulator 单机部署编排。两个服务共享同一镜像，通过不同 command 启动：
+#   api  —— Fastify + SQLite，唯一经济结算入口，监听 3001（仅容器内网络）。
+#   web  —— Next.js 生产服务，监听 3000（对外），经 rewrites 反向代理 /api → api:3001。
+#
+# 部署步骤与密钥生成见 docs/deploy.md。敏感配置从 .env.docker 读取，切勿提交。
+
+services:
+  api:
+    image: mtg-market-simulator
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # 镜像默认 CMD 即启动 API，显式声明便于阅读。
+    command: ["node", "apps/api/dist/server.js"]
+    env_file: .env.docker
+    environment:
+      # 容器内固定：API 监听所有网卡，SQLite 写持久卷，前端走同站代理。
+      PORT: "3001"
+      APP_ENV: "production"
+      SQLITE_PATH: "/app/data/market-simulator.db"
+      CATALOG_DATA_DIR: "/app/data/catalog"
+      # 代理模式下浏览器同源请求，CORS 白名单为本站自身。
+      WEB_ORIGIN: "${WEB_ORIGIN:-http://localhost:3000}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000}"
+    volumes:
+      # SQLite 与卡池目录持久化到命名卷，重建容器不丢经济真相。
+      - api-data:/app/data
+    expose:
+      - "3001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web:
+    image: mtg-market-simulator
+    # 在 web 包目录内以生产模式启动 Next。
+    working_dir: /app/apps/web
+    command: ["pnpm", "exec", "next", "start", "-p", "3000", "-H", "0.0.0.0"]
+    environment:
+      # 代理模式：前端用相对路径 /api；Next 把 /api/* 转发到 api 服务。
+      NEXT_PUBLIC_API_BASE_URL: "/api"
+      API_PROXY_TARGET: "http://api:3001"
+      NODE_ENV: "production"
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    restart: unless-stopped
+
+volumes:
+  api-data:

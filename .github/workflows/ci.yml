@@ -1,0 +1,63 @@
+# MTG Market Simulator 持续集成。
+# 触发：push/PR 到主开发分支。包含构建+质量门禁和 Docker 构建验证两个 job。
+# 不含部署步骤：生产部署在 VPS 上手动执行 docker compose（见 docs/deploy.md）。
+
+name: CI
+
+on:
+  push:
+    branches: [glm-after17, main]
+  pull_request:
+    branches: [glm-after17, main]
+
+# 同仓库 PR 不重复触发 push + PR。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: 构建 + 检查 + 测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: 启用 pnpm 并锁定版本
+        run: corepack enable && corepack prepare pnpm@8.5.1 --activate
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: 类型检查
+        run: pnpm check
+
+      - name: 构建
+        run: pnpm -r build
+
+      - name: 测试
+        run: pnpm test
+
+  docker-build:
+    name: Docker 构建验证
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 构建 Docker 镜像（仅验证，不推送）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
