@@ -1,0 +1,96 @@
+.summary {
+  color: #596153;
+  margin: 0 0 18px;
+}
+.grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+.card,
+.detail {
+  background: #fff;
+  border: 1px solid #d8d6c5;
+  border-radius: 12px;
+  padding: 18px;
+}
+.cardHead {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+.card h2,
+.detail h1 {
+  margin: 0;
+}
+.badge {
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 4px 9px;
+  white-space: nowrap;
+}
+.pending {
+  background: #f0efe9;
+  color: #596153;
+}
+.unlocked {
+  background: #e3f0d7;
+  color: #254d22;
+}
+.blocked {
+  background: #fff1f0;
+  color: #9b2226;
+}
+.progress {
+  color: #254d22;
+  font-weight: 700;
+  margin: 14px 0 5px;
+}
+.meta,
+.muted {
+  color: #596153;
+  font-size: 0.9rem;
+}
+.detail > * + * {
+  margin-top: 16px;
+}
+.detailList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+.detailList div {
+  border-top: 1px solid #e7e4d7;
+  padding-top: 10px;
+}
+.detailList dt {
+  color: #596153;
+  font-size: 0.84rem;
+}
+.detailList dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+.sourceLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.notice {
+  background: #f3f2e8;
+  border: 1px solid #d8d6c5;
+  border-radius: 8px;
+  padding: 13px;
+}
+@media (max-width: 480px) {
+  .cardHead {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .card,
+  .detail {
+    padding: 14px;
+  }
+}

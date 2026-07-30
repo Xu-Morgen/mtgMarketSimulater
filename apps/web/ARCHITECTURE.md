@@ -25,7 +25,7 @@
 
 ## 页面模块
 
-`features/` 按业务域建立 `auth`、`dashboard`、`catalog`、`packs`、`inventory`、`market`、`orders`、`decks`、`tournaments` 与 `admin`。其中买单/卖单确认是独立页面流程，必须读取服务端预览并二次确认。
+`features/` 按业务域建立 `auth`、`dashboard`、`catalog`、`packs`、`inventory`、`market`、`orders`、`decks`、`tournaments`、`achievements` 与 `admin`。其中买单/卖单确认是独立页面流程，必须读取服务端预览并二次确认。
 
 `app/` 使用公开、玩家和管理员路由组组合这些页面模块。`admin` 至少拆分为首页、活动、玩家、内容/参数、任务/Agent 和日志页面；管理员布局负责导航与无权限/会话过期体验，但所有 `/v1/admin/*` 请求仍由 API 复核 `admin` 角色。
 
@@ -43,6 +43,13 @@
 - `/decks`、`/decks/new` 与 `/decks/[deckId]` 组合 `features/decks/decks-page.tsx`。编辑器逐页读取服务端可用库存，并原样展示可用量、订单锁定和比赛锁定；五种虚拟基本地仅作为草稿输入，不对应 SKU 或库存。
 - `stores/deck-draft-store.ts` 只保存未提交名称与卡表。合法性、禁牌版本、评分来源、库存冲突和保存后的卡组均为服务器返回；未保存内容在刷新/关闭前使用浏览器离开提示。
 - `tests/e2e/decks.spec.ts` 与 `tests/manual/I24F.md` 覆盖空库存、虚拟基本地、Companion、服务端合法/非法结果、评分尚未生成、锁定冲突和窄屏。
+
+## I26F 成就与收藏里程碑页面（2026-07-30）
+
+- `api/achievements-api.ts` 是成就概览与详情的唯一浏览器入口，只读 `GET /v1/achievements`、`GET /v1/achievements/detail`；TanStack Query 以用户 ID 隔离缓存，页面不创建 mutation 或在 Zustand 保存成就真相。
+- `/achievements` 与 `/achievements/[definitionId]` 组合 `features/achievements/achievements-page.tsx`。列表展示定义和服务端进度，详情原样展示解锁、奖励状态与来源 ID；赛事、收藏和账本入口分别导向现有只读页面，不能从前端解锁、发奖或补发。
+- I26B 奖励为服务端自动发放：`granted` 显示为无需领取，`blocked` 显示为风控拦截并保留解锁事实。页面不以客户端时间判断“刚解锁”或奖励状态。
+- `tests/e2e/achievements.spec.ts` 与 `tests/manual/I26F.md` 覆盖空态、重复读取、自动发放/拦截状态、来源跳转及桌面/窄屏。
 
 ## I06F 已落地基线（2026-07-24）
 
