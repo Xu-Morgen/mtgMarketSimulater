@@ -53,6 +53,9 @@ export const publicApiPaths = [
   "/v1/player-tournament-rounds/{roundId}/disputes",
   "/v1/admin/tournament-disputes/{disputeId}/resolve",
   "/v1/admin/player-tournaments/{tournamentId}/replay",
+  "/v1/achievements",
+  "/v1/achievements/unlocks",
+  "/v1/achievements/detail",
   "/v1/auth/register",
   "/v1/auth/login",
   "/v1/auth/refresh",
@@ -252,6 +255,24 @@ export const openApiDocument = {
     "/v1/player-tournament-rounds/{roundId}/disputes": { post: { summary: "同桌成员创建赛果争议", responses: { "201": { description: "争议已创建" } } } },
     "/v1/admin/tournament-disputes/{disputeId}/resolve": { post: { summary: "管理员以原因和赋分结案现实桌争议", responses: { "200": { description: "争议已结案" } } } },
     "/v1/admin/player-tournaments/{tournamentId}/replay": { get: { summary: "管理员读取非 NPC 赛事的 seed、配对与完整重放材料", responses: { "200": { description: "管理员重放材料" }, "404": { description: "赛事不存在" } } } },
+    "/v1/achievements": {
+      get: {
+        summary: "读取当前玩家的受控成就定义及服务端进度",
+        responses: { "200": { description: "成就定义与进度" }, "401": { description: "认证无效或过期" } }
+      }
+    },
+    "/v1/achievements/unlocks": {
+      get: {
+        summary: "读取当前玩家的不可变成就解锁、奖励状态与赛事来源",
+        responses: { "200": { description: "成就解锁列表" }, "401": { description: "认证无效或过期" } }
+      }
+    },
+    "/v1/achievements/detail": {
+      get: {
+        summary: "按 definitionId 查询当前玩家的一项成就详情、奖励状态与来源",
+        responses: { "200": { description: "成就详情" }, "401": { description: "认证无效或过期" }, "404": { description: "成就不存在" } }
+      }
+    },
     "/v1/auth/register": {
       post: {
         summary: "注册玩家账户并创建会话",

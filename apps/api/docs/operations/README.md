@@ -121,3 +121,8 @@
 - 结算从报名 ID 关联 `tournament_results`、`tournament_reward_draws`（seed、候选池、版本、命中项）、`tournament_rewards`/`tournament_pack_grants`、比赛 hold、`ledger_entries(reason=tournament_reward)`、`fact_events(event_type=tournament.settled)` 与审计。重领任务只读取既有结果；发现漂移时停止写流量、保留数据库/WAL/请求证据，绝不直接更新奖励、报名、库存、账本或结果。
 - 补充包奖励凭证由 `tournament_pack_grants` 的 `available → claimed` 条件更新消费；按 grant ID 关联 `pack_openings`、`pack_rule_replays`、入库流水、`pack.opened`、outbox 和两类审计。下架不取消已发凭证，但失效候选 SKU 会使领取完整回滚，待修复受控目录后用新幂等键重试。
 - 玩家游戏内赛事检查 `jobs.unique_key=tournament-settle:player:{tournamentId}`、`player_tournament_registration_holds`、`player_tournament_deck_card_snapshots`、`player_tournament_results`、`player_tournament_reward_draws`/`player_tournament_rewards` 与每个报名的 `tournament.settled`；现实桌检查 `player_tournament_rounds`（含 `stage=playoff`）、全桌 `player_tournament_round_confirmations` 和 `tournament_disputes`。玩家补充包凭证位于 `player_tournament_pack_grants`，按与 NPC 凭证相同的 `available → claimed` 条件更新和开包回滚规则处理。种子/完整 replay 仅可由 admin 读取；普通玩家查询不到即按权限边界处理，不得通过数据库导出补发。
+
+## I26B 成就任务排障
+
+- `achievement.process` 的 payload 只有 `{ factEventId }`，由写入 `tournament.settled` fact 时以 `achievement.process:{factEventId}` 唯一键投递。任务失败可按既有 jobs 重试语义安全重领；缺少、非赛事或重复 fact 均不得直接补写赛事、账本或库存。
+- 从 fact ID 只读关联 `achievement_progress.last_evaluated_fact_id`、`achievement_unlocks.source_fact_id/source_aggregate_id`、`achievement_reward_grants.correlation_id`、账本/库存流水和 `audit_logs`（`achievement.unlocked` 或 `achievement.reward_blocked`）。`rewardStatus=blocked` 是风控结果，不得通过直接更新 grant、计数或余额“补发”；后续补偿只能由受审计 application 命令实现。

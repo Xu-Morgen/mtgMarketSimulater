@@ -536,3 +536,121 @@ export const packOpenings = sqliteTable(
     index("pack_openings_pack_created_index").on(table.packId, table.createdAt)
   ]
 );
+
+/** I26B：受控成就定义由迁移固定，奖励可发放货币、SKU 或不可交易徽章。 */
+export const achievementDefinitions = sqliteTable("achievement_definitions", {
+  id: text("id").primaryKey(),
+  kind: text("kind").notNull(),
+  category: text("category").notNull(),
+  goal: integer("goal").notNull(),
+  rewardKind: text("reward_kind").notNull(),
+  rewardAmount: integer("reward_amount").notNull(),
+  rewardPackId: text("reward_pack_id"),
+  rewardSkuId: text("reward_sku_id"),
+  rewardBadgeId: text("reward_badge_id"),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  badge: text("badge"),
+  hidden: integer("hidden").notNull(),
+  ruleVersion: text("rule_version").notNull(),
+  createdAt: text("created_at").notNull()
+});
+
+/** 玩家成就进度；唯一键保证每次评估只产生一行，已解锁后不再回退。 */
+export const achievementProgress = sqliteTable(
+  "achievement_progress",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    definitionId: text("definition_id")
+      .notNull()
+      .references(() => achievementDefinitions.id),
+    currentValue: integer("current_value").notNull(),
+    goalValue: integer("goal_value").notNull(),
+    status: text("status").notNull(),
+    unlockedAt: text("unlocked_at"),
+    lastEvaluatedFactId: text("last_evaluated_fact_id"),
+    updatedAt: text("updated_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("achievement_progress_user_definition_unique").on(table.userId, table.definitionId),
+    index("achievement_progress_user_index").on(table.userId)
+  ]
+);
+
+/** 不可变解锁记录；来源指向触发解锁的 fact 与 aggregate，便于反查赛事与流水。 */
+export const achievementUnlocks = sqliteTable(
+  "achievement_unlocks",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    definitionId: text("definition_id")
+      .notNull()
+      .references(() => achievementDefinitions.id),
+    sourceType: text("source_type").notNull(),
+    sourceFactId: text("source_fact_id"),
+    sourceAggregateId: text("source_aggregate_id"),
+    ruleVersion: text("rule_version").notNull(),
+    unlockedAt: text("unlocked_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("achievement_unlocks_user_definition_unique").on(table.userId, table.definitionId),
+    index("achievement_unlocks_source_fact_index").on(table.sourceFactId),
+    index("achievement_unlocks_user_index").on(table.userId)
+  ]
+);
+
+/** 奖励发放流水；correlation_id 关联账本或库存流水，唯一键防止重复发奖。 */
+export const achievementRewardGrants = sqliteTable(
+  "achievement_reward_grants",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    definitionId: text("definition_id")
+      .notNull()
+      .references(() => achievementDefinitions.id),
+    unlockId: text("unlock_id")
+      .notNull()
+      .references(() => achievementUnlocks.id),
+    rewardKind: text("reward_kind").notNull(),
+    rewardAmount: integer("reward_amount").notNull(),
+    rewardSkuId: text("reward_sku_id"),
+    rewardBadgeId: text("reward_badge_id"),
+    grantStatus: text("grant_status").notNull(),
+    correlationId: text("correlation_id").notNull(),
+    grantedAt: text("granted_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("achievement_reward_grants_user_definition_unique").on(table.userId, table.definitionId),
+    index("achievement_reward_grants_user_index").on(table.userId)
+  ]
+);
+
+/** 每日奖励/重复参赛风控计数；以自然日唯一键收敛并发与补跑。 */
+export const achievementRiskCounters = sqliteTable(
+  "achievement_risk_counters",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    naturalDate: text("natural_date").notNull(),
+    rewardsGranted: integer("rewards_granted").notNull(),
+    repeatParticipations: integer("repeat_participations").notNull(),
+    updatedAt: text("updated_at").notNull()
+  },
+  (table) => [uniqueIndex("achievement_risk_counters_user_date_unique").on(table.userId, table.naturalDate)]
+);
+
+/** 成就系统默认风控阈值单例；管理员完整配置留给 I30B。 */
+export const achievementRiskLimits = sqliteTable("achievement_risk_limits", {
+  singleton: integer("singleton").primaryKey(),
+  maxRewardsPerDay: integer("max_rewards_per_day").notNull(),
+  maxRepeatParticipationsPerDay: integer("max_repeat_participations_per_day").notNull(),
+  updatedAt: text("updated_at").notNull()
+});

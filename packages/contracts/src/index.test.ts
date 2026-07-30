@@ -5,6 +5,9 @@ import {
   isValidMoney,
   isValidRequestFingerprint,
   isValidRequestId,
+  type AchievementDefinitionDto,
+  type AchievementProgressDto,
+  type AchievementUnlockDto,
   type ApiResponse,
   type BilateralFulfillmentType,
   type DailyWorkFundingStatusDto,
@@ -197,5 +200,40 @@ describe("共享契约", () => {
       status: "available",
       amount: { amount: 1000 }
     });
+  });
+
+  it("I26B 成就定义、进度与解锁来源只承载服务端已结算结果", () => {
+    const definition: AchievementDefinitionDto = {
+      id: "first-tournament/v1",
+      kind: "tournament",
+      category: "tournament",
+      goal: 1,
+      reward: { kind: "GAME_CREDIT", amount: 200, packId: null, skuId: null, badgeId: null },
+      display: { title: "初登赛场", description: "完成你的第一场赛事结算", badge: null },
+      hidden: false,
+      ruleVersion: "achievement/v1"
+    };
+    const progress: AchievementProgressDto = {
+      definitionId: "first-tournament/v1",
+      currentValue: 1,
+      goalValue: 1,
+      status: "unlocked",
+      unlockedAt: "2026-07-30T00:00:00.000Z",
+      lastEvaluatedFactId: "fact-0001"
+    };
+    const unlock: AchievementUnlockDto = {
+      definitionId: "first-tournament/v1",
+      source: { type: "tournament.settled", factId: "fact-0001", aggregateId: "registration-0001" },
+      ruleVersion: "achievement/v1",
+      unlockedAt: "2026-07-30T00:00:00.000Z",
+      reward: { kind: "GAME_CREDIT", amount: 200, packId: null, skuId: null, badgeId: null },
+      rewardStatus: "granted",
+      rewardCorrelationId: "achievement-reward:unlock-0001"
+    };
+    const parsed = JSON.parse(JSON.stringify({ definition, progress, unlock }));
+    expect(parsed.definition.reward).toMatchObject({ kind: "GAME_CREDIT", amount: 200 });
+    expect(parsed.progress).toMatchObject({ status: "unlocked", currentValue: 1 });
+    expect(parsed.unlock.source).toMatchObject({ type: "tournament.settled", aggregateId: "registration-0001" });
+    expect(parsed.unlock).toMatchObject({ rewardStatus: "granted" });
   });
 });

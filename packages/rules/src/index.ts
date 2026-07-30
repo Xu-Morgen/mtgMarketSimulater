@@ -623,3 +623,4 @@ export function evaluateCancellationRisk(input: { ruleVersion: string; cancellat
 export * from "./local-deck-power.js";
 export * from "./deck-feature-tags.js";
 export * from "./tournament-rules.js";
+export * from "./achievement-rules.js";

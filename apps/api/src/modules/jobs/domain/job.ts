@@ -8,6 +8,7 @@ export const registeredJobTypes = [
   "daily.rollover",
   "market.reprice",
   "tournament.settle",
+  "achievement.process",
   "order.expire",
   "narrative.generate",
   "backup.create"

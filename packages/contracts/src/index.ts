@@ -807,6 +807,44 @@ export interface NarrativePayload {
   tone: "victory" | "defeat" | "tense" | "neutral";
 }
 
+/** I26B 成就：定义、进度、解锁与奖励只承载服务端已结算结果，浏览器不得自行解锁或发奖。 */
+export type AchievementKindDto = "tournament" | "deck" | "collection";
+export type AchievementRewardKindDto = "GAME_CREDIT" | "sku" | "badge";
+export interface AchievementRewardDetailDto { kind: AchievementRewardKindDto; amount: number; packId: string | null; skuId: string | null; badgeId: string | null; }
+export interface AchievementDisplayDto { title: string; description: string; badge: string | null; }
+export interface AchievementDefinitionDto {
+  id: string;
+  kind: AchievementKindDto;
+  category: string;
+  goal: number;
+  reward: AchievementRewardDetailDto;
+  display: AchievementDisplayDto;
+  hidden: boolean;
+  ruleVersion: string;
+}
+export interface AchievementProgressDto {
+  definitionId: string;
+  currentValue: number;
+  goalValue: number;
+  status: "pending" | "unlocked";
+  unlockedAt: string | null;
+  /** 触发该次评估的 fact 事件 ID，用于来源反查；未评估时为 null。 */
+  lastEvaluatedFactId: string | null;
+}
+/** 不可变解锁记录的来源摘要；前端可据此跳转到赛事或流水。 */
+export interface AchievementUnlockSourceDto { type: "tournament.settled" | "collection"; factId: string | null; aggregateId: string | null; }
+export interface AchievementUnlockDto {
+  definitionId: string;
+  source: AchievementUnlockSourceDto;
+  ruleVersion: string;
+  unlockedAt: string;
+  reward: AchievementRewardDetailDto;
+  /** 奖励实际发放状态；风控拦截不会撤销已达成的成就。 */
+  rewardStatus: "granted" | "blocked";
+  /** 关联账本/库存流水的 correlationId；徽章奖励为 unlockId 关联的审计入口。 */
+  rewardCorrelationId: string | null;
+}
+
 export interface FactEvent<TType extends string, TPayload> {
   id: string;
   type: TType;

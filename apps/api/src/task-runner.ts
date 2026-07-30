@@ -12,6 +12,7 @@ import { MarketService } from "./modules/market/application/market-service.js";
 import { OrderService } from "./modules/orders/application/order-service.js";
 import { DailyRolloverService, type DailyRolloverPayload } from "./modules/users/application/daily-rollover-service.js";
 import { createTournamentService } from "./modules/tournaments/api/tournament-routes.js";
+import { createAchievementService } from "./modules/achievements/api/achievement-routes.js";
 
 export interface TaskRunner {
   stop(): Promise<void>;
@@ -81,6 +82,13 @@ export function createTaskRegistry(config: ApiConfig, database: Database.Databas
       return;
     }
     throw new Error("赛事结算任务缺少报名或玩家赛事 ID");
+  });
+  // I26B：成就处理以独立任务消费 tournament.settled fact；解锁/奖励在 application 单事务内原子完成，重复 fact 幂等。
+  const achievements = createAchievementService(database, config);
+  registry.register("achievement.process", async (payload) => {
+    const parsed = payload as { factEventId?: string };
+    if (!parsed.factEventId) throw new Error("成就处理任务缺少 factEventId");
+    achievements.processFactEvent({ factEventId: parsed.factEventId });
   });
   return registry;
 }

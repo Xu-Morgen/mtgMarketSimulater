@@ -38,6 +38,19 @@ export function enqueueTournamentSettleJob(
 }
 
 /**
+ * I26B：每个 `tournament.settled` fact 事件唯一投递一次成就处理。任务至少执行一次，
+ * `achievement_unlocks` 的 (user_id, definition_id) 唯一约束和 `last_evaluated_fact_id`
+ * 去重收敛业务结果，使历史事件补跑不会重复解锁或发奖。
+ */
+export function enqueueAchievementProcessJob(
+  database: ConstructorParameters<typeof SqliteJobRepository>[0],
+  factEventId: string,
+  runAfter: string
+): void {
+  new SqliteJobRepository(database).enqueue({ type: "achievement.process", payload: { factEventId }, uniqueKey: `achievement.process:${factEventId}`, runAfter, maxAttempts: 5 }, runAfter);
+}
+
+/**
  * I17B 每日价格同步调度。以 UTC 自然日为唯一键：`last_scheduled_date` 落后于今日时
  * 投递一次 `prices.sync`（uniqueKey=`prices.sync:daily:<date>`）。停机多日只补投一次
  * 而非逐日补投——历史回填由独立的 `prices.backfill` 负责。条件 UPDATE + 任务唯一键

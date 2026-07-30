@@ -167,3 +167,8 @@
 - 奖励池可原子授予 `GAME_CREDIT`、本地 SKU 或当时在售补充包。NPC 奖励使用 `GET /v1/tournament-pack-grants` 与 `POST /v1/tournament-pack-grants/{grantId}/claim`；玩家赛事奖励使用对应的 `/v1/player-tournament-pack-grants` 路径。两类领取均以幂等键一次性消费凭证，并把入库、开包事实、审计与凭证状态放在同一事务。
 - 玩家赛事：`POST /v1/player-tournaments` 创建受控 Commander 游戏内或现实桌赛事，并绑定服务器发布的奖励配置（编辑能力留给 I30B）；`GET /v1/player-tournaments` 只列出当前创建者或报名者可读取的赛事，`GET /v1/player-tournaments/{id}`、`/registrations`、`/rounds`、`/result` 只对创建者或报名者可读。游戏内报名提交 `{ deckId }` 并按上述服务端快照/hold 规则执行，`POST /start` 投递唯一结算任务；现实桌报名只接受 `{ deckName }`，不保存或锁定实体卡组。现实桌配对、结果提交、全桌确认、退出、争议和最终结算分别走 `/rounds`、`/result`、`/confirm`、`/withdraw`、`/disputes`、`/settle`，所有写请求都需幂等键。
 - 现实桌的服务端规则为目标每桌 4–8 人（人数不足时不拒绝赛事）、胜 4、平局全桌 1、弃权/退出 0；未获同桌全体确认前不记分。只有跨越不同奖励配置的同分名次会生成 `stage=playoff` 的额外同桌，且仍须全桌确认至分出名次。争议只可由 `POST /v1/admin/tournament-disputes/{disputeId}/resolve`（admin、理由、赋分、幂等键）结案。非 NPC seed、完整配对和重放不向玩家返回，仅 `GET /v1/admin/player-tournaments/{tournamentId}/replay` 可读。
+
+## I26B 成就查询协议
+
+- `GET /v1/achievements`、`GET /v1/achievements/unlocks` 和 `GET /v1/achievements/detail?definitionId=<id>` 都要求 player 会话，且只读当前玩家的数据。定义 ID 可包含 `/v1` 后缀，因此详情使用查询参数而非路径参数；未知 ID 返回 `404 RESOURCE_NOT_FOUND`。
+- 概览返回受控定义及服务端进度；解锁返回不可变来源（`tournament.settled` fact 与报名 aggregate）、规则版本、奖励明细、关联 correlation ID 和 `rewardStatus`。`granted` 表示奖励已经在服务端事务中发放，`blocked` 表示成就已经解锁但奖励被每日风控拦截；两个状态都不是浏览器可变更的资源。

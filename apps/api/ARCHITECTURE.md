@@ -170,3 +170,9 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 - 活动采用草稿、已排期、已生效、已暂停、已结束的显式状态与实体版本。预览只返回服务端校验结果；发布、暂停和结束是分别审计且要求幂等键的命令，已发布版本不得原地覆盖。
 - 玩家管理 API 只提供完成检索、冻结/解冻、会话撤销和补偿修正所需的最小数据；不返回密码哈希、令牌摘要或通用数据库字段，也不提供直接设置最终余额/库存的接口。
 - audit/jobs/narratives 等日志由各模块 application 暴露分页、筛选、脱敏查询端口，admin 负责组合 DTO，不访问对方 infrastructure。日志只读，不提供删除/修改路由。
+
+## 成就与收藏里程碑（I26B）
+
+- `modules/achievements` 只消费已结算的 `tournament.settled` fact，绝不改写赛事结果，也不依赖 outbox dispatcher。`TournamentService` 在写入事实的同一事务投递以 fact ID 唯一的 `achievement.process`；任务至少执行一次，业务结果由成就解锁唯一约束收敛。
+- `AchievementService` 在 `InventoryService.withLedgerTransaction` 中读取事实和报名卡组快照、调用 `@mtg-market/rules` 的 `achievement/v1`，然后原子写入进度、解锁、奖励发放状态、每日风控计数及审计。货币奖励走 users application 账本，SKU 奖励走 inventory application，徽章仅作为不可交易展示物记录；任一写入失败均回滚。
+- 成就定义由 `0028_achievements.sql` 固定，并与规则包首批定义保持同一稳定 ID。`GET /v1/achievements`、`/unlocks` 与 `/detail?definitionId=` 均只返回当前玩家自己的服务端投影和来源标识；浏览器没有解锁或发奖命令。

@@ -28,7 +28,7 @@ import {
 import { DeckService } from "../../decks/application/deck-service.js";
 import { LeylineEvaluationError, type LeylineClient } from "../../decks/infrastructure/leyline-client.js";
 import { InventoryService } from "../../inventory/application/inventory-service.js";
-import { enqueueTournamentSettleJob } from "../../jobs/application/task-service.js";
+import { enqueueAchievementProcessJob, enqueueTournamentSettleJob } from "../../jobs/application/task-service.js";
 import { PackService } from "../../packs/application/pack-service.js";
 import { UserService } from "../../users/application/user-service.js";
 import { naturalDateAt } from "../../users/domain/natural-day.js";
@@ -1015,9 +1015,12 @@ export class TournamentService {
   }
 
   private appendTournamentFact(input: { aggregateType: string; aggregateId: string; tournamentId: string; playerId: string; result: "win" | "loss"; rewardAmount: number; ruleVersion: string; randomSeedHash: string; now: string }): void {
+    const factEventId = randomUUID();
     this.database.prepare(
       "INSERT INTO fact_events (id, event_type, aggregate_type, aggregate_id, version, payload_json, occurred_at) VALUES (?, 'tournament.settled', ?, ?, 1, ?, ?)"
-    ).run(randomUUID(), input.aggregateType, input.aggregateId, JSON.stringify({ tournamentId: input.tournamentId, playerId: input.playerId, result: input.result, reward: { amount: input.rewardAmount, currency: "GAME_CREDIT" }, ruleVersion: input.ruleVersion, randomSeedHash: input.randomSeedHash }), input.now);
+    ).run(factEventId, input.aggregateType, input.aggregateId, JSON.stringify({ tournamentId: input.tournamentId, playerId: input.playerId, result: input.result, reward: { amount: input.rewardAmount, currency: "GAME_CREDIT" }, ruleVersion: input.ruleVersion, randomSeedHash: input.randomSeedHash }), input.now);
+    // I26B：成就处理以独立、幂等的 achievement.process 任务消费该 fact；任务至少执行一次，解锁唯一约束收敛至多一次业务结果。
+    enqueueAchievementProcessJob(this.database, factEventId, input.now);
   }
 
   private tournamentDto(tournament: Tournament, userId: string): TournamentDto {
