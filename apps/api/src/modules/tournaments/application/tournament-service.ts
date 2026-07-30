@@ -11,6 +11,7 @@ import {
   type PlayerTournamentRoundDto,
   type PlayerTournamentResultDto,
   type TournamentDto,
+  type TournamentHistoryItemDto,
   type TournamentRegistrationDto,
   type TournamentRewardDetailDto,
   type TournamentSettlementDto
@@ -25,7 +26,7 @@ import {
   type TournamentKind
 } from "@mtg-market/rules";
 import { DeckService } from "../../decks/application/deck-service.js";
-import type { LeylineClient } from "../../decks/infrastructure/leyline-client.js";
+import { LeylineEvaluationError, type LeylineClient } from "../../decks/infrastructure/leyline-client.js";
 import { InventoryService } from "../../inventory/application/inventory-service.js";
 import { enqueueTournamentSettleJob } from "../../jobs/application/task-service.js";
 import { PackService } from "../../packs/application/pack-service.js";
@@ -162,6 +163,8 @@ type CommandState<T> =
 type RegistrationCommand = { statusCode: number; response: ApiResponse<{ registration: TournamentRegistrationDto }> };
 type PackClaimCommand = { statusCode: number; response: ApiResponse<{ opening: PackOpeningDto }> };
 type Award = { amount: number; detail: TournamentRewardDetailDto };
+export type TournamentLogger = { warn: (bindings: Record<string, unknown>, message: string) => void };
+const silentTournamentLogger: TournamentLogger = { warn: () => undefined };
 
 /**
  * I25B 赛事应用入口。所有写路径均由 application 持有短事务、幂等键和审计；路由层
@@ -175,7 +178,7 @@ export class TournamentService {
 
   constructor(
     private readonly database: Database.Database,
-    private readonly config: { timezone: string; encryptionKey: string; leyline: LeylineClient }
+    private readonly config: { timezone: string; encryptionKey: string; leyline: LeylineClient; logger?: TournamentLogger }
   ) {
     this.inventory = new InventoryService(database);
     this.users = new UserService(database);
@@ -223,6 +226,21 @@ export class TournamentService {
     return (this.database
       .prepare("SELECT * FROM tournaments WHERE owner_user_id = ? AND natural_date = ? ORDER BY template_id")
       .all(userId, naturalDate) as Tournament[]).map((tournament) => this.tournamentDto(tournament, userId));
+  }
+
+  /** 历史只读取当前玩家自己的报名和已结算服务端结果，绝不由浏览器拼接。 */
+  history(userId: string): TournamentHistoryItemDto[] {
+    const rows = this.database.prepare(
+      `SELECT tournament.* FROM tournaments tournament
+       JOIN tournament_registrations registration ON registration.tournament_id = tournament.id
+       WHERE registration.user_id = ?
+       ORDER BY tournament.natural_date DESC, tournament.created_at DESC`
+    ).all(userId) as Tournament[];
+    return rows.map((tournament) => ({
+      tournament: this.tournamentDto(tournament, userId),
+      registration: this.registration(userId, tournament.id)!,
+      result: this.settlement(userId, tournament.id)
+    }));
   }
 
   registration(userId: string, tournamentId: string): TournamentRegistrationDto | null {
@@ -353,6 +371,16 @@ export class TournamentService {
     const isMember = this.database.prepare("SELECT 1 FROM player_tournament_registrations WHERE tournament_id = ? AND user_id = ?").get(tournamentId, userId);
     if (tournament.creator_user_id !== userId && !isMember) return null;
     return this.playerTournamentDto(tournament);
+  }
+
+  /** 创建者与报名者均可返回自己参加过的玩家赛事，用于前端历史入口。 */
+  playerTournamentList(userId: string): PlayerTournamentDto[] {
+    return (this.database.prepare(
+      `SELECT tournament.* FROM player_tournaments tournament
+       WHERE tournament.creator_user_id = ?
+          OR EXISTS (SELECT 1 FROM player_tournament_registrations registration WHERE registration.tournament_id = tournament.id AND registration.user_id = ?)
+       ORDER BY tournament.created_at DESC`
+    ).all(userId, userId) as PlayerTournamentRow[]).map((tournament) => this.playerTournamentDto(tournament));
   }
 
   playerRegistrations(userId: string, tournamentId: string): PlayerTournamentRegistrationDto[] | null {
@@ -754,8 +782,11 @@ export class TournamentService {
     let evaluation;
     try {
       evaluation = await this.config.leyline.evaluate(evaluatedDeck.cards);
-    } catch {
-      return this.registrationReply(409, input.requestId, "VERSION_STALE", "卡组评分暂不可用，请稍后重试");
+    } catch (error) {
+      const failure = error instanceof LeylineEvaluationError ? error : new LeylineEvaluationError("unknown", 1);
+      const details = { provider: "leyline", failureReason: failure.reason, attempts: failure.attempts, ...(failure.httpStatus === null ? {} : { httpStatus: failure.httpStatus }) };
+      (this.config.logger ?? silentTournamentLogger).warn({ event: "tournament.registration_scoring_failed", requestId: input.requestId, userId: input.userId, tournamentId: input.tournamentId, deckId: input.deckId, ...details }, "Leyline 卡组评分失败");
+      return this.registrationReply(503, input.requestId, "SCORING_UNAVAILABLE", scoringFailureMessage(failure.reason), details);
     }
     return this.inventory.withLedgerTransaction(() => {
       const raced = this.idempotency(input.userId, input.idempotencyKey);
@@ -1097,8 +1128,8 @@ export class TournamentService {
     return command;
   }
 
-  private registrationReply(statusCode: number, requestId: string, code: ApiErrorCode, message: string): RegistrationCommand {
-    return { statusCode, response: failure(requestId, code, message) as ApiResponse<{ registration: TournamentRegistrationDto }> };
+  private registrationReply(statusCode: number, requestId: string, code: ApiErrorCode, message: string, details?: Record<string, unknown>): RegistrationCommand {
+    return { statusCode, response: failure(requestId, code, message, details) as ApiResponse<{ registration: TournamentRegistrationDto }> };
   }
 
   private packClaimReplay(row: Idempotency, fingerprint: string, requestId: string): PackClaimCommand {
@@ -1154,4 +1185,15 @@ export class TournamentService {
   private seededCompare(seed: string, leftId: string, rightId: string): number {
     return this.hash(`${seed}:${leftId}`).localeCompare(this.hash(`${seed}:${rightId}`)) || leftId.localeCompare(rightId);
   }
+}
+
+function scoringFailureMessage(reason: LeylineEvaluationError["reason"]): string {
+  return {
+    timeout: "卡组评分请求超时，请稍后重试",
+    network: "卡组评分服务网络连接失败，请稍后重试",
+    http_status: "卡组评分服务响应异常，请稍后重试",
+    invalid_json: "卡组评分服务返回的 JSON 无效，请稍后重试",
+    invalid_schema: "卡组评分服务返回结构不合法，请稍后重试",
+    unknown: "卡组评分服务暂不可用，请稍后重试"
+  }[reason];
 }

@@ -6,7 +6,7 @@ import type { ApiConfig } from "../../../config/environment.js";
 import { failure, success } from "../../../shared/http/api-response.js";
 import { requireRole } from "../../auth/api/auth-routes.js";
 import { LeylineClient } from "../../decks/infrastructure/leyline-client.js";
-import { TournamentService } from "../application/tournament-service.js";
+import { type TournamentLogger, TournamentService } from "../application/tournament-service.js";
 
 const tournamentIdParams = z.object({ tournamentId: z.string().uuid() }).strict();
 const roundIdParams = z.object({ roundId: z.string().uuid() }).strict();
@@ -37,30 +37,32 @@ function commandFailure<T>(requestId: string, command: CommandResult<T>) {
 }
 
 function statusFor(result: string): number {
-  return result === "not-found" ? 404 : result === "forbidden" ? 403 : 409;
+  return result === "not-found" ? 404 : result === "forbidden" ? 403 : result === "score-unavailable" ? 503 : 409;
 }
 
 function codeFor(result: string) {
-  return result === "not-found" ? "RESOURCE_NOT_FOUND" : result === "forbidden" ? "AUTHORIZATION_DENIED" : result === "invalid-deck" ? "RULE_VIOLATION" : result === "score-unavailable" ? "VERSION_STALE" : result === "idempotency-conflict" ? "IDEMPOTENCY_CONFLICT" : result === "in-progress" ? "IDEMPOTENCY_IN_PROGRESS" : "RESOURCE_CONFLICT" as const;
+  return result === "not-found" ? "RESOURCE_NOT_FOUND" : result === "forbidden" ? "AUTHORIZATION_DENIED" : result === "invalid-deck" ? "RULE_VIOLATION" : result === "score-unavailable" ? "SCORING_UNAVAILABLE" : result === "idempotency-conflict" ? "IDEMPOTENCY_CONFLICT" : result === "in-progress" ? "IDEMPOTENCY_IN_PROGRESS" : "RESOURCE_CONFLICT" as const;
 }
 
 function requireKey(request: { headers: Record<string, unknown> }): string | null {
   return idempotencyKey(request);
 }
 
-export function createTournamentService(database: Database.Database, config: Pick<ApiConfig, "APP_TIMEZONE" | "DECK_RESPONSE_ENCRYPTION_KEY" | "LEYLINE_ENDPOINT" | "LEYLINE_TIMEOUT_MS" | "LEYLINE_MAX_RETRIES">): TournamentService {
+export function createTournamentService(database: Database.Database, config: Pick<ApiConfig, "APP_TIMEZONE" | "DECK_RESPONSE_ENCRYPTION_KEY" | "LEYLINE_ENDPOINT" | "LEYLINE_TIMEOUT_MS" | "LEYLINE_MAX_RETRIES">, logger?: TournamentLogger): TournamentService {
   return new TournamentService(database, {
     timezone: config.APP_TIMEZONE,
     encryptionKey: config.DECK_RESPONSE_ENCRYPTION_KEY,
-    leyline: new LeylineClient({ endpoint: config.LEYLINE_ENDPOINT, timeoutMs: config.LEYLINE_TIMEOUT_MS, maxRetries: config.LEYLINE_MAX_RETRIES })
+    leyline: new LeylineClient({ endpoint: config.LEYLINE_ENDPOINT, timeoutMs: config.LEYLINE_TIMEOUT_MS, maxRetries: config.LEYLINE_MAX_RETRIES }),
+    ...(logger ? { logger } : {})
   });
 }
 
 /** HTTP 只负责验证、鉴权、幂等键与语义映射；所有 SQL、锁定和规则均在 application。 */
 export async function registerTournamentRoutes(app: FastifyInstance, database: Database.Database, config: Pick<ApiConfig, "APP_TIMEZONE" | "DECK_RESPONSE_ENCRYPTION_KEY" | "LEYLINE_ENDPOINT" | "LEYLINE_TIMEOUT_MS" | "LEYLINE_MAX_RETRIES">): Promise<void> {
-  const tournaments = createTournamentService(database, config);
+  const tournaments = createTournamentService(database, config, app.log);
 
   app.get("/v1/tournaments", { preHandler: requireRole("player") }, async (request) => success(request.requestId, { items: tournaments.list(request.actor!.id) }));
+  app.get("/v1/tournaments/history", { preHandler: requireRole("player") }, async (request) => success(request.requestId, { items: tournaments.history(request.actor!.id) }));
   app.get("/v1/tournaments/:tournamentId/registration", { preHandler: requireRole("player") }, async (request, reply) => {
     const registration = tournaments.registration(request.actor!.id, tournamentIdParams.parse(request.params).tournamentId);
     return registration ? success(request.requestId, { registration }) : reply.code(404).send(failure(request.requestId, "RESOURCE_NOT_FOUND", "尚未报名该赛事"));
@@ -110,6 +112,7 @@ export async function registerTournamentRoutes(app: FastifyInstance, database: D
     if (!("data" in command)) return reply.code(409).send(commandFailure(request.requestId, command));
     return reply.code(command.state === "completed" ? 201 : 200).send(success(request.requestId, { tournamentId: command.data }));
   });
+  app.get("/v1/player-tournaments", { preHandler: requireRole("player") }, async (request) => success(request.requestId, { items: tournaments.playerTournamentList(request.actor!.id) }));
   app.get("/v1/player-tournaments/:tournamentId", { preHandler: requireRole("player") }, async (request, reply) => {
     const tournament = tournaments.playerTournament(request.actor!.id, tournamentIdParams.parse(request.params).tournamentId);
     return tournament ? success(request.requestId, { tournament }) : reply.code(404).send(failure(request.requestId, "RESOURCE_NOT_FOUND", "赛事不存在或当前玩家无权读取"));

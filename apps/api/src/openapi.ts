@@ -233,7 +233,7 @@ export const openApiDocument = {
     "/v1/tournaments": { get: { summary: "查询当前服务器自然日的个人 NPC 赛事", responses: { "200": { description: "个人赛事列表" }, "401": { description: "认证无效或过期" } } } },
     "/v1/tournaments/{tournamentId}/registration": { get: { summary: "查询当前玩家的赛事报名及评分快照", responses: { "200": { description: "报名" }, "404": { description: "尚未报名" } } } },
     "/v1/tournaments/{tournamentId}/result": { get: { summary: "查询已结算的个人 NPC 赛事结果与公开重放材料", responses: { "200": { description: "赛事结果" }, "404": { description: "尚未结算" } } } },
-    "/v1/tournaments/{tournamentId}/register": { post: { summary: "以幂等键报名个人 NPC 赛事；评分成功后原子收费并锁定卡组库存", responses: { "201": { description: "报名成功" }, "200": { description: "幂等重放" }, "400": { description: "参数无效或缺少幂等键" }, "409": { description: "评分、库存、赛事状态或幂等冲突" } } } },
+    "/v1/tournaments/{tournamentId}/register": { post: { summary: "以幂等键报名个人 NPC 赛事；评分成功后原子收费并锁定卡组库存", responses: { "201": { description: "报名成功" }, "200": { description: "幂等重放" }, "400": { description: "参数无效或缺少幂等键" }, "409": { description: "卡组版本、库存、赛事状态或幂等冲突" }, "503": { description: "Leyline 评分不可用；返回受控失败分类，不含卡表或 Provider 原始响应" } } } },
     "/v1/tournament-pack-grants": { get: { summary: "查询当前玩家已获得的补充包奖励凭证", responses: { "200": { description: "奖励补充包凭证" } } } },
     "/v1/tournament-pack-grants/{grantId}/claim": { post: { summary: "以幂等键领取 NPC 赛事补充包奖励并零费用开包", responses: { "201": { description: "奖励已开封" }, "200": { description: "幂等重放" }, "409": { description: "凭证已领取或幂等冲突" } } } },
     "/v1/player-tournament-pack-grants": { get: { summary: "查询当前玩家的玩家赛事补充包奖励凭证", responses: { "200": { description: "奖励补充包凭证" } } } },

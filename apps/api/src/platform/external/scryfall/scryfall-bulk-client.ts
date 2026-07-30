@@ -16,7 +16,11 @@ export type ScryfallBulkCard = {
   legalities?: Record<string, string>;
   artist?: string;
   color_identity?: string[];
+  colors?: string[];
+  mana_cost?: string;
   type_line?: string;
+  power?: string;
+  toughness?: string;
   keywords?: string[];
   cmc?: number;
   finishes?: string[];

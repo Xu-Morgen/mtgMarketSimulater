@@ -6,16 +6,32 @@
 .issues { margin: .7rem 0 0; padding-left: 1.25rem; color: #a53d18; }
 .serverOk { color: #257942; font-weight: 600; }
 .serverBad { color: #a53d18; font-weight: 600; }
-.editor { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(18rem, .75fr); gap: 1rem; align-items: start; }
-.editor > section { min-width: 0; }
-.sticky { position: sticky; top: 1rem; }
+.editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(19rem, 24rem); gap: 1rem; align-items: start; }
+.editor > section, .summaryColumn { min-width: 0; }
+.summaryColumn { align-self: start; display: grid; gap: 1rem; }
+.summaryColumn .panel { overflow-wrap: anywhere; }
 .inventoryList, .selectedList { display: grid; gap: .65rem; max-height: 34rem; overflow: auto; }
 .inventoryRow, .selectedRow { display: flex; justify-content: space-between; align-items: center; gap: .75rem; border-bottom: 1px solid var(--border); padding: .65rem 0; }
 .inventoryRow:last-child, .selectedRow:last-child { border-bottom: 0; }
+.cardFilters { align-items: end; display: flex; flex-wrap: wrap; gap: .75rem; margin: .85rem 0; }
+.cardFilters label { display: grid; gap: .35rem; font-size: .9rem; font-weight: 600; }
+.cardFilters select { min-height: 2.4rem; }
+.tableWrap { border: 1px solid var(--border); border-radius: 8px; overflow: auto; }
+.tableActions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.oraclePreview { -webkit-box-orient: vertical; -webkit-line-clamp: 2; display: -webkit-box; overflow: hidden; }
+.manaCost { align-items: center; display: inline-flex; flex-wrap: wrap; gap: .2rem; }
+.manaCost span:not(.sr-only) { align-items: center; border-radius: 999px; display: inline-flex; font-size: .75rem; font-weight: 700; justify-content: center; min-height: 1.55rem; min-width: 1.55rem; padding: .1rem .25rem; }
+.manaGeneric { background: #ece9df; color: #3f3f3a; }
+.manaW { background: #fff9dc; border: 1px solid #c7b96e; color: #6c5e14; }
+.manaU { background: #dceeff; border: 1px solid #70a9d8; color: #1d5d92; }
+.manaB { background: #e5e2eb; border: 1px solid #80788c; color: #332d3b; }
+.manaR { background: #ffe2dd; border: 1px solid #d87a6c; color: #9b3427; }
+.manaG { background: #e1f3df; border: 1px solid #77af72; color: #2c7030; }
 .zone { font-size: .8rem; border-radius: 999px; padding: .15rem .5rem; background: #eef3ff; color: #2d4d94; }
 .quantity { width: 5rem; }
 .basicGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; }
 .basicGrid label, .nameField { display: grid; gap: .35rem; }
+.nameError { color: #a53d18; font-size: .9rem; margin: .45rem 0 0; }
 .notice { border-left: 4px solid #a66c00; background: #fff9eb; padding: .75rem; }
 .success { border-left-color: #267a42; background: #edf9f0; }
-@media (max-width: 850px) { .editor { grid-template-columns: 1fr; } .sticky { position: static; } .basicGrid { grid-template-columns: 1fr; } .inventoryRow, .selectedRow { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 1100px) { .editor { grid-template-columns: 1fr; } .basicGrid { grid-template-columns: 1fr; } .inventoryRow, .selectedRow { align-items: flex-start; flex-direction: column; } .cardFilters { align-items: stretch; flex-direction: column; } }

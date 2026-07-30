@@ -62,10 +62,11 @@ describe("TournamentService daily NPC instances", () => {
     const database = openSqliteDatabase(join(directory, "test.db")); const now = new Date("2026-07-29T02:00:00.000Z"); const userId = "00000000-0000-4000-8000-000000000005";
     createArchive(database, userId, now, "npc-register"); const deckId = createLegalDeck(database, userId, now.toISOString()); const service = scoredServiceFor(database);
     const daily = service.list(userId, now); const single = daily.find((event) => event.templateId === "daily-npc-single/v1")!;
-    const unavailable = new TournamentService(database, { timezone: "Asia/Shanghai", encryptionKey: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", leyline: new LeylineClient({ endpoint: "https://example.test/evaluate", timeoutMs: 100, maxRetries: 0 }, async () => { throw new Error("timeout"); }) });
+    const scoringLogs: Array<Record<string, unknown>> = [];
+    const unavailable = new TournamentService(database, { timezone: "Asia/Shanghai", encryptionKey: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", leyline: new LeylineClient({ endpoint: "https://example.test/evaluate", timeoutMs: 100, maxRetries: 0 }, async () => { throw new Error("timeout"); }), logger: { warn: (bindings) => scoringLogs.push(bindings) } });
     const swiss = daily.find((event) => event.templateId === "daily-npc-swiss/v1")!;
     const failed = await unavailable.register({ userId, tournamentId: swiss.id, deckId, idempotencyKey: "npc-register-key-0002", requestId: "request-register-0003", now });
-    expect(failed.response).toMatchObject({ ok: false, error: { code: "VERSION_STALE" } }); expect(database.prepare("SELECT COUNT(*) AS count FROM tournament_registrations WHERE tournament_id = ?").get(swiss.id)).toEqual({ count: 0 });
+    expect(failed).toMatchObject({ statusCode: 503, response: { ok: false, error: { code: "SCORING_UNAVAILABLE", message: "卡组评分请求超时，请稍后重试", details: { provider: "leyline", failureReason: "timeout", attempts: 1 } } } }); expect(scoringLogs).toEqual([expect.objectContaining({ event: "tournament.registration_scoring_failed", failureReason: "timeout", attempts: 1 })]); expect(database.prepare("SELECT COUNT(*) AS count FROM tournament_registrations WHERE tournament_id = ?").get(swiss.id)).toEqual({ count: 0 });
     const [first, replay] = await Promise.all([service.register({ userId, tournamentId: single.id, deckId, idempotencyKey: "npc-register-key-0001", requestId: "request-register-0001", now }), service.register({ userId, tournamentId: single.id, deckId, idempotencyKey: "npc-register-key-0001", requestId: "request-register-0002", now })]);
     if (!first.response.ok || !replay.response.ok) throw new Error("报名夹具未返回成功响应");
     const registrationId = first.response.data.registration.id;

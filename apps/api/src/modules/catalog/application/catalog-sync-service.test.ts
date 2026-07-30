@@ -19,6 +19,13 @@ const card = {
   released_at: "2023-02-10",
   name: "Fixture Card",
   collector_number: "1",
+  mana_cost: "{2}{R}",
+  colors: ["R"],
+  color_identity: ["R"],
+  type_line: "Legendary Creature — Human",
+  oracle_text: "Fixture Card deals 2 damage to any target.",
+  power: "3",
+  toughness: "3",
   rarity: "rare",
   legalities: { modern: "legal" },
   finishes: ["nonfoil", "foil"],
@@ -85,6 +92,9 @@ describe("I09B Scryfall Bulk 同步", () => {
       { finish: "foil" },
       { finish: "nonfoil" }
     ]);
+    expect(database.prepare("SELECT mana_cost, colors_json, color_identity_json, type_line, power, toughness FROM card_printings").get()).toEqual({
+      mana_cost: "{2}{R}", colors_json: '["R"]', color_identity_json: '["R"]', type_line: "Legendary Creature — Human", power: "3", toughness: "3"
+    });
     expect(
       database
         .prepare(

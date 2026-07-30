@@ -6,7 +6,7 @@ import { COMMANDER_BANLIST_VERSION, COMMANDER_DECK_RULE_VERSION, type DeckRuleCa
 import { failure, success } from "../../../shared/http/api-response.js";
 import { encryptJsonPayload } from "../../../shared/security/encrypted-payload.js";
 import type { LeylineEvaluation } from "../domain/leyline-evaluation.js";
-const LEYLINE_ADAPTER_VERSION = "leyline-adapter/v1" as const;
+const LEYLINE_ADAPTER_VERSION = "leyline-adapter/v2" as const;
 
 export type SkuDeckCardInput = { zone: "commander" | "main" | "companion"; skuId: string; quantity: number };
 export type VirtualDeckCardInput = { zone: "virtual_basic"; virtualBasic: "plains" | "island" | "swamp" | "mountain" | "forest"; quantity: number };

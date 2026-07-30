@@ -53,7 +53,7 @@
 ## I10B 库存查询协议
 
 - `GET /v1/inventory` 要求有效 Bearer 会话，仅返回当前玩家的库存总览。支持 `query`、`setCode`、`finish`、`locked=any|locked|available`、`sort=updatedAt|name|quantity|availableQuantity`、`direction`、`cursor`、`limit`，所有筛选、排序和分页均在服务端执行。
-- `GET /v1/inventory/{skuId}` 返回当前玩家该 SKU 的持有量、可用量、订单/比赛锁定量、移动平均成本、服务端 `marketUnitPrice`、全部持有的 `marketValue`、`unrealizedProfitLoss` 和本地展示卡牌资料；三项估值字段均在 SQLite 查询中以整数产生，浏览器不得相乘、相减或用可用库存替代全部持有量。未持有返回 `404 RESOURCE_NOT_FOUND`。`marketValue: null` 时响应带 `marketValueUnavailableReason`，客户端不得自行估算市值。
+- `GET /v1/inventory/{skuId}` 返回当前玩家该 SKU 的持有量、可用量、订单/比赛锁定量、移动平均成本、服务端 `marketUnitPrice`、全部持有的 `marketValue`、`unrealizedProfitLoss` 和本地展示卡牌资料；目录资料包含本地快照的费用符号、卡面颜色、颜色标识、类别行、规则文本及攻防（缺失时显式为 null/空），供卡组编辑器展示和筛选。三项估值字段均在 SQLite 查询中以整数产生，浏览器不得相乘、相减或用可用库存替代全部持有量。未持有返回 `404 RESOURCE_NOT_FOUND`。`marketValue: null` 时响应带 `marketValueUnavailableReason`，客户端不得自行估算市值。
 - `GET /v1/inventory/{skuId}/reconciliation` 返回服务端校验的数量恒等式和不可变 `inventory_entries` 分页流水，供排障与未来管理查询反查。上述路由均不提供改库存或解锁功能；锁定、释放、扣减仅能由开包、订单和比赛的服务端命令完成。
 
 ## I13B MTGJSON 价格同步协议
@@ -95,7 +95,8 @@
 - `POST /v1/decks/validate` 接收 `{ name, banlistVersion?, cards[] }` 并只返回服务端合法性和可用库存提示，不写状态。`cards` 只允许本地 `skuId` 的 `commander|main|companion` 项，或固定 `virtual_basic`（`plains|island|swamp|mountain|forest`）；虚拟基本地没有 SKU、库存、持仓、市场或锁定记录。
 - `POST /v1/decks` 与 `PUT /v1/decks/{deckId}` 使用同一请求体并要求 `Idempotency-Key`。合法性不足、库存不足或禁牌不妨碍保存草稿，但结果明确 `legality.valid=false` 和问题列表；同键同参返回首次完整结果，同键异参返回 `409 IDEMPOTENCY_CONFLICT`。保存/编辑不会替浏览器或 Provider 判定最终报名资格，I25B 报名时仍须重新读取已保存卡表、可用库存与版本快照。
 - `commander-100/v1` 只接受单指挥官 `1+99` 或官方允许双指挥官 `2+98`，以 Oracle 身份判定单例，检查颜色标识、当前持久化官方禁牌表、Companion 限制和虚拟基本地颜色。禁牌表版本是草稿事实的一部分；新版本只影响显式采用它的后续构筑，旧草稿/未来报名快照不会被后台覆写。
-- Leyline 端点、超时和重试只由服务端 `LEYLINE_*` 配置控制。I24B 提供 `leyline-adapter/v1` 的 `decklistText` 正规化与允许 schema/AES-GCM 源记录工具，但依 ADR-003，草稿端点绝不调用 Provider；I25B 只能在报名事务的收费/锁卡/创建报名之前调用，失败时不得改写任何历史快照或资产。
+- Leyline 端点、超时和重试只由服务端 `LEYLINE_*` 配置控制。默认 Provider 为 `POST https://api.mtgleyline.com/api/deck-ranking/analyze`，请求体为 `{ format: "commander", decklistText }`；`leyline-adapter/v2` 接受 `scores.power`（0–100）及 Provider 在无缺失卡时返回的 `missingCards: null`，并在领域快照中归一化为空数组。依 ADR-003，草稿端点绝不调用 Provider；I25B 只能在报名事务的收费/锁卡/创建报名之前调用，失败时不得改写任何历史快照或资产。
+- 卡组编辑器对库存卡使用服务端投影的表格展示费用/颜色、类别、规则文本、攻防和本地图片预览；前端的名称、费用颜色、类别与指挥官颜色筛选只影响展示，不能判定颜色合法性或可用库存。库存表中只有 `typeLine` 为传奇生物的本地 SKU 开放“设为指挥官”入口；保存或报名仍须经服务端完整复核。`0027_card_display_fields.sql` 部署后必须重启 API 以应用迁移，再由管理员投递一次受控 `catalog.sync` 回填既有目录的费用、颜色和攻防快照。
 
 ## I18B P2P 双边委托预览与创建协议
 
@@ -159,9 +160,10 @@
 
 ## I25B 比赛、报名与确定性结算协议
 
-- `GET /v1/tournaments` 只返回当前认证玩家、按 `APP_TIMEZONE` 自然日隔离的个人 NPC 赛事。受控模板冻结座位、报名条件、费用、难度、每日次数、开赛方式、开放/截止时间、规则版本和奖励池；`daily.rollover` 与延迟访问都以 `(template_id,natural_date,owner_user_id)` 唯一键补建，绝不重置已有赛事。`GET /v1/tournaments/{tournamentId}/registration`、`/result` 只允许读取自己的快照和 NPC 公开重放材料。
+- `GET /v1/tournaments` 只返回当前认证玩家、按 `APP_TIMEZONE` 自然日隔离的个人 NPC 赛事。受控模板冻结座位、报名条件、费用、难度、每日次数、开赛方式、开放/截止时间、规则版本和奖励池；`daily.rollover` 与延迟访问都以 `(template_id,natural_date,owner_user_id)` 唯一键补建，绝不重置已有赛事。`GET /v1/tournaments/history` 只返回当前玩家已报名赛事及已有的服务端结算结果；`GET /v1/tournaments/{tournamentId}/registration`、`/result` 只允许读取自己的快照和 NPC 公开重放材料。
 - `POST /v1/tournaments/{tournamentId}/register` 接收 `{ deckId }` 与格式正确的 `Idempotency-Key`。先重新验证已保存 Commander 卡表、禁牌版本、Companion 和可用库存，再调用 Leyline；只有 Provider 成功后才在一个短事务追加加密源记录、评分/完整卡表快照、报名、所有非虚拟基本地（含 Companion）hold、报名费、审计和唯一 `tournament.settle` 任务。评分失败、卡组变化或库存冲突不会收费、锁卡或创建报名。
+- Leyline 评分不可用返回 `503 SCORING_UNAVAILABLE`；`error.details` 仅包含受控的 `provider: "leyline"`、`failureReason`（`timeout`、`network`、`http_status`、`invalid_json`、`invalid_schema` 或 `unknown`）、`attempts` 和可选 `httpStatus`。服务端以 `tournament.registration_scoring_failed` 记录同一分类与请求 ID；绝不返回或记录卡表、Provider 端点、原始响应或底层错误文本。真实卡组/禁牌版本变更仍返回 `409 VERSION_STALE`。
 - 单场、瑞士与预报名赛事由 `tournament/v1` 只消费报名评分快照和持久化 seed 结算。瑞士固定 4/1/0/1/0、公布人数轮次和晋级线；NPC 填满空座、不会领取奖励，只有冠军奖励位同分才进行 seed 驱动的加赛。结算在一个短事务释放 hold（不 capture 卡牌）、写结果/奖励/随机池候选与命中项、`tournament.settled` 和审计；重复领取任务或重放报名不会再次收费、解锁或奖励。
 - 奖励池可原子授予 `GAME_CREDIT`、本地 SKU 或当时在售补充包。NPC 奖励使用 `GET /v1/tournament-pack-grants` 与 `POST /v1/tournament-pack-grants/{grantId}/claim`；玩家赛事奖励使用对应的 `/v1/player-tournament-pack-grants` 路径。两类领取均以幂等键一次性消费凭证，并把入库、开包事实、审计与凭证状态放在同一事务。
-- 玩家赛事：`POST /v1/player-tournaments` 创建受控 Commander 游戏内或现实桌赛事，并绑定服务器发布的奖励配置（编辑能力留给 I30B）；`GET /v1/player-tournaments/{id}`、`/registrations`、`/rounds`、`/result` 只对创建者或报名者可读。游戏内报名提交 `{ deckId }` 并按上述服务端快照/hold 规则执行，`POST /start` 投递唯一结算任务；现实桌报名只接受 `{ deckName }`，不保存或锁定实体卡组。现实桌配对、结果提交、全桌确认、退出、争议和最终结算分别走 `/rounds`、`/result`、`/confirm`、`/withdraw`、`/disputes`、`/settle`，所有写请求都需幂等键。
+- 玩家赛事：`POST /v1/player-tournaments` 创建受控 Commander 游戏内或现实桌赛事，并绑定服务器发布的奖励配置（编辑能力留给 I30B）；`GET /v1/player-tournaments` 只列出当前创建者或报名者可读取的赛事，`GET /v1/player-tournaments/{id}`、`/registrations`、`/rounds`、`/result` 只对创建者或报名者可读。游戏内报名提交 `{ deckId }` 并按上述服务端快照/hold 规则执行，`POST /start` 投递唯一结算任务；现实桌报名只接受 `{ deckName }`，不保存或锁定实体卡组。现实桌配对、结果提交、全桌确认、退出、争议和最终结算分别走 `/rounds`、`/result`、`/confirm`、`/withdraw`、`/disputes`、`/settle`，所有写请求都需幂等键。
 - 现实桌的服务端规则为目标每桌 4–8 人（人数不足时不拒绝赛事）、胜 4、平局全桌 1、弃权/退出 0；未获同桌全体确认前不记分。只有跨越不同奖励配置的同分名次会生成 `stage=playoff` 的额外同桌，且仍须全桌确认至分出名次。争议只可由 `POST /v1/admin/tournament-disputes/{disputeId}/resolve`（admin、理由、赋分、幂等键）结案。非 NPC seed、完整配对和重放不向玩家返回，仅 `GET /v1/admin/player-tournaments/{tournamentId}/replay` 可读。

@@ -22,7 +22,7 @@ describe("loadApiConfig", () => {
       MTGJSON_PRINTINGS_ENDPOINT: "https://mtgjson.com/api/v5/AllPrintings.json.gz",
       MTGJSON_ALLPRICES_ENDPOINT: "https://mtgjson.com/api/v5/AllPrices.json.gz",
       MTGJSON_USER_AGENT: "MTG-Market-Simulator/0.1 (local deployment)",
-      LEYLINE_ENDPOINT: "https://api.leyline.gg/v1/evaluate",
+      LEYLINE_ENDPOINT: "https://api.mtgleyline.com/api/deck-ranking/analyze",
       LEYLINE_TIMEOUT_MS: 5000,
       LEYLINE_MAX_RETRIES: 1,
       DECK_RESPONSE_ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="

@@ -16,6 +16,7 @@ function seed(database: ReturnType<typeof openSqliteDatabase>): void {
   database.prepare("INSERT INTO users (id, email, display_name, password_hash, role, created_at, updated_at) VALUES ('player-1', 'inventory@example.test', '库存玩家', 'hash', 'player', ?, ?)").run(now, now);
   database.prepare("INSERT INTO card_sets (id, code, name, released_at, source, source_reference, created_at) VALUES ('set-1', 'TST', '测试系列', NULL, 'manual-test', NULL, ?)").run(now);
   database.prepare("INSERT INTO card_printings (id, set_id, name, collector_number, scryfall_id, oracle_text, rarity, legalities_json, artist, source, source_reference, is_manual_exception, created_at, updated_at) VALUES ('printing-1', 'set-1', '库存测试卡', '1', NULL, NULL, 'common', '{}', NULL, 'manual-test', NULL, 1, ?, ?)").run(now, now);
+  database.prepare("UPDATE card_printings SET mana_cost = '{1}{R}', colors_json = '[\"R\"]', color_identity_json = '[\"R\"]', type_line = 'Creature — Test', power = '2', toughness = '3', oracle_text = '测试效果' WHERE id = 'printing-1'").run();
   database.prepare("INSERT INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES ('11111111-1111-4111-8111-111111111111', 'printing-1', 'nonfoil', 1, 'manual-test', NULL, 1, ?, ?)").run(now, now);
 }
 function testDatabase() { const directory = mkdtempSync(join(tmpdir(), "mtg-inventory-")); directories.push(directory); const database = openSqliteDatabase(join(directory, "test.db")); seed(database); return database; }
@@ -96,7 +97,7 @@ describe("I10B 库存、锁定与对账", () => {
     const reconciliation = await app.inject({ method: "GET", url: `/v1/inventory/${skuId}/reconciliation`, headers: { authorization } });
     expect(unauthorized.statusCode).toBe(401);
     expect(list.json()).toMatchObject({ ok: true, data: { page: { total: 1 } } });
-    expect(list.json().data.items[0]).toMatchObject({ skuId, quantity: 2, availableQuantity: 2, averageCost: { amount: 100 } });
+    expect(list.json().data.items[0]).toMatchObject({ skuId, quantity: 2, availableQuantity: 2, averageCost: { amount: 100 }, sku: { manaCost: "{1}{R}", colors: ["R"], colorIdentity: ["R"], typeLine: "Creature — Test", power: "2", toughness: "3", oracleText: "测试效果" } });
     expect(detail.json()).toMatchObject({ ok: true, data: { holding: { skuId, marketUnitPrice: null, marketValue: null, unrealizedProfitLoss: null, marketValueUnavailableReason: "no_snapshot" } } });
     expect(reconciliation.json()).toMatchObject({ ok: true, data: { skuId, reconciled: true, entries: { items: [expect.objectContaining({ reason: "api_fixture" })] } } });
     await app.close(); database.close();

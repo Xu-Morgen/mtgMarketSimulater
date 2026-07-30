@@ -106,6 +106,7 @@ export type ApiErrorCode =
   | "INSUFFICIENT_INVENTORY"
   | "INVENTORY_LOCKED"
   | "PRICE_UNAVAILABLE"
+  | "SCORING_UNAVAILABLE"
   | "VERSION_STALE"
   | "IDEMPOTENCY_KEY_REQUIRED"
   | "IDEMPOTENCY_CONFLICT"
@@ -197,6 +198,14 @@ export interface CatalogSkuDto extends CardSku {
   printingId: string;
   setName: string;
   rarity: string;
+  /** Scryfall 费用符号的本地快照；null 表示该印刷未提供。 */
+  manaCost: string | null;
+  /** 卡面颜色与颜色标识均由服务器目录快照返回，浏览器只用于筛选展示。 */
+  colors: Array<"W" | "U" | "B" | "R" | "G">;
+  colorIdentity: Array<"W" | "U" | "B" | "R" | "G">;
+  typeLine: string;
+  power: string | null;
+  toughness: string | null;
   legalities: Record<string, string>;
   source: CatalogSource;
   sourceReference: string | null;
@@ -328,8 +337,8 @@ export interface InventoryDto {
 export interface InventoryHoldingDto extends InventoryDto {
   sku: Pick<
     CatalogSkuDto,
-    "id" | "name" | "setCode" | "setName" | "collectorNumber" | "finish" | "imagePath" | "tradable"
-  >;
+    "id" | "name" | "setCode" | "setName" | "collectorNumber" | "finish" | "imagePath" | "tradable" | "manaCost" | "colors" | "colorIdentity" | "typeLine" | "power" | "toughness"
+  > & { oracleText: string | null };
   /** 没有有效价格快照时为 null，原因由服务端明确给出。 */
   marketValueUnavailableReason: "no_snapshot" | "stale_snapshot" | null;
 }
@@ -782,6 +791,8 @@ export interface TournamentDto { id: string; templateId: string; naturalDate: st
 export interface TournamentRegistrationDto { id: string; tournamentId: string; deckId: string; powerSnapshot: DeckPowerSnapshotDto; status: "registered" | "settled" | "eliminated"; registeredAt: string; }
 export interface TournamentRewardDetailDto { kind: "GAME_CREDIT" | "pack" | "sku" | "none"; amount: number; packId: string | null; skuId: string | null; }
 export interface TournamentSettlementDto { tournamentId: string; registrationId: string; rank: number; wins: number; draws: number; losses: number; byes: number; forfeits: number; points: number; reward: Money; rewardDetail: TournamentRewardDetailDto; ruleVersion: string; settledAt: string; replay: { seed: string; playerScore: number; npcScores: Array<{ id: string; score: number }>; swissCut: number; standings: Array<{ id: string; points: number; opponentPoints: number }>; rounds: Array<{ round: number; opponentName: string; outcome: "win" | "draw" | "loss" | "bye" | "forfeit"; stage: "single" | "swiss" | "elimination" | "playoff" }> }; }
+/** 玩家自己的 NPC 已报名赛事历史；结果和重放均为服务端已结算投影。 */
+export interface TournamentHistoryItemDto { tournament: TournamentDto; registration: TournamentRegistrationDto; result: TournamentSettlementDto | null; }
 
 export interface PlayerTournamentDto { id: string; creatorUserId: string; mode: "game" | "tabletop"; name: string; status: "open" | "in_progress" | "settled" | "disputed" | "cancelled"; ruleVersion: string; createdAt: string; settledAt: string | null; }
 export interface PlayerTournamentRegistrationDto { id: string; tournamentId: string; deckName: string; mode: "game" | "tabletop"; status: "registered" | "withdrawn" | "eliminated"; points: number; registeredAt: string; }

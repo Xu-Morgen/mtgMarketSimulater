@@ -12,6 +12,10 @@
 
 `packs/packs-page.tsx` 通过 `api/packs-api.ts` 读取 I11B 已发布的补充包配置，并在 `/packs` 与 `/packs/<packId>` 分别展示列表和卡位概率详情。I12F 在 `/packs` 读取服务端购买预览并只提交其规则版本，成功后以服务端 `PackOpeningDto` 显示可跳过动画和单次结果；`/packs/history` 只读取服务端已结算记录。页面只格式化服务端返回的价格、规则版本、启用/禁用状态和 basis points；不暴露候选池、种子、保底状态，也不抽卡或生成结果。
 
+`tournaments/tournaments-page.tsx` 组合 `/tournaments`、`/tournaments/create` 与 `/tournaments/player/<id>`：今日 NPC 赛事、报名确认、服务器结算中/结果、奖励补充包、公开 NPC 重放、历史赛事、玩家赛事与现实桌轮次均通过 `api/tournaments-api.ts` 读取或提交。报名和玩家赛事写操作复用同一意图的幂等键；TanStack Query 成功后只失效服务器真相。浏览器不计算卡组资格、积分、排名、奖励、随机池、库存 hold 或同桌权限。
+
+`decks/decks-page.tsx` 的可用库存区域以服务端库存投影表格呈现名称、费用/颜色、类别、长规则文本 Tooltip、攻防和本地图片预览；预览复用库存页的 `CardImagePopover`，直接按列表行的本地 `imagePath` 读取受会话保护的缓存卡图。表格固定每页 10 行并支持翻页。最右侧只提交「设为指挥官 / 加入主牌 / 设为 Companion」草稿意图，其中只有服务端资料标记为传奇生物的卡开放指挥官按钮；已设为指挥官或加入主牌的 SKU 会从候选表隐藏，Companion 仍可更换。已选区同时显示实体卡张数与含虚拟基本地的卡组总张数；名称为空时保存会在本地提示而不发起请求。合法性与报名说明使用独立的响应式摘要列，在中等及更窄宽度自动改为单列，避免与横向滚动表格叠层。名称、费用颜色、类别（含传奇）与指挥官颜色筛选仅过滤已读取行；选定指挥官时默认按其服务器颜色标识筛选，不能替代服务端 Commander 颜色/库存复核。
+
 Next.js 的 `app/` 路由文件只负责路由协议和框架边界，应从本层引入对应的页面模块。本层不能使用 Next 保留目录名 `pages/`，以免被识别为旧 Pages Router。建议的后续目录为 `auth/`、`dashboard/`、`catalog/`、`packs/`、`inventory/`、`market/`、`orders/`、`decks/`、`tournaments/`、`admin/`。
 
 `admin/` 至少包含后台首页、活动、玩家、内容/参数、任务/Agent 和日志页面。管理页面只提交服务端预览和显式管理命令；不能直接编辑最终余额/库存、修改外部快照或删除日志。前端路由判断只改善体验，Fastify `/v1/admin/*` 的角色检查才是授权边界。

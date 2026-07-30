@@ -8,6 +8,7 @@ type CatalogRow = {
   sku_source: "scryfall" | "manual-test"; sku_source_reference: string | null; sku_manual_exception: number;
   tradable: number; image_path: string | null; image_source_url: string | null; image_status: "missing" | "cached" | "failed" | null;
   image_cached_at: string | null; oracle_text: string | null; artist: string | null; released_at: string | null;
+  mana_cost: string | null; colors_json: string; color_identity_json: string; type_line: string; power: string | null; toughness: string | null;
 };
 
 export type CatalogFilters = { query?: string | undefined; setCode?: string | undefined; rarity?: string | undefined; finish?: "nonfoil" | "foil" | "etched" | undefined; cursor?: string | undefined; limit: number };
@@ -19,7 +20,7 @@ function item(row: CatalogRow): CatalogSkuDto {
   return {
     id: row.sku_id, printingId: row.printing_id, scryfallId: row.scryfall_id ?? `manual:${row.printing_id}`, name: row.name,
     setCode: row.set_code, setName: row.set_name, collectorNumber: row.collector_number, finish: row.finish,
-    rarity: row.rarity, legalities: JSON.parse(row.legalities_json) as Record<string, string>, imagePath: publicImagePath(row.image_path),
+    rarity: row.rarity, manaCost: row.mana_cost, colors: JSON.parse(row.colors_json) as CatalogSkuDto["colors"], colorIdentity: JSON.parse(row.color_identity_json) as CatalogSkuDto["colorIdentity"], typeLine: row.type_line, power: row.power, toughness: row.toughness, legalities: JSON.parse(row.legalities_json) as Record<string, string>, imagePath: publicImagePath(row.image_path),
     tradable: row.tradable === 1, source: row.sku_source, sourceReference: row.sku_source_reference,
     isManualException: row.sku_manual_exception === 1, image: image(row)
   };
@@ -55,7 +56,7 @@ export class SqliteCatalogRepository {
       p.collector_number, sku.finish, p.rarity, p.legalities_json, sku.source AS sku_source,
       sku.source_reference AS sku_source_reference, sku.is_manual_exception AS sku_manual_exception, sku.tradable,
       image.cache_path AS image_path, image.source_url AS image_source_url, image.status AS image_status, image.cached_at AS image_cached_at,
-      p.oracle_text, p.artist, s.released_at
+      p.oracle_text, p.artist, s.released_at, p.mana_cost, p.colors_json, p.color_identity_json, p.type_line, p.power, p.toughness
       FROM card_skus sku JOIN card_printings p ON p.id = sku.printing_id JOIN card_sets s ON s.id = p.set_id
       LEFT JOIN card_image_cache image ON image.printing_id = p.id`;
   }

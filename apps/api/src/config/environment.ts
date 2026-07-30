@@ -22,7 +22,7 @@ const environmentSchema = z.object({
   ,MTGJSON_PRINTINGS_ENDPOINT: z.string().url().default("https://mtgjson.com/api/v5/AllPrintings.json.gz")
   ,MTGJSON_ALLPRICES_ENDPOINT: z.string().url().default("https://mtgjson.com/api/v5/AllPrices.json.gz")
   ,MTGJSON_USER_AGENT: z.string().trim().min(1).max(256).default("MTG-Market-Simulator/0.1 (local deployment)")
-  ,LEYLINE_ENDPOINT: z.string().url().default("https://api.leyline.gg/v1/evaluate")
+  ,LEYLINE_ENDPOINT: z.string().url().default("https://api.mtgleyline.com/api/deck-ranking/analyze")
   ,LEYLINE_TIMEOUT_MS: z.coerce.number().int().min(100).max(30_000).default(5_000)
   ,LEYLINE_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(1)
   // 默认值仅便于本地测试；生产部署必须通过受控环境覆盖为随机 32 字节密钥。

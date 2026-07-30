@@ -186,7 +186,7 @@ export class CatalogSyncService {
       "INSERT INTO card_sets (id, code, name, released_at, source, source_reference, created_at) VALUES (?, ?, ?, ?, 'scryfall', ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, released_at = excluded.released_at, source_reference = excluded.source_reference"
     );
     const insertPrinting = this.database.prepare(
-      "INSERT INTO card_printings (id, set_id, name, collector_number, scryfall_id, oracle_id, oracle_text, rarity, legalities_json, artist, color_identity_json, type_line, keywords_json, mana_value, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scryfall', ?, 0, ?, ?) ON CONFLICT(id) DO UPDATE SET set_id = excluded.set_id, name = excluded.name, collector_number = excluded.collector_number, scryfall_id = excluded.scryfall_id, oracle_id = excluded.oracle_id, oracle_text = excluded.oracle_text, rarity = excluded.rarity, legalities_json = excluded.legalities_json, artist = excluded.artist, color_identity_json = excluded.color_identity_json, type_line = excluded.type_line, keywords_json = excluded.keywords_json, mana_value = excluded.mana_value, source_reference = excluded.source_reference, updated_at = excluded.updated_at"
+      "INSERT INTO card_printings (id, set_id, name, collector_number, scryfall_id, oracle_id, oracle_text, rarity, legalities_json, artist, color_identity_json, colors_json, mana_cost, type_line, power, toughness, keywords_json, mana_value, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scryfall', ?, 0, ?, ?) ON CONFLICT(id) DO UPDATE SET set_id = excluded.set_id, name = excluded.name, collector_number = excluded.collector_number, scryfall_id = excluded.scryfall_id, oracle_id = excluded.oracle_id, oracle_text = excluded.oracle_text, rarity = excluded.rarity, legalities_json = excluded.legalities_json, artist = excluded.artist, color_identity_json = excluded.color_identity_json, colors_json = excluded.colors_json, mana_cost = excluded.mana_cost, type_line = excluded.type_line, power = excluded.power, toughness = excluded.toughness, keywords_json = excluded.keywords_json, mana_value = excluded.mana_value, source_reference = excluded.source_reference, updated_at = excluded.updated_at"
     );
     const insertSku = this.database.prepare(
       "INSERT INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, ?, 0, 'scryfall', ?, 0, ?, ?) ON CONFLICT(printing_id, finish) DO UPDATE SET tradable = 0, source_reference = excluded.source_reference, updated_at = excluded.updated_at"
@@ -228,7 +228,11 @@ export class CatalogSyncService {
         JSON.stringify(card.legalities ?? {}),
         card.artist ?? null,
         JSON.stringify(card.color_identity ?? []),
+        JSON.stringify(card.colors ?? []),
+        card.mana_cost ?? null,
         card.type_line ?? "",
+        card.power ?? null,
+        card.toughness ?? null,
         JSON.stringify(card.keywords ?? []),
         manaValue,
         card.id,
