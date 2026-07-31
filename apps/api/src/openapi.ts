@@ -62,6 +62,7 @@ export const publicApiPaths = [
   "/v1/auth/logout",
   "/v1/auth/session",
   "/v1/archive",
+  "/v1/dashboard",
   "/v1/account",
   "/v1/ledger",
   "/v1/catalog/cards",
@@ -327,6 +328,12 @@ export const openApiDocument = {
       get: {
         summary: "查询当前用户的存档摘要与净资产占位",
         responses: { "200": { description: "存档摘要" }, "404": { description: "尚未创建存档" } }
+      }
+    },
+    "/v1/dashboard": {
+      get: {
+        summary: "查询玩家首页的服务端聚合快照",
+        responses: { "200": { description: "余额、净资产、收藏、今日资金/比赛、指数和待办" }, "404": { description: "尚未创建游戏存档" } }
       }
     },
     "/v1/account": {

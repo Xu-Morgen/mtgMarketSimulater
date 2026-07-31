@@ -137,6 +137,12 @@
 - `POST /v1/daily-work-funding/claim`（player）请求体必须是 `{}`，要求格式正确的 `Idempotency-Key`。当日已由 `daily.rollover` 开放且已建档时，返回 `201 { funding }`；同键同参返回首次 `200`，同键异参为 `409 IDEMPOTENCY_CONFLICT`，未开放/未建档/同日换键重复领取为 `409 RESOURCE_CONFLICT`。成功结果包含金额、自然日、时区、规则版本和领取时间。
 - `daily.rollover` 的 job payload 是服务端内部协议，不暴露给浏览器；它固定日期、IANA 时区和工作资金规则版本，仅创建资格快照，不直接给任何用户入账。
 
+## I27F 玩家首页聚合协议
+
+- `GET /v1/dashboard`（player）返回只读 `PlayerDashboardDto`：账户余额、完整估值的净资产、收藏种类/数量/市值、未报价持仓数、当日工作资金资格、今日 NPC 赛事计数、市场指数和服务端待办。未建档返回 `404 RESOURCE_NOT_FOUND`。
+- `netWorth` 与 `collection.marketValue` 只有在全部当前持仓均有有效游戏内报价时才返回金额；任一持仓缺价则为 `null` 并携带 `unpricedSkuCount`。浏览器不得把库存、报价或账户余额自行相加后作为替代值。
+- 此端点无需幂等键、不写审计或经济流水；为与 `GET /v1/tournaments` 保持相同的日模板保障，首次读取某自然日可能由 Tournament application 惰性补建该玩家的受控赛事模板，但不会报名、锁定资产、结算或发奖。资金领取、开包、交易、报名、成就和奖励继续使用所属命令端点及既有幂等协议。
+
 ## I17B 价格历史、每日同步与 AllPrices 回填协议
 
 - `GET /v1/market/quotes/{skuId}/history?range=7d|30d|all` 与 `GET /v1/market/index/history?range=7d|30d|all` 要求有效会话，按自然日采样返回 `PriceHistoryDto`/`MarketIndexHistoryDto`。历史来自只追加的 `price_snapshot_entries`（reference）与 `market_quotes`（game），同日多次同步/重定价取该日最新值；任一价格缺失为 null，空历史返回空 `points` 数组而非 `404`，确保失败同步仍能展示旧价或空态。浏览器不得自行计算曲线或推断缺失值。

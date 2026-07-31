@@ -6,13 +6,15 @@ import { failure, success } from "../../../shared/http/api-response.js";
 import { requireRole } from "../../auth/api/auth-routes.js";
 import { archiveRequestFingerprint, UserService } from "../application/user-service.js";
 import type { ApiConfig } from "../../../config/environment.js";
+import { registerDashboardRoutes } from "../../dashboard/api/dashboard-routes.js";
 
 const archiveBodySchema = z.object({}).strict();
 const ledgerQuerySchema = z.object({ cursor: z.string().regex(/^\d+$/).optional(), limit: z.coerce.number().int().min(1).max(100).default(20) }).strict();
 
 /** users API 仅负责认证、协议映射与幂等键提取，经济写入均委派给 application。 */
-export async function registerUserRoutes(app: FastifyInstance, database: Database.Database, config: Pick<ApiConfig, "APP_TIMEZONE" | "DAILY_WORK_FUNDING_RULE_VERSION">): Promise<void> {
+export async function registerUserRoutes(app: FastifyInstance, database: Database.Database, config: Pick<ApiConfig, "APP_TIMEZONE" | "DAILY_WORK_FUNDING_RULE_VERSION" | "DECK_RESPONSE_ENCRYPTION_KEY" | "LEYLINE_ENDPOINT" | "LEYLINE_TIMEOUT_MS" | "LEYLINE_MAX_RETRIES">): Promise<void> {
   const users = new UserService(database, { timezone: config.APP_TIMEZONE, ruleVersion: config.DAILY_WORK_FUNDING_RULE_VERSION });
+  await registerDashboardRoutes(app, database, config);
   app.post("/v1/archive", { preHandler: requireRole("player") }, async (request, reply) => {
     const key = request.headers["idempotency-key"];
     if (typeof key !== "string" || !isValidIdempotencyKey(key)) return reply.code(400).send(failure(request.requestId, "IDEMPOTENCY_KEY_REQUIRED", "写请求必须携带格式正确的 Idempotency-Key"));

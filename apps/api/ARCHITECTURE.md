@@ -175,4 +175,9 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 
 - `modules/achievements` 只消费已结算的 `tournament.settled` fact，绝不改写赛事结果，也不依赖 outbox dispatcher。`TournamentService` 在写入事实的同一事务投递以 fact ID 唯一的 `achievement.process`；任务至少执行一次，业务结果由成就解锁唯一约束收敛。
 - `AchievementService` 在 `InventoryService.withLedgerTransaction` 中读取事实和报名卡组快照、调用 `@mtg-market/rules` 的 `achievement/v1`，然后原子写入进度、解锁、奖励发放状态、每日风控计数及审计。货币奖励走 users application 账本，SKU 奖励走 inventory application，徽章仅作为不可交易展示物记录；任一写入失败均回滚。
+
+## 玩家首页聚合只读投影（I27F）
+
+- `modules/dashboard/application/PlayerDashboardService` 仅组合 users、inventory、decks、market 与 tournaments 的 application 查询；不直接读写其他模块基础设施或数据表，不建立缓存表，也不参与经济事务。
+- `GET /v1/dashboard` 要求 player 会话和已创建存档，返回 `PlayerDashboardDto`。完整净资产仅在所有持仓均有服务端市值时返回；任一持仓无有效报价则返回 `null`，避免用局部估值误导玩家。待办资格也由服务端在同一快照内给出。
 - 成就定义由 `0028_achievements.sql` 固定，并与规则包首批定义保持同一稳定 ID。`GET /v1/achievements`、`/unlocks` 与 `/detail?definitionId=` 均只返回当前玩家自己的服务端投影和来源标识；浏览器没有解锁或发奖命令。

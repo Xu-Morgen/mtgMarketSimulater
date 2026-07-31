@@ -5,7 +5,7 @@
  * 这里的事件只描述已经提交的业务事实，绝不能被当作结算命令消费。
  */
 
-export const CONTRACTS_VERSION = "2026-07-29" as const;
+export const CONTRACTS_VERSION = "2026-07-30" as const;
 
 export type CurrencyCode = "EUR" | "GAME_CREDIT";
 export type PriceSource = "mtgjson-cardmarket" | "manual-test";
@@ -407,6 +407,33 @@ export interface GameArchiveSummaryDto {
   netWorth: Money | null;
 }
 
+/** I27F 玩家首页只读投影；所有金额、收藏统计与待办资格均由服务端聚合。 */
+export interface PlayerDashboardDto {
+  balance: AccountBalanceDto;
+  /** 账户总额加可完整估值的库存市值；存在未报价持仓时为 null，避免误导性部分净资产。 */
+  netWorth: Money | null;
+  collection: {
+    distinctSkuCount: number;
+    totalCardCount: number;
+    marketValue: Money | null;
+    unpricedSkuCount: number;
+  };
+  dailyWorkFunding: DailyWorkFundingStatusDto;
+  todayTournaments: {
+    availableCount: number;
+    registeredCount: number;
+    settlingCount: number;
+    settledCount: number;
+  };
+  marketIndex: MarketIndexDto;
+  todos: Array<{
+    id: "claim_daily_work_funding" | "acquire_cards" | "build_deck" | "register_tournament";
+    label: string;
+    href: string;
+  }>;
+  capturedAt: string;
+}
+
 export interface QuoteDto {
   /** 不可变报价快照标识；交易确认必须回传它，客户端不得自行拼接金额。 */
   quoteId: string;
@@ -535,6 +562,14 @@ export interface MarketIndexHistoryDto {
   range: PriceHistoryRange;
   points: MarketIndexHistoryPointDto[];
   generatedAt: string;
+}
+
+/** I27F 首页市场指数；计算和采样均由服务端市场投影完成。 */
+export interface MarketIndexDto {
+  referenceIndex: number | null;
+  gameIndex: number | null;
+  quotedSkus: number;
+  capturedAt: string | null;
 }
 
 /** I13B 管理端价格同步状态；下载地址和 Provider 原始内容永不进入 DTO。 */

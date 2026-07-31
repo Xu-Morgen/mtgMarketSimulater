@@ -109,3 +109,32 @@ describe("I23B 每日工作资金 API", () => {
     await app.close(); database.close();
   });
 });
+
+describe("I27F 玩家首页聚合快照", () => {
+  it("只读返回服务端余额、收藏、今日赛事、市场指数与待办，不创建额外经济流水", async () => {
+    const { app, database } = await createTestApp();
+    const authorization = await playerAuthorization(app);
+    const beforeArchive = await app.inject({ method: "GET", url: "/v1/dashboard", headers: { authorization } });
+    await app.inject({ method: "POST", url: "/v1/archive", headers: { authorization, "idempotency-key": "dashboard-archive-0001" }, payload: {} });
+    const before = database.prepare("SELECT COUNT(*) AS count FROM ledger_entries").get();
+    const overview = await app.inject({ method: "GET", url: "/v1/dashboard", headers: { authorization } });
+    const replay = await app.inject({ method: "GET", url: "/v1/dashboard", headers: { authorization } });
+
+    expect(beforeArchive).toMatchObject({ statusCode: 404 });
+    expect(overview.json()).toMatchObject({
+      ok: true,
+      data: {
+        overview: {
+          balance: { total: { amount: 10_000 }, available: { amount: 10_000 }, frozen: { amount: 0 } },
+          netWorth: { amount: 10_000, currency: "GAME_CREDIT" },
+          collection: { distinctSkuCount: 0, totalCardCount: 0, marketValue: { amount: 0 }, unpricedSkuCount: 0 },
+          marketIndex: { referenceIndex: null, gameIndex: null, quotedSkus: 0 }
+        }
+      }
+    });
+    expect(overview.json().data.overview.todos).toEqual(expect.arrayContaining([{ id: "acquire_cards", href: "/packs", label: "获得第一张卡牌" }, { id: "build_deck", href: "/decks/new", label: "构筑合法 Commander 卡组" }]));
+    expect(replay.statusCode).toBe(200);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM ledger_entries").get()).toEqual(before);
+    await app.close(); database.close();
+  });
+});

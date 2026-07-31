@@ -4,6 +4,7 @@ import type { DailyWorkFundingDto, DailyWorkFundingStatusDto } from "@mtg-market
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { archiveQueryKey, ledgerQueryKey } from "./archive-api";
+import { dashboardQueryKey } from "./dashboard-api";
 import { apiRequest } from "./client";
 import { useSession } from "../providers/session-provider";
 import { createIdempotencyKey } from "../utils/idempotency";
@@ -50,7 +51,8 @@ export function useClaimDailyWorkFundingMutation() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: dailyWorkFundingQueryKey(user.id) }),
         queryClient.invalidateQueries({ queryKey: archiveQueryKey(user.id) }),
-        queryClient.invalidateQueries({ queryKey: ledgerQueryKey(user.id, null) })
+        queryClient.invalidateQueries({ queryKey: ledgerQueryKey(user.id, null) }),
+        queryClient.invalidateQueries({ queryKey: dashboardQueryKey(user.id) })
       ]);
     }
   });

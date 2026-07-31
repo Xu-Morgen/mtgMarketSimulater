@@ -51,6 +51,13 @@
 - I26B 奖励为服务端自动发放：`granted` 显示为无需领取，`blocked` 显示为风控拦截并保留解锁事实。页面不以客户端时间判断“刚解锁”或奖励状态。
 - `tests/e2e/achievements.spec.ts` 与 `tests/manual/I26F.md` 覆盖空态、重复读取、自动发放/拦截状态、来源跳转及桌面/窄屏。
 
+## I27F 玩家闭环首页与收藏册（2026-07-30）
+
+- `api/dashboard-api.ts` 是 `/dashboard` 与 `/collection` 的唯一聚合入口，只读 `GET /v1/dashboard`；余额、完整估值的净资产、收藏统计、每日资金资格、今日赛事、市场指数和待办都来自 `PlayerDashboardDto`。领取成功只失效该用户的 dashboard/archive/ledger/daily 查询，浏览器不加总资产或生成待办。
+- `/dashboard` 展示服务端余额、净资产、今日资金、今日比赛、市场指数和待办入口。报价不完整时服务端返回 `netWorth: null`，页面明确显示不可用而不展示部分估值。
+- `/collection` 展示服务端收藏进度与库存快照，卡牌详情固定进入本地 `/catalog/[skuId]`；详情提供只读库存筛选和比赛入口。收藏、库存、比赛和成就都没有由浏览器直接写入的捷径。
+- `tests/e2e/player-loop.spec.ts` 与 `tests/manual/I27F.md` 在桌面及 390 × 844 窄屏复核资金领取后的刷新、收藏/详情跳转及全部闭环模块入口；开包、NPC/P2P、构筑、赛事和成就的写操作仍由各自专项 Playwright 与 I27B 对账测试验证。
+
 ## I06F 已落地基线（2026-07-24）
 
 - 根布局通过 `providers/app-providers.tsx` 装配 TanStack Query、会话恢复和全局通知。access token 只存浏览器内存，refresh token 保持 HttpOnly Cookie；会话恢复经 CSRF Cookie 调用 `/v1/auth/refresh`，不将令牌持久化到 localStorage。

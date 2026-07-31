@@ -2,6 +2,7 @@
 
 import { Descriptions, Modal, Spin } from "antd";
 import type { CatalogSkuDto } from "@mtg-market/contracts";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useCatalogDetailQuery } from "../api/catalog-api";
 import { loadPublicWebConfig, publicWebEnvironment } from "../config/public";
@@ -48,7 +49,7 @@ export function CatalogCardDetailModal({ skuId, onClose }: { skuId: string | nul
         { key: "artist", label: "画师", children: sku.artist ?? "未提供" },
         { key: "rules", label: "规则文本", children: sku.oracleText ?? "未提供" },
         { key: "legalities", label: "赛制合法性", children: Object.entries(sku.legalities).map(([format, legality]) => `${format}：${legality}`).join("；") || "未提供" }
-      ]} /></>;
+      ]} /><div className="actions"><Link className="button secondary" href={`/inventory?query=${encodeURIComponent(sku.name)}`}>在库存中查看</Link><Link className="button secondary" href="/tournaments">前往比赛</Link></div></>;
     })() : null}
   </Modal>;
 }

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { calculateMarketQuote, marketQuoteValidUntil, MARKET_RULE_VERSION, propagateMarketPressure, type MarketFactorInput } from "@mtg-market/rules";
-import type { MarketIndexHistoryDto, MarketIndexHistoryPointDto, MarketQuoteListItemDto, Page, PriceHistoryDto, PriceHistoryPointDto, PriceHistoryRange, QuoteDto } from "@mtg-market/contracts";
+import type { MarketIndexDto, MarketIndexHistoryDto, MarketIndexHistoryPointDto, MarketQuoteListItemDto, Page, PriceHistoryDto, PriceHistoryPointDto, PriceHistoryRange, QuoteDto } from "@mtg-market/contracts";
 import { withinTransaction } from "@mtg-market/database";
 import { publicImagePath } from "../../../shared/catalog/image-path.js";
 
@@ -193,7 +193,7 @@ export class MarketService {
     };
   }
 
-  index(): { referenceIndex: number | null; gameIndex: number | null; quotedSkus: number; capturedAt: string | null } {
+  index(): MarketIndexDto {
     const row = this.database.prepare(
       `SELECT AVG(reference_price_eur_cents) AS reference_index, AVG(market_price_amount) AS game_index,
         COUNT(*) AS quoted_skus, MAX(calculated_at) AS captured_at
