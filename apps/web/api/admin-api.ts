@@ -13,6 +13,8 @@ import type {
   AdminPackRulePreviewDto,
   AdminUserDetailDto,
   AdminUserListItemDto,
+  BackupRecordDto,
+  BackupRestoreRehearsalDto,
   CampaignScopeType,
   JobDto,
   MtgjsonImportDraftDto,
@@ -20,7 +22,7 @@ import type {
   Page
 } from "@mtg-market/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "./client";
+import { apiRequest, downloadAttachment } from "./client";
 import { useSession } from "../providers/session-provider";
 import { createIdempotencyKey } from "../utils/idempotency";
 
@@ -169,7 +171,17 @@ export const adminApi = {
   publishPackRule: (accessToken: string, packId: string, definition: PackRuleDefinition, idempotencyKey: string) =>
     apiRequest<{ packId: string; ruleVersion: string }>(`/v1/admin/packs/${packId}/rule-publish`, { method: "POST", accessToken, idempotencyKey, body: definition }),
   disablePack: (accessToken: string, packId: string, reason: string, idempotencyKey: string) =>
-    apiRequest<{ packId: string; enabled: boolean }>(`/v1/admin/packs/${packId}/disable`, { method: "POST", accessToken, idempotencyKey, body: { reason } })
+    apiRequest<{ packId: string; enabled: boolean }>(`/v1/admin/packs/${packId}/disable`, { method: "POST", accessToken, idempotencyKey, body: { reason } }),
+  // 备份与恢复演练（I31F）
+  backups: (accessToken: string, limit = 25) =>
+    apiRequest<{ items: BackupRecordDto[] }>(`/v1/admin/backups?limit=${limit}`, { accessToken }),
+  backup: (accessToken: string, id: string) =>
+    apiRequest<{ backup: BackupRecordDto }>(`/v1/admin/backups/${id}`, { accessToken }),
+  triggerBackup: (accessToken: string, kind: "manual" | "predeploy", idempotencyKey: string) =>
+    apiRequest<{ backup: BackupRecordDto; skipped: boolean }>("/v1/admin/backups", { method: "POST", accessToken, idempotencyKey, body: { kind } }),
+  downloadBackup: (accessToken: string, id: string, fileName: string) => downloadAttachment(`/v1/admin/backups/${id}/download`, { accessToken }, fileName),
+  restoreRehearsal: (accessToken: string, id: string, idempotencyKey: string) =>
+    apiRequest<{ rehearsal: BackupRestoreRehearsalDto }>(`/v1/admin/backups/${id}/restore-rehearsal`, { method: "POST", accessToken, idempotencyKey })
 };
 
 // ----- 查询 hooks -----
@@ -294,6 +306,18 @@ export function useAdminJobsQuery(status?: string, limit = 50) {
   });
 }
 
+export function useAdminBackupsQuery(limit = 25) {
+  const { accessToken, user } = useSession();
+  return useQuery({
+    queryKey: ["admin", "backups", user?.id ?? "anonymous", limit],
+    queryFn: () => adminApi.backups(accessToken!, limit),
+    enabled: Boolean(accessToken && user?.role === "admin"),
+    retry: false,
+    // 存在 running 备份时轮询，直到服务端推进为终态；无 running 时不轮询。
+    refetchInterval: (query) => (query.state.data?.data.items.some((item) => item.status === "running") ? 3_000 : false)
+  });
+}
+
 // ----- 写 mutation：组件层生成幂等键，成功后失效相关查询，不在浏览器伪成功 -----
 
 const adminKeys = {
@@ -306,7 +330,8 @@ const adminKeys = {
   market: ["admin", "market-parameters"] as const,
   series: ["admin", "series"] as const,
   drafts: ["admin", "import-drafts"] as const,
-  exceptions: ["admin", "exception-trades"] as const
+  exceptions: ["admin", "exception-trades"] as const,
+  backups: ["admin", "backups"] as const
 };
 
 function invalidateAllAdmin(client: ReturnType<typeof useQueryClient>): void {
@@ -487,5 +512,21 @@ export function useDisablePackMutation() {
   return useMutation({
     mutationFn: ({ packId, reason }: { packId: string; reason: string }) => adminApi.disablePack(accessToken!, packId, reason, createIdempotencyKey()),
     onSuccess: () => invalidateAllAdmin(client)
+  });
+}
+
+export function useTriggerBackupAdminMutation() {
+  const { accessToken } = useSession(); const client = useQueryClient();
+  return useMutation({
+    mutationFn: (kind: "manual" | "predeploy") => adminApi.triggerBackup(accessToken!, kind, createIdempotencyKey()),
+    onSuccess: () => { void client.invalidateQueries({ queryKey: adminKeys.backups }); }
+  });
+}
+
+export function useRestoreRehearsalAdminMutation() {
+  const { accessToken } = useSession(); const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => adminApi.restoreRehearsal(accessToken!, id, createIdempotencyKey()),
+    onSuccess: () => { void client.invalidateQueries({ queryKey: adminKeys.backups }); }
   });
 }

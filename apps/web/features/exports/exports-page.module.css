@@ -1,0 +1,21 @@
+.page { max-width: 1180px; }
+.intro { font-size: 1.05rem; line-height: 1.7; max-width: 760px; }
+.card { background: #fff; border: 1px solid #d8d6c5; border-radius: 12px; padding: 20px; margin-top: 18px; }
+.card h2 { margin-top: 0; }
+.formatPick { align-items: center; display: flex; flex-wrap: wrap; gap: 14px; margin: 14px 0; }
+.formatPick label { align-items: center; display: inline-flex; font-weight: 600; gap: 6px; }
+.actions { margin-top: 14px; }
+.tableWrap { background: #fff; border: 1px solid #d8d6c5; border-radius: 12px; overflow-x: auto; margin-top: 18px; }
+.tableWrap table { border-collapse: collapse; min-width: 820px; width: 100%; }
+.tableWrap th, .tableWrap td { border-bottom: 1px solid #e8e7db; padding: 10px 12px; text-align: left; vertical-align: top; }
+.tableWrap th { color: #596153; font-size: .85rem; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; }
+.tag { border-radius: 999px; display: inline-block; font-size: .8rem; padding: 3px 9px; white-space: nowrap; }
+.running { background: #eef0e6; color: #4b5320; }
+.succeeded { background: #e3f1e6; color: #1f5132; }
+.expired { background: #ede9dd; color: #5a5648; }
+.failed { background: #fdecee; color: #8d1f24; }
+.failure { background: #fdecee; border-radius: 8px; color: #8d1f24; padding: 8px 10px; }
+.notice { background: #f5f4ec; border-left: 4px solid #827a42; margin-top: 18px; padding: 12px; }
+.disabledEntry { background: #f4e4e4; border: 1px solid #9b2226; border-radius: 6px; color: #9b2226; cursor: not-allowed; font-weight: 700; padding: 5px 10px; }
+@media (max-width: 700px) { .tableWrap table { min-width: 640px; } }
