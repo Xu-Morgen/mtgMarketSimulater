@@ -25,7 +25,12 @@ describe("loadApiConfig", () => {
       LEYLINE_ENDPOINT: "https://api.mtgleyline.com/api/deck-ranking/analyze",
       LEYLINE_TIMEOUT_MS: 5000,
       LEYLINE_MAX_RETRIES: 1,
-      DECK_RESPONSE_ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+      DECK_RESPONSE_ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+      BACKUP_DIR: "./data/backups",
+      BACKUP_RETENTION: 7,
+      BACKUP_INTEGRITY_CHECK: true,
+      EXPORT_DIR: "./data/exports",
+      EXPORT_TTL_SECONDS: 600
     });
   });
 

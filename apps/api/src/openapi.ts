@@ -110,7 +110,13 @@ export const publicApiPaths = [
   "/v1/admin/mtgjson/drafts/{id}/discard",
   "/v1/admin/packs/{packId}/rule-preview",
   "/v1/admin/packs/{packId}/rule-publish",
-  "/v1/admin/packs/{packId}/disable"
+  "/v1/admin/packs/{packId}/disable",
+  "/v1/admin/backups",
+  "/v1/admin/backups/{id}",
+  "/v1/admin/backups/{id}/download",
+  "/v1/admin/backups/{id}/restore-rehearsal",
+  "/v1/exports",
+  "/v1/exports/{id}/download"
 ] as const;
 
 export const openApiDocument = {
@@ -527,6 +533,18 @@ export const openApiDocument = {
     "/v1/admin/mtgjson/drafts/{id}/discard": { post: { summary: "丢弃草稿", responses: { "200": { description: "已丢弃" }, "409": { description: "状态不允许丢弃" }, "403": { description: "需要管理员权限" } } } },
     "/v1/admin/packs/{packId}/rule-preview": { post: { summary: "补充包规则发布前预览", responses: { "200": { description: "概率与校验结果" }, "404": { description: "补充包不存在" }, "403": { description: "需要管理员权限" } } } },
     "/v1/admin/packs/{packId}/rule-publish": { post: { summary: "发布新版本补充包规则（不可原地覆盖）", responses: { "201": { description: "已发布" }, "409": { description: "版本已存在" }, "403": { description: "需要管理员权限" } } } },
-    "/v1/admin/packs/{packId}/disable": { post: { summary: "停用补充包", responses: { "200": { description: "已停用" }, "409": { description: "已停用或不存在" }, "403": { description: "需要管理员权限" } } } }
+    "/v1/admin/packs/{packId}/disable": { post: { summary: "停用补充包", responses: { "200": { description: "已停用" }, "409": { description: "已停用或不存在" }, "403": { description: "需要管理员权限" } } } },
+    "/v1/admin/backups": {
+      get: { summary: "管理员只读分页查询备份记录", responses: { "200": { description: "备份列表" }, "403": { description: "需要管理员权限" } } },
+      post: { summary: "以幂等键手动触发 SQLite 一致性备份", responses: { "201": { description: "备份完成" }, "202": { description: "备份进行中" }, "400": { description: "缺少幂等键" }, "403": { description: "需要管理员权限" } } }
+    },
+    "/v1/admin/backups/{id}": { get: { summary: "查询单条备份记录", responses: { "200": { description: "备份详情" }, "404": { description: "备份不存在" }, "403": { description: "需要管理员权限" } } } },
+    "/v1/admin/backups/{id}/download": { get: { summary: "受控下载成功备份文件（不暴露源库路径）", responses: { "200": { description: "备份文件流" }, "409": { description: "该备份不可下载" }, "404": { description: "备份不存在" }, "403": { description: "需要管理员权限" } } } },
+    "/v1/admin/backups/{id}/restore-rehearsal": { post: { summary: "在只读副本上演练恢复并校验完整性，绝不覆盖运行库", responses: { "200": { description: "演练摘要" }, "404": { description: "备份不存在" }, "409": { description: "仅成功备份可演练" }, "403": { description: "需要管理员权限" } } } },
+    "/v1/exports": {
+      get: { summary: "玩家只读查询自己的导出记录与状态", responses: { "200": { description: "导出列表" }, "401": { description: "认证无效或过期" } } },
+      post: { summary: "以幂等键生成玩家全部经营报表（CSV/JSON，含公式注入防护）", responses: { "201": { description: "导出完成" }, "202": { description: "导出进行中" }, "400": { description: "缺少幂等键或格式无效" }, "401": { description: "认证无效或过期" } } }
+    },
+    "/v1/exports/{id}/download": { get: { summary: "下载自己的导出文件（服务端复核 ownership 防越权）", responses: { "200": { description: "导出文件流" }, "404": { description: "导出不存在、已过期或无权下载" }, "401": { description: "认证无效或过期" } } } }
   }
 } as const;

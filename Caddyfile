@@ -1,0 +1,29 @@
+# MTG Market Simulator Caddy 反向代理配置。
+#
+# DOMAIN 环境变量决定站点地址：
+#   - 留空（默认 :80）：纯 IP/本地部署，Caddy 只监听 80 端口走 HTTP。
+#   - 设为你的域名（如 card.example.com）：Caddy 自动申请并续期 Let's Encrypt 证书，启用 HTTPS。
+#
+# {$DOMAIN::80} 语法：读取环境变量 DOMAIN，未设置时回退到 :80。
+# 详见 docs/deploy.md 的“启用 HTTPS”一节。
+
+{$DOMAIN::80} {
+	encode zstd gzip
+
+	# 全部流量反代到 Next.js 容器；/api/* 由 Next rewrites 再转发到 api 容器。
+	reverse_proxy web:3000
+
+	# 安全响应头：禁止浏览器把下载的备份/导出当脚本内联执行。
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# 备份/导出通过 attachment 下载；帧嵌入按需放开，默认拒绝。
+		X-Frame-Options "DENY"
+	}
+
+	# 访问日志输出到 stdout，供 docker compose logs caddy 收集。
+	log {
+		output stdout
+		format console
+	}
+}

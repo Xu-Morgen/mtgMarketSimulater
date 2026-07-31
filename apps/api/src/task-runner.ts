@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { ensureDailyPriceSyncScheduled, ensureDailyRolloverScheduled, TaskRegistry, TaskWorker } from "./modules/jobs/application/task-service.js";
+import { ensureDailyPriceSyncScheduled, ensureDailyRolloverScheduled, ensureDailyBackupScheduled, TaskRegistry, TaskWorker } from "./modules/jobs/application/task-service.js";
 import { SqliteJobRepository } from "./modules/jobs/infrastructure/sqlite-job-repository.js";
 import type { ApiConfig } from "./config/environment.js";
 import { createCatalogSyncService } from "./modules/catalog/api/catalog-routes.js";
@@ -13,6 +13,7 @@ import { OrderService } from "./modules/orders/application/order-service.js";
 import { DailyRolloverService, type DailyRolloverPayload } from "./modules/users/application/daily-rollover-service.js";
 import { createTournamentService } from "./modules/tournaments/api/tournament-routes.js";
 import { createAchievementService } from "./modules/achievements/api/achievement-routes.js";
+import { BackupService } from "./modules/backup/application/backup-service.js";
 
 export interface TaskRunner {
   stop(): Promise<void>;
@@ -25,7 +26,7 @@ export function startTaskRunner(database: Database.Database, intervalMs = 1_000,
   let inFlight: Promise<void> | null = null;
   let lastDailyCheck = 0;
 
-  const tick = () => {
+    const tick = () => {
     if (stopping || inFlight) return;
     // 日切检查以 5 分钟为节流，避免每秒查询；自然日唯一键保证补跑至多一次。
     const current = now().getTime();
@@ -33,6 +34,7 @@ export function startTaskRunner(database: Database.Database, intervalMs = 1_000,
       lastDailyCheck = current;
       const checkedAt = now();
       ensureDailyPriceSyncScheduled(database, checkedAt);
+      ensureDailyBackupScheduled(database, checkedAt);
       if (dailyWorkFundingConfig) ensureDailyRolloverScheduled(database, { timezone: dailyWorkFundingConfig.APP_TIMEZONE, ruleVersion: dailyWorkFundingConfig.DAILY_WORK_FUNDING_RULE_VERSION }, checkedAt);
     }
     inFlight = worker.runOne().then(() => undefined).finally(() => { inFlight = null; });
@@ -89,6 +91,14 @@ export function createTaskRegistry(config: ApiConfig, database: Database.Databas
     const parsed = payload as { factEventId?: string };
     if (!parsed.factEventId) throw new Error("成就处理任务缺少 factEventId");
     achievements.processFactEvent({ factEventId: parsed.factEventId });
+  });
+  // I31B：备份在事务外产出 WAL 一致副本，失败只追加 failed 记录、绝不删最近成功备份。
+  // payload.kind 可为 scheduled（每日）/predeploy（部署前）；scheduled 以 UTC 自然日唯一键去重。
+  const backup = new BackupService(database, config.SQLITE_PATH, { BACKUP_DIR: config.BACKUP_DIR, BACKUP_RETENTION: config.BACKUP_RETENTION, BACKUP_INTEGRITY_CHECK: config.BACKUP_INTEGRITY_CHECK, EXPORT_DIR: config.EXPORT_DIR });
+  registry.register("backup.create", async (payload) => {
+    const parsed = (payload ?? {}) as { kind?: "scheduled" | "manual" | "predeploy" };
+    await backup.runBackup({ kind: parsed.kind ?? "scheduled", actorId: "system", requestId: null, idempotencyKey: `backup.create:daily:${new Date().toISOString().slice(0, 10)}` });
+    backup.pruneBackups();
   });
   return registry;
 }

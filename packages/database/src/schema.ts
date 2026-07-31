@@ -733,3 +733,9 @@ export const mtgjsonImportDrafts = sqliteTable(
     index("mtgjson_import_drafts_kind_set_index").on(table.draftKind, table.setCode)
   ]
 );
+
+// I31B 备份与导出记录表（迁移 0032_backups.sql / 0033_exports.sql）。
+// 这两张表只追加运维/导出事实，不属于经济真相，故不导出 Drizzle 对象；
+// 与只在迁移中定义的 bilateral_orders/tournaments 等表保持一致的访问约定（应用层用 raw SQL 读写）。
+// - backup_records：SQLite 一致性备份，由 backup.create 任务产出；失败只追加 failed，绝不删最近成功备份。
+// - export_records：玩家经营报表，严格按 user_id 过滤；下载时服务端再次复核 ownership 防越权。

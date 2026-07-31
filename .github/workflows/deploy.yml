@@ -1,0 +1,84 @@
+# MTG Market Simulator 部署工作流（GHCR 镜像 + SSH 拉起）。
+#
+# 触发：
+#   1. workflow_dispatch：手动触发，可选输入 image_tag（默认 latest）。
+#   2. push 到 main：CI 已推送 latest 镜像后自动部署。
+#
+# 流程：SSH 登 VPS → 预备份（部署前自动触发 backup.create, kind=predeploy）→
+#   docker compose pull + up -d（迁移随 API 启动自动跑）→ 轮询 /ready 直到 200 →
+#   失败则保留预备份并以非零退出告警（人工按 docs/deploy.md 回滚）。
+#
+# 所需 secrets（在仓库 Settings → Secrets 配置，文档见 docs/deploy.md）：
+#   SSH_PRIVATE_KEY  —— 部署用的 SSH 私钥（建议为只读部署密钥）。
+#   SSH_HOST         —— 目标服务器主机（IP 或域名）。
+#   SSH_USER         —— SSH 登录用户（需有 docker 权限）。
+#   DEPLOY_DIR       —— 服务器上 docker-compose.yml 所在目录（如 /opt/mtgMarketSimulater）。
+
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 要部署的镜像 tag（默认 latest）
+        required: false
+        default: latest
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 部署到生产服务器
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: 解析镜像 tag
+        id: tag
+        run: echo "value=${{ github.event.inputs.image_tag || 'latest' }}" >> "$GITHUB_OUTPUT"
+
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: 预备份（部署前自动触发 backup.create）
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            "cd ${{ secrets.DEPLOY_DIR }} && \
+             docker compose exec -T api node -e \"const d=require('better-sqlite3')('/app/data/market-simulator.db'); d.pragma('wal_checkpoint(TRUNCATE)'); d.close();\" && \
+             PREBACKUP_DIR=predeploy-\$(date +%Y%m%d-%H%M%S) && \
+             docker cp \$(docker compose ps -q api):/app/data ./backup-\$PREBACKUP_DIR && \
+             echo \"预备份完成：./backup-\$PREBACKUP_DIR\""
+
+      - name: 拉取并重启服务（迁移随 API 启动自动执行）
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            "cd ${{ secrets.DEPLOY_DIR }} && \
+             git pull --ff-only && \
+             docker compose pull && \
+             docker compose up -d"
+
+      - name: 健康检查（轮询 /ready，最多 90 秒）
+        id: health
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            "cd ${{ secrets.DEPLOY_DIR }} && \
+             for i in \$(seq 1 18); do \
+               CODE=\$(docker compose exec -T api wget -qO- http://localhost:3001/ready >/dev/null 2>&1 && echo ok || echo fail); \
+               if [ \"\$CODE\" = 'ok' ]; then echo 'ready'; exit 0; fi; \
+               sleep 5; \
+             done; \
+             echo '健康检查失败：服务未在 90 秒内就绪'; exit 1"
+
+      - name: 失败告警（保留预备份，需人工回滚）
+        if: failure()
+        run: |
+          echo "::warning::部署失败或健康检查未通过。服务器上已保留预备份目录 backup-predeploy-*。"
+          echo "请按 docs/deploy.md 的“回滚”步骤回滚到上一版本镜像，并检查 docker compose logs api。"
+          exit 1

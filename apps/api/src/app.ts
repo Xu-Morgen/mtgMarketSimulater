@@ -23,6 +23,8 @@ import { registerDeckRoutes } from "./modules/decks/api/deck-routes.js";
 import { registerTournamentRoutes } from "./modules/tournaments/api/tournament-routes.js";
 import { registerAchievementRoutes } from "./modules/achievements/api/achievement-routes.js";
 import { registerAdminRoutes } from "./modules/admin/api/admin-routes.js";
+import { registerBackupRoutes } from "./modules/backup/api/backup-routes.js";
+import { registerExportRoutes } from "./modules/export/api/export-routes.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -116,6 +118,8 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
   await registerTournamentRoutes(app, database, config);
   await registerAchievementRoutes(app, database, config);
   await registerAdminRoutes(app, config, database);
+  await registerBackupRoutes(app, config, database);
+  await registerExportRoutes(app, config, database);
 
   app.get("/health", async (request) => success(request.requestId, { status: "ok", database: databaseHealth(database) }));
 

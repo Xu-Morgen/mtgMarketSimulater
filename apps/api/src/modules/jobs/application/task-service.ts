@@ -87,6 +87,22 @@ export function ensureDailyRolloverScheduled(
   }, iso);
 }
 
+/**
+ * I31B 每日备份调度。以 UTC 自然日为唯一键投递 `backup.create`
+ *（uniqueKey=`backup.create:daily:<date>`）：同一天只投递一次，停机多日只补投当天而非逐日补投。
+ * 条件 UPDATE + 任务唯一键保证补跑至多投递一次；与 ensureDailyPriceSyncScheduled 同构。
+ */
+export function ensureDailyBackupScheduled(database: ConstructorParameters<typeof SqliteJobRepository>[0], now: Date): void {
+  const iso = now.toISOString();
+  const today = iso.slice(0, 10);
+  withinTransaction(database, () => {
+    const state = database.prepare("SELECT last_scheduled_date FROM backup_schedule_state WHERE singleton = 1").get() as { last_scheduled_date: string } | undefined;
+    if (state && state.last_scheduled_date >= today) return;
+    new SqliteJobRepository(database).enqueue({ type: "backup.create", payload: { kind: "scheduled" }, uniqueKey: `backup.create:daily:${today}`, runAfter: iso, maxAttempts: 3 }, iso);
+    database.prepare("UPDATE backup_schedule_state SET last_scheduled_date = ?, last_attempted_run_after = ?, updated_at = ? WHERE singleton = 1").run(today, iso, iso);
+  });
+}
+
 export class TaskRegistry {
   private readonly handlers = new Map<string, JobHandler>();
 

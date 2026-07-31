@@ -27,6 +27,14 @@ const environmentSchema = z.object({
   ,LEYLINE_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(1)
   // 默认值仅便于本地测试；生产部署必须通过受控环境覆盖为随机 32 字节密钥。
   ,DECK_RESPONSE_ENCRYPTION_KEY: z.string().trim().min(43).default(defaultDeckResponseEncryptionKey)
+  // I31B 备份与导出配置（纯服务端，绝不暴露给浏览器或放 NEXT_PUBLIC_）。
+  // 备份目录：保留策略至少保留 N 份成功备份，绝不删最近成功备份。
+  ,BACKUP_DIR: z.string().trim().min(1).default("./data/backups")
+  ,BACKUP_RETENTION: z.coerce.number().int().min(1).max(365).default(7)
+  ,BACKUP_INTEGRITY_CHECK: z.coerce.boolean().default(true)
+  // 导出目录与文件有效期（秒）：过期文件不可下载并定时清理。
+  ,EXPORT_DIR: z.string().trim().min(1).default("./data/exports")
+  ,EXPORT_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(600)
 }).superRefine((value, context) => {
   if (Buffer.from(value.DECK_RESPONSE_ENCRYPTION_KEY, "base64").length !== 32) context.addIssue({ code: "custom", path: ["DECK_RESPONSE_ENCRYPTION_KEY"], message: "DECK_RESPONSE_ENCRYPTION_KEY 必须是 32 字节 base64 密钥" });
   if (value.APP_ENV === "production" && value.DECK_RESPONSE_ENCRYPTION_KEY === defaultDeckResponseEncryptionKey) context.addIssue({ code: "custom", path: ["DECK_RESPONSE_ENCRYPTION_KEY"], message: "生产环境必须设置随机 DECK_RESPONSE_ENCRYPTION_KEY" });
@@ -38,6 +46,12 @@ export type ApiConfig = Omit<z.infer<typeof environmentSchema>, "CORS_ORIGINS" |
   /** 空数组表示不导入任何系列，避免意外把完整 Bulk Data 写入小型部署。 */
   CATALOG_ENABLED_SET_CODES: string[];
 };
+
+/** I31B 备份服务所需配置切片，便于测试注入受控值。 */
+export type BackupConfig = Pick<ApiConfig, "BACKUP_DIR" | "BACKUP_RETENTION" | "BACKUP_INTEGRITY_CHECK" | "EXPORT_DIR">;
+
+/** I31B 导出服务所需配置切片，便于测试注入受控值。 */
+export type ExportConfig = Pick<ApiConfig, "EXPORT_DIR" | "EXPORT_TTL_SECONDS">;
 
 /**
  * 环境变量只在启动边界读取。用例和基础设施通过显式配置接收值，避免在业务代码中

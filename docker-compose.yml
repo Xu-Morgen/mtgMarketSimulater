@@ -1,8 +1,9 @@
-# MTG Market Simulator 单机部署编排。两个服务共享同一镜像，通过不同 command 启动：
-#   api  —— Fastify + SQLite，唯一经济结算入口，监听 3001（仅容器内网络）。
-#   web  —— Next.js 生产服务，监听 3000（对外），经 rewrites 反向代理 /api → api:3001。
+# MTG Market Simulator 单机部署编排。三服务共享同一镜像，通过不同 command/职责启动：
+#   caddy —— 唯一对外入口（80/443），反代到 web:3000；有域名时自动 HTTPS，无域名时纯 HTTP。
+#   web   —— Next.js 生产服务，监听 3000（容器内），经 rewrites 反向代理 /api → api:3001。
+#   api   —— Fastify + SQLite，唯一经济结算入口，监听 3001（仅容器内网络）。
 #
-# 部署步骤与密钥生成见 docs/deploy.md。敏感配置从 .env.docker 读取，切勿提交。
+# 部署步骤、密钥生成与 Caddy 域名配置见 docs/deploy.md。敏感配置从 .env.docker 读取，切勿提交。
 
 services:
   api:
@@ -19,11 +20,14 @@ services:
       APP_ENV: "production"
       SQLITE_PATH: "/app/data/market-simulator.db"
       CATALOG_DATA_DIR: "/app/data/catalog"
+      # 备份与导出写入同一持久卷，重建容器不丢备份/导出与经济真相。
+      BACKUP_DIR: "/app/data/backups"
+      EXPORT_DIR: "/app/data/exports"
       # 代理模式下浏览器同源请求，CORS 白名单为本站自身。
-      WEB_ORIGIN: "${WEB_ORIGIN:-http://localhost:3000}"
-      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000}"
+      WEB_ORIGIN: "${WEB_ORIGIN:-http://localhost:80}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:80}"
     volumes:
-      # SQLite 与卡池目录持久化到命名卷，重建容器不丢经济真相。
+      # SQLite、卡池、备份与导出持久化到命名卷，重建容器不丢经济真相与备份。
       - api-data:/app/data
     expose:
       - "3001"
@@ -48,9 +52,28 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    ports:
-      - "${WEB_PORT:-3000}:3000"
+    expose:
+      - "3000"
     restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-80}:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      # DOMAIN 为空（纯 IP 部署）时 Caddyfile 走 :80；有域名时自动签发 HTTPS 证书。
+      DOMAIN: "${DOMAIN:-}"
+    depends_on:
+      - web
 
 volumes:
   api-data:
+  caddy-data:
+  caddy-config:

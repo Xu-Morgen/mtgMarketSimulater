@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { openSqliteDatabase } from "@mtg-market/database";
-import { ensureDailyPriceSyncScheduled, ensureDailyRolloverScheduled, TaskRegistry, TaskWorker } from "./application/task-service.js";
+import { ensureDailyPriceSyncScheduled, ensureDailyRolloverScheduled, ensureDailyBackupScheduled, TaskRegistry, TaskWorker } from "./application/task-service.js";
 import { SqliteJobRepository } from "./infrastructure/sqlite-job-repository.js";
 import { startTaskRunner } from "../../task-runner.js";
 
@@ -114,6 +114,31 @@ describe("I23B 每日日切调度", () => {
       { uniqueKey: "daily.rollover:2025-12-31", payload: { naturalDate: "2025-12-31", timezone: "America/Los_Angeles", workFundingRuleVersion: "daily-work-funds/v1" } },
       { uniqueKey: "daily.rollover:2026-01-04", payload: { naturalDate: "2026-01-04", timezone: "America/Los_Angeles", workFundingRuleVersion: "daily-work-funds/v1" } }
     ]);
+    database.close();
+  });
+});
+
+describe("I31B 每日备份调度", () => {
+  it("UTC 自然日切换时投递一次 backup.create，同日重放不重复投递", () => {
+    const { database } = fixture();
+    ensureDailyBackupScheduled(database, new Date("2026-07-31T23:59:00.000Z"));
+    const jobs = database.prepare("SELECT unique_key, payload_json FROM jobs WHERE type = 'backup.create'").all() as Array<{ unique_key: string; payload_json: string }>;
+    expect(jobs).toEqual([{ unique_key: "backup.create:daily:2026-07-31", payload_json: JSON.stringify({ kind: "scheduled" }) }]);
+    // 同日再次调用不应投递第二个任务。
+    ensureDailyBackupScheduled(database, new Date("2026-07-31T23:59:59.000Z"));
+    const sameDayJobs = database.prepare("SELECT unique_key FROM jobs WHERE type = 'backup.create'").all() as Array<{ unique_key: string }>;
+    expect(sameDayJobs.length).toBe(1);
+    const state = database.prepare("SELECT last_scheduled_date, last_attempted_run_after FROM backup_schedule_state WHERE singleton = 1").get() as { last_scheduled_date: string; last_attempted_run_after: string };
+    expect(state.last_scheduled_date).toBe("2026-07-31");
+    database.close();
+  });
+
+  it("跨日补跑以新自然日唯一键投递，停机多日只补一次而非逐日补投", () => {
+    const { database } = fixture();
+    ensureDailyBackupScheduled(database, new Date("2026-07-31T00:00:00.000Z"));
+    ensureDailyBackupScheduled(database, new Date("2026-08-03T00:00:00.000Z")); // 停机 3 天后
+    const jobs = database.prepare("SELECT unique_key FROM jobs WHERE type = 'backup.create' ORDER BY unique_key").all() as Array<{ unique_key: string }>;
+    expect(jobs).toEqual([{ unique_key: "backup.create:daily:2026-07-31" }, { unique_key: "backup.create:daily:2026-08-03" }]);
     database.close();
   });
 });

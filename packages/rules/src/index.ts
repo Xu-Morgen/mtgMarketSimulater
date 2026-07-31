@@ -624,3 +624,4 @@ export * from "./local-deck-power.js";
 export * from "./deck-feature-tags.js";
 export * from "./tournament-rules.js";
 export * from "./achievement-rules.js";
+export * from "./export-rules.js";

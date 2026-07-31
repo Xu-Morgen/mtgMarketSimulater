@@ -1147,6 +1147,44 @@ export interface AdminPackRulePreviewDto {
   issues: string[];
 }
 
+/** I31B 备份记录 DTO。不暴露源库绝对路径，浏览器只看到文件名与受控下载流。 */
+export interface BackupRecordDto {
+  id: string;
+  kind: "scheduled" | "manual" | "predeploy";
+  status: "running" | "succeeded" | "failed";
+  backupFileName: string | null;
+  sizeBytes: number | null;
+  sqliteIntegrityOk: boolean | null;
+  sha256: string | null;
+  failureReason: string | null;
+  createdBy: string;
+  createdAt: string;
+  completedAt: string | null;
+  requestId: string | null;
+}
+
+/** I31B 恢复演练结果 DTO：只读校验摘要，绝不覆盖运行库。 */
+export interface BackupRestoreRehearsalDto {
+  backupId: string;
+  backupFileName: string;
+  sqliteIntegrityOk: boolean;
+  coreTablesPresent: boolean;
+  sampleCounts: { users: number; accounts: number; inventoryHoldings: number; jobs: number };
+}
+
+/** I31B 玩家导出记录 DTO。文件路径不外泄；下载时服务端再次复核 ownership 防越权。 */
+export interface ExportRecordDto {
+  id: string;
+  kind: "all";
+  format: "csv" | "json";
+  fileName: string;
+  sizeBytes: number | null;
+  status: "running" | "succeeded" | "failed" | "expired";
+  failureReason: string | null;
+  expiresAt: string;
+  createdAt: string;
+}
+
 const requestIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 const idempotencyKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 const sha256Pattern = /^[a-f0-9]{64}$/;
