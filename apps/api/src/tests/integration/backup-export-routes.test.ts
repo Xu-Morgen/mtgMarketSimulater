@@ -210,8 +210,10 @@ describe("I31B 导出 export-routes（用户隔离 + CSV 注入防护）", () =>
   });
 
   it("通过 HTTP 路由：player 可生成并下载自己的导出，无 token 401，player 访问 admin 备份 403", async () => {
-    const { database } = fixture();
-    const app = await buildApp(database);
+    // POST /v1/exports 会写文件，必须隔离 EXPORT_DIR（与第 47 行备份用例一致），
+    // 否则命中 cwd 相对路径 ./data/exports；该共享目录不可写时记录 failed → 路由 500。
+    const { database, backupDir, exportDir } = fixture();
+    const app = await buildApp(database, { BACKUP_DIR: backupDir, EXPORT_DIR: exportDir });
     const player = await registerPlayer(app, "http-player@example.test");
     const create = await app.inject({ method: "POST", url: "/v1/exports", headers: { authorization: player.authorization, "idempotency-key": idKey("http-exp") }, payload: { formats: ["csv"] } });
     expect([201, 202]).toContain(create.statusCode);

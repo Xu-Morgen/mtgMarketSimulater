@@ -6,10 +6,16 @@ coverage/
 .env.local
 .env.docker
 .env.docker.local
-data/*.db
-data/*.db-shm
-data/*.db-wal
-data/images/
-data/backups/
+# 运行时 SQLite 数据库、WAL/SHM（运行时数据不纳入源码提交，见 AGENTS.md §5）
+*.db
+*.db-shm
+*.db-wal
+# apps/api/data 运行时数据：备份、导出、快照与卡图缓存；保留各目录 README 文档
+apps/api/data/backups/*
+!apps/api/data/backups/README.md
+apps/api/data/exports/*
+!apps/api/data/exports/README.md
+apps/api/data/snapshots/*
+!apps/api/data/snapshots/README.md
 apps/api/data/catalog/images/*
 apps/web/test-results/*

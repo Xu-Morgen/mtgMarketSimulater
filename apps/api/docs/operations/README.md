@@ -126,3 +126,48 @@
 
 - `achievement.process` 的 payload 只有 `{ factEventId }`，由写入 `tournament.settled` fact 时以 `achievement.process:{factEventId}` 唯一键投递。任务失败可按既有 jobs 重试语义安全重领；缺少、非赛事或重复 fact 均不得直接补写赛事、账本或库存。
 - 从 fact ID 只读关联 `achievement_progress.last_evaluated_fact_id`、`achievement_unlocks.source_fact_id/source_aggregate_id`、`achievement_reward_grants.correlation_id`、账本/库存流水和 `audit_logs`（`achievement.unlocked` 或 `achievement.reward_blocked`）。`rewardStatus=blocked` 是风控结果，不得通过直接更新 grant、计数或余额“补发”；后续补偿只能由受审计 application 命令实现。
+
+## I32B 发布门禁与首周观察
+
+I32B 是发布质量门禁迭代，不新增业务能力。本节把发布阻断条件、首周观察指标、回滚与值守流程收敛为可执行手册；任一门禁或观察指标异常即视为发布阻断或需介入处置。详细的部署/恢复/回滚命令见 [deploy.md](../../../docs/deploy.md)。
+
+### 发布前门禁清单（全部通过方可发布）
+
+发布前必须在干净检出上依次执行，并记录证据文件路径与结果摘要：
+
+1. **静态检查**：`pnpm check`（ESLint + 全 workspace `tsc --noEmit`）零错误。
+2. **全量测试**：`pnpm --filter @mtg-market/api test`（含规则、Fastify/SQLite 集成、任务/恢复、API 主流程）全绿；`pnpm --filter @mtg-market/rules test` 与 `pnpm --filter @mtg-market/database test` 全绿。
+3. **全局经济对账门禁**：`pnpm --filter @mtg-market/api test -- --run src/tests/integration/economic-reconciliation.test.ts` 必须通过。该套件在终态闭环与活跃锁定中间态两个场景下断言全部经济恒等式（账户/账本、库存/库存流水、冻结额守恒、库存锁定守恒、hold 引用闭包、奖励可追溯、事实事件完整性），任何一条不平即阻断发布。
+4. **服务端安全门禁**：`pnpm --filter @mtg-market/api test -- --run src/tests/integration/security-gate.test.ts` 必须通过。覆盖 Argon2id 密码哈希、错误/过期/无效令牌、CSRF 与 refresh 轮换、角色边界、认证限流、输入校验与统一包络、CORS 白名单、密钥隔离与 `NEXT_PUBLIC_*` 边界、管理命令审计与日志脱敏。
+5. **恢复演练门禁（I31B）**：在预备份上执行 `restoreRehearsal`，确认 `integrity_check` 通过且核心表行数与运行库一致；参见 `backup-export-routes.test.ts`。
+6. **CI/CD 构建**：`.github/workflows/ci.yml` 在目标 commit 上绿，GHCR 镜像 `:<git短sha>` 已推送。
+7. **问题分级**：不存在未解决的 P0/P1 问题。P0/P1 的定义与处置见下文「值守与升级路径」。
+
+### 首周观察指标（含阈值与查询）
+
+发布后首周每日检查以下指标；任一超阈值即按「值守与升级路径」介入。查询均在只读模式下执行，**禁止通过修改经济表、任务状态或 hold 来「修正」指标**。
+
+| 指标 | 阈值 / 期望 | 只读查询（容器内 SQLite） |
+| --- | --- | --- |
+| 任务失败率 | `jobs.status IN ('failed','dead')` 计数应趋近 0；`/ready` 的 `jobs` 摘要不应长期出现连续失败 | `SELECT type, status, COUNT(*) FROM jobs WHERE status IN ('failed','dead') GROUP BY type, status;` |
+| 价格快照新鲜度 | `price_sync_state` 最近成功运行时间应在当日 UTC 自然日内 | `SELECT last_successful_run_id, updated_at FROM price_sync_state;`（关联 `price_sync_runs.status='succeeded'`） |
+| 账本不平告警 | 运行全局经济对账只读 SQL（见 `economic-reconciliation.test.ts` 的恒等式），不平计数必须为 0 | 逐账户 `total_amount = available_amount + frozen_amount` 且 `total_amount = 账本净额`；逐持仓 `quantity = available + order_locked + tournament_locked` |
+| 备份保留与完整性 | `backup_records` 最旧 `succeeded` 不少于配置保留数（默认 7），且全部 `succeeded` 的 `sqlite_integrity_ok = 1` | `SELECT COUNT(*) FROM backup_records WHERE status='succeeded' AND sqlite_integrity_ok=1;` 与 `SELECT MIN(created_at) FROM backup_records WHERE status='succeeded';` |
+| 市场报价有效性 | `market_quotes` 的 `valid_until` 持续得到刷新，无大面积长期过期 | `SELECT COUNT(*) FROM market_quotes WHERE valid_until < datetime('now');` |
+
+> **AI 成本指标**：`OPENAI` 调用次数、token 与成本指标仅在 I34 可选能力启用后纳入观察；I33 发布前不投递 `narrative.generate`，本表不设 AI 阈值。
+
+### 回滚流程
+
+回滚触发条件与命令详见 [deploy.md](../../../docs/deploy.md) 第 6 节。摘要：
+
+- **健康检查失败（deploy.yml 已自动告警）**：`/ready` 轮询超 90 秒未返回 200 时，deploy 工作流保留预备份并以非零退出告警。人工回滚步骤：切回上一版本 GHCR `<sha>` 镜像 → `docker compose up -d` → 重新轮询 `/ready`。
+- **上线后数据/业务异常**：停服 → 用 `backup-predeploy-*` 预备份卷替换 `/app/data` → 重启。迁移只追加且向后兼容，回滚到较旧镜像通常安全；若回滚跨越破坏性迁移，优先用预备份恢复数据，不要混用旧镜像与新库。
+- **经济对账不平**：这是发布阻断级事件。先停止全部写流量、保留 SQLite WAL 与数据库文件、请求 ID、任务与审计证据；**禁止直接改账户、库存、hold、订单或流水来「补平」**。处置只能由所属 application 的受审计补偿命令在同事务写新流水与原因，无法安全处置时保持冻结并升级。
+
+### 值守与升级路径
+
+- **问题分级**：P0 = 经济真相被破坏（账本不平、库存/hold 漂移、重复扣款/发卡、奖励/保证金丢失、备份不可恢复）；P1 = 核心流程阻断但经济真相完好（任务连续失败、价格快照过期不可用、管理命令越权、限流/CSRF 失效）。其余为 P2 及以下。
+- **每日检查项**：上表五项指标 + `docker compose logs api` 错误摘要 + `/ready` 状态。
+- **异常升级路径**：①立即停止相关写流量（必要时 `docker compose stop api`）；②保留 WAL/数据库文件、请求 ID、任务 ID 与审计证据；③只读排障定位根因；④处置仅经所属 application 的受审计命令完成，不在数据库手改资产、订单、hold 或任务状态；⑤无法安全处置时保持冻结并升级到人工评审。
+- **禁止直接修数**：本手册与各模块排障节一致遵循「禁止直接修数」——任何疑似漂移只能以新流水 + 原因 + 审计在同事务修正，禁止覆盖 `accounts`、`inventory_holdings`、`fund_holds`、`bilateral_orders`、`bilateral_trades`、`jobs` 或审计的最终值，禁止删除流水或审计记录。
