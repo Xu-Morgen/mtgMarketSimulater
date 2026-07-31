@@ -23,14 +23,21 @@ async function recoverPlayerSession(page: Page): Promise<void> {
   await page.route("**/v1/auth/refresh", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ accessToken: "daily-work-funding-e2e-token", user: { id: userId, email: "daily-work-funding@example.test", displayName: "每日资金测试玩家", role: "player", createdAt: now } })) }));
 }
 
-async function mockDashboard(page: Page, ledgerReason = "initial_funding"): Promise<void> {
+/**
+ * I27F 起 dashboard 页改为读取 /v1/dashboard 聚合概览；每日资金卡片的 status 也来自该响应的
+ * overview.dailyWorkFunding（player-dashboard-page.tsx），而非单独的 /v1/daily-work-funding。
+ * 因此 mock 必须补上 /v1/dashboard，否则概览 404、资金卡片不渲染。
+ * statusProvider 让每个用例用闭包驱动 dailyWorkFunding，与 /v1/daily-work-funding mock 共享同一状态。
+ */
+async function mockDashboard(page: Page, ledgerReason = "initial_funding", statusProvider: () => ReturnType<typeof status> = status): Promise<void> {
   await page.route("**/v1/archive", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ archive: { id: "archive-i23f", userId, initialFundingRuleVersion: "initial-funding/v1", createdAt: now, balance: { total: { amount: 11_000, currency: "GAME_CREDIT" }, available: { amount: 11_000, currency: "GAME_CREDIT" }, frozen: { amount: 0, currency: "GAME_CREDIT" }, updatedAt: now }, netWorth: null } })) }));
   await page.route("**/v1/ledger?*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [{ id: `ledger-${ledgerReason}`, direction: "credit", amount: { amount: 1000, currency: "GAME_CREDIT" }, balanceAfter: { amount: 11_000, currency: "GAME_CREDIT" }, reason: ledgerReason, occurredAt: now }], page: { total: 1, hasMore: false, nextCursor: null } })) }));
+  await page.route("**/v1/dashboard", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ overview: { balance: { total: { amount: 11_000, currency: "GAME_CREDIT" }, available: { amount: 11_000, currency: "GAME_CREDIT" }, frozen: { amount: 0, currency: "GAME_CREDIT" }, updatedAt: now }, netWorth: null, collection: { distinctSkuCount: 0, totalCardCount: 0, marketValue: { amount: 0, currency: "GAME_CREDIT" }, unpricedSkuCount: 0 }, dailyWorkFunding: statusProvider(), todayTournaments: { availableCount: 0, registeredCount: 0, settlingCount: 0, settledCount: 0 }, marketIndex: { referenceIndex: null, gameIndex: null, quotedSkus: 0, capturedAt: now }, todos: [], capturedAt: now } })) }));
 }
 
 test("每日工作资金以服务端资格领取，双击只提交一次并刷新账本", async ({ page }) => {
-  await mockDashboard(page, "daily_work_funding");
   let currentStatus = status();
+  await mockDashboard(page, "daily_work_funding", () => currentStatus);
   let postCalls = 0;
   const keys: string[] = [];
   await page.route("**/v1/daily-work-funding", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ status: currentStatus })) }));
@@ -55,7 +62,7 @@ test("每日工作资金以服务端资格领取，双击只提交一次并刷�
 });
 
 test("已领取状态只显示服务端记录，不再投递领取请求", async ({ page }) => {
-  await mockDashboard(page, "daily_work_funding");
+  await mockDashboard(page, "daily_work_funding", () => status({ state: "claimed" }));
   let postCalls = 0;
   await page.route("**/v1/daily-work-funding", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ status: status({ state: "claimed" }) })) }));
   await page.route("**/v1/daily-work-funding/claim", async (route) => { postCalls += 1; await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify(failure("UNEXPECTED", "不应调用领取接口")) }); });
@@ -68,11 +75,12 @@ test("已领取状态只显示服务端记录，不再投递领取请求", async
 });
 
 test("跨日冲突后重新读取服务端日期与时区，不使用浏览器本地日期", async ({ page }) => {
-  await mockDashboard(page);
   let currentStatus = status({ naturalDate: "2026-07-29", timezone: "Asia/Shanghai" });
-  let statusCalls = 0;
+  // I27F 后每日资金状态由 /v1/dashboard 聚合返回；领取冲突后前端 invalidate dashboard 并重查，
+  // 因此用 statusProvider 被调用次数（即 dashboard 重查次数）取代旧的 /v1/daily-work-funding 调用计数。
+  let dashboardCalls = 0;
+  await mockDashboard(page, "initial_funding", () => { dashboardCalls += 1; return currentStatus; });
   await page.route("**/v1/daily-work-funding", async (route) => {
-    statusCalls += 1;
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ status: currentStatus })) });
   });
   await page.route("**/v1/daily-work-funding/claim", async (route) => {
@@ -86,5 +94,5 @@ test("跨日冲突后重新读取服务端日期与时区，不使用浏览器�
   await expect(page.getByText("服务器自然日已切换，请重新确认资格")).toBeVisible();
   await expect(page.getByText("服务端日期：2026-07-30（America/New_York）")).toBeVisible();
   await expect(page.getByText("下一次可领取：")).toBeVisible();
-  expect(statusCalls).toBeGreaterThanOrEqual(2);
+  expect(dashboardCalls).toBeGreaterThanOrEqual(2);
 });

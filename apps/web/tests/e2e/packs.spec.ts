@@ -139,6 +139,8 @@ test("玩家可查看服务端概率和禁用原因，并从详情返回商店�
 });
 
 test("购买预览、重复点击、跳过动画和刷新历史只展示一次服务端开包", async ({ page }) => {
+  // 串联购买、开包动画、详情、历史与刷新，叠加 dev 首次编译后超过默认 30s 单测超时；故单独放宽。
+  test.setTimeout(90_000);
   await registerPlayer(page);
   await mockPackList(page, [activePack]);
   await mockOpeningPresentations(page);
@@ -202,6 +204,9 @@ test("购买预览、重复点击、跳过动画和刷新历史只展示一次�
   expect(openCalls).toBe(1);
   expect(receivedKey).toMatch(/^[0-9a-f-]{36}$/i);
   expect(previewCalls).toBeGreaterThanOrEqual(1);
+  // 卡牌详情 Modal 仍打开，其遮罩（ant-modal-wrap）会拦截后续点击；先关闭再进入开包历史。
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "卡牌详情" })).toHaveCount(0);
   await page.getByRole("link", { name: "查看开包历史" }).first().click();
   await expect(page.getByRole("heading", { name: "开包历史" })).toBeVisible();
   await expect(page.getByText(opening.openedAt)).toBeVisible();

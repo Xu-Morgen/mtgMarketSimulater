@@ -30,6 +30,8 @@ async function session(page: Page) {
  * 进入每个环节，不以客户端计算来补齐任何一步。
  */
 test("玩家闭环从工作资金经获得卡牌、交易、构筑、比赛、成就到再投资均有连续浏览器入口", async ({ page }) => {
+  // 本用例串联 11+ 个路由，dev 模式每个路由首次按需编译 2–6s，累加后超过默认 30s 单测超时；故单独放宽。
+  test.setTimeout(120_000);
   let claimed = false;
   let claimCalls = 0;
   await page.route("**/v1/archive", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ archive: { id: "archive-i27f", userId, initialFundingRuleVersion: "initial-funding/v1", createdAt: now, balance: overview(claimed).balance, netWorth: null } })) }));

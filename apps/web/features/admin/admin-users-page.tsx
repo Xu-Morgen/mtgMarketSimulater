@@ -18,21 +18,25 @@ import { useToast } from "../../providers/toast-provider";
 import { formatDateTime } from "./admin-format";
 import styles from "./admin-shared.module.css";
 
+const PAGE_SIZE = 25;
+
 /** I30F 玩家数据管理：检索/详情、冻结/解冻、会话撤销与补偿修正（原因 → 预览 → 二次确认 → 查看新流水/审计）。 */
 export function AdminUsersPage() {
   const [username, setUsername] = useState("");
   const [role, setRole] = useState<"player" | "admin" | "">("");
   const [status, setStatus] = useState<"active" | "frozen" | "">("");
   const [applied, setApplied] = useState<{ username: string; role: "player" | "admin" | ""; status: "active" | "frozen" | "" }>({ username: "", role: "", status: "" });
+  // 偏移量随筛选条件与服务端 total 共同驱动分页；调整筛选始终回到第一页，避免停留在不存在的页码。
+  const [offset, setOffset] = useState(0);
   const [detailId, setDetailId] = useState<string | null>(null);
   const users = useAdminUsersQuery({
     username: applied.username || undefined,
     role: applied.role === "" ? undefined : applied.role,
     status: applied.status === "" ? undefined : applied.status,
-    limit: 25, offset: 0
+    limit: PAGE_SIZE, offset
   });
-  const apply = () => setApplied({ username: username.trim(), role, status });
-  const reset = () => { setUsername(""); setRole(""); setStatus(""); setApplied({ username: "", role: "", status: "" }); };
+  const apply = () => { setApplied({ username: username.trim(), role, status }); setOffset(0); };
+  const reset = () => { setUsername(""); setRole(""); setStatus(""); setApplied({ username: "", role: "", status: "" }); setOffset(0); };
   return <main className={`page ${styles.page}`}>
     <h1>玩家数据管理</h1>
     <p className={styles.intro}>支持按用户名、角色和状态检索；冻结/解冻与会话撤销显示服务端返回状态。补偿修正只提交补偿命令，不接收“最终余额/最终库存”自由编辑，并展示新生成流水与原始关联记录。</p>
@@ -42,9 +46,12 @@ export function AdminUsersPage() {
       <label>账户状态<select aria-label="账户状态筛选" value={status} onChange={(event) => setStatus(event.target.value as "active" | "frozen" | "")}><option value="">全部</option><option value="active">正常</option><option value="frozen">已冻结</option></select></label>
       <div className={styles.actions}><button className="button" type="button" onClick={apply}>检索</button><button className="button secondary" type="button" onClick={reset}>清除</button></div>
     </div>
-    {users.isPending ? <PageSkeleton label="正在检索玩家" /> : users.isError ? <ErrorState title={users.error instanceof ApiClientError && users.error.code === "AUTHORIZATION_DENIED" ? "无权检索玩家" : "玩家检索失败"} onRetry={() => void users.refetch()} /> : !users.data ? <PageSkeleton label="正在确认检索权限" /> : users.data.data.items.length === 0 ? <EmptyState title="没有匹配的玩家">调整检索条件后重试。</EmptyState> : <div className={styles.tableWrap}><table><thead><tr><th>用户 ID</th><th>邮箱</th><th>显示名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>
-      {users.data.data.items.map((user) => <UserListRow key={user.id} user={user} onOpen={() => setDetailId(user.id)} />)}
-    </tbody></table></div>}
+    {users.isPending ? <PageSkeleton label="正在检索玩家" /> : users.isError ? <ErrorState title={users.error instanceof ApiClientError && users.error.code === "AUTHORIZATION_DENIED" ? "无权检索玩家" : "玩家检索失败"} onRetry={() => void users.refetch()} /> : !users.data ? <PageSkeleton label="正在确认检索权限" /> : users.data.data.items.length === 0 ? <EmptyState title="没有匹配的玩家">调整检索条件后重试。</EmptyState> : <>
+      <div className={styles.tableWrap}><table><thead><tr><th>用户 ID</th><th>邮箱</th><th>显示名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>
+        {users.data.data.items.map((user) => <UserListRow key={user.id} user={user} onOpen={() => setDetailId(user.id)} />)}
+      </tbody></table></div>
+      <UsersPagination offset={offset} pageSize={PAGE_SIZE} total={users.data.data.total} onChange={setOffset} />
+    </>}
     {detailId ? <UserDetailDialog id={detailId} onClose={() => setDetailId(null)} /> : null}
   </main>;
 }
@@ -59,6 +66,22 @@ function UserListRow({ user, onOpen }: { user: AdminUserListItemDto; onOpen: () 
     <td className={styles.mono}>{formatDateTime(user.createdAt)}</td>
     <td><button className="button secondary" type="button" onClick={onOpen}>查看详情</button></td>
   </tr>;
+}
+
+/** 玩家分页：以服务端 total 为权威，首页/上一页/下一页均通过偏移量驱动同一查询键。 */
+function UsersPagination({ offset, pageSize, total, onChange }: { offset: number; pageSize: number; total: number; onChange: (offset: number) => void }) {
+  const currentPage = Math.floor(offset / pageSize) + 1;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const rangeStart = total === 0 ? 0 : offset + 1;
+  const rangeEnd = Math.min(offset + pageSize, total);
+  const hasPrev = offset > 0;
+  const hasNext = offset + pageSize < total;
+  return <nav className="pagination" aria-label="玩家分页">
+    <button className="button secondary" type="button" disabled={!hasPrev} onClick={() => onChange(0)}>首页</button>
+    <button className="button secondary" type="button" disabled={!hasPrev} onClick={() => onChange(Math.max(0, offset - pageSize))}>上一页</button>
+    <span>第 {currentPage} / {totalPages} 页（第 {rangeStart}–{rangeEnd} 项，共 {total} 项）</span>
+    <button className="button secondary" type="button" disabled={!hasNext} onClick={() => onChange(offset + pageSize)}>下一页</button>
+  </nav>;
 }
 
 function UserDetailDialog({ id, onClose }: { id: string; onClose: () => void }) {

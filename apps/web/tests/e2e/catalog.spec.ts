@@ -12,14 +12,19 @@ async function registerPlayer(page: Page): Promise<void> {
 }
 
 test("玩家可在表格中浏览独立 SKU，并在弹窗详情中看到无图片降级", async ({ page }) => {
+  // 首个用例常承担 dev 服务器首次编译（register/catalog/筛选路由），超过默认 30s 单测超时；故单独放宽。
+  test.setTimeout(90_000);
   await registerPlayer(page);
   await page.getByRole("link", { name: "卡牌目录" }).click();
   await expect(page.getByRole("heading", { name: "浏览印刷版本" })).toBeVisible();
   await expect(page.getByRole("table")).toBeVisible();
   await expect(page.locator(".ant-pagination")).toBeVisible();
   await expect(page.getByRole("button", { name: "详情" })).not.toHaveCount(0);
+  // seed 中仅 etched 印刷（collector #11）无本地卡图缓存；定位该行验证无图降级文案。
+  await page.goto("/catalog?finish=etched");
+  await expect(page.getByRole("button", { name: "详情" })).not.toHaveCount(0);
   await page.getByRole("button", { name: "详情" }).first().click();
-  await expect(page.getByRole("dialog", { name: "印刷 SKU 详情" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "卡牌详情" })).toBeVisible();
   await expect(page.getByText("暂无本地图片；管理员可按需缓存该印刷的卡图。")).toBeVisible();
 });
 
