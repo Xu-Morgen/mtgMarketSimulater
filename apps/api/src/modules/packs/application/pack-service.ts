@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import { openPack, packSlotProbabilities, type PackOpenResult } from "@mtg-market/rules";
+import { openPack, packSlotProbabilities, type PackOpenResult, type PackRuleInput } from "@mtg-market/rules";
 import {
   canonicalizeRequest,
   type ApiResponse,
@@ -90,6 +90,48 @@ export class PackService {
     return withinTransaction(this.database, () =>
       this.generateAuditedResultInTransaction(packId, now)
     );
+  }
+
+  /**
+   * I30B 管理员发布新版本补充包规则。规则经服务端候选池/卡位/权重/工艺校验后，
+   * 以 `(pack_id, version)` 不可变快照追加并切换 active_rule_version；已发布版本不可原地覆盖。
+   * 返回新规则版本号；pack 不存在返回 "not-found"，版本已存在返回 "version-conflict"。
+   */
+  publishRule(packId: string, definition: PackRuleInput, now: string): string | "not-found" | "version-conflict" {
+    const pack = this.packs.find(packId);
+    if (!pack) return "not-found";
+    // packSlotProbabilities 内部调用 validatePackRule，校验候选池/卡位/权重/工艺边界。
+    packSlotProbabilities(definition);
+    return withinTransaction(this.database, () => {
+      const published = this.packs.publishRule(packId, definition, now);
+      return published ? definition.version : "version-conflict";
+    });
+  }
+
+  /** I30B 管理员停用补充包；保留审计，不删除已发布规则。 */
+  disablePack(packId: string, reason: string, now: string): boolean {
+    return withinTransaction(this.database, () => this.packs.disablePack(packId, reason, now));
+  }
+
+  /** I30B 管理员启用补充包；清空停用原因。 */
+  enablePack(packId: string, now: string): boolean {
+    return withinTransaction(this.database, () => this.packs.enablePack(packId, now));
+  }
+
+  /** I30B 管理员发布前预览：返回服务端计算的稀有度概率与候选池校验结果。 */
+  previewRule(packId: string, definition: PackRuleInput): { valid: boolean; slots: Array<{ id: string; draws: number; rarityProbabilities: Array<{ rarity: string; probabilityBasisPoints: number }> }>; candidatePoolSize: number; issues: string[] } | "not-found" {
+    const pack = this.packs.find(packId);
+    if (!pack) return "not-found";
+    const issues: string[] = [];
+    let slots: Array<{ id: string; draws: number; rarityProbabilities: Array<{ rarity: string; probabilityBasisPoints: number }> }> = [];
+    try {
+      slots = packSlotProbabilities(definition).map((slot) => ({ id: slot.slotId, draws: slot.draws, rarityProbabilities: slot.rarityProbabilities }));
+    } catch (error) {
+      issues.push(error instanceof Error ? error.message : "规则校验失败");
+    }
+    const candidatePoolSize = this.packs.hasAllCandidateSkus(definition) ? new Set(definition.pools.flatMap((pool) => pool.candidates.map((candidate) => candidate.skuId))).size : 0;
+    if (!this.packs.hasAllCandidateSkus(definition)) issues.push("候选池存在未建档 SKU");
+    return { valid: issues.length === 0, slots, candidatePoolSize, issues };
   }
 
   /** 商店仅展示可结算的活动包；概率公示仍由 list/detail 提供全部配置。 */

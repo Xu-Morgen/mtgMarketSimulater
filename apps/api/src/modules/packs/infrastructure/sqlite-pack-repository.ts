@@ -133,6 +133,41 @@ export class SqlitePackRepository {
     return id;
   }
 
+  /**
+   * I30B 管理员发布新版本补充包规则。规则以 `(pack_id, version)` 不可变快照追加；
+   * 发布后切换 booster_packs.active_rule_version，绝不原地覆盖已发布版本。调用方须处于事务内。
+   * 同版本重复发布由 UNIQUE(pack_id, version) 拦截，返回 false。
+   */
+  publishRule(packId: string, definition: PackRuleInput, now: string): boolean {
+    const ruleId = randomUUID();
+    const insertResult = this.database
+      .prepare(
+        "INSERT OR IGNORE INTO booster_pack_rules (id, pack_id, version, definition_json, created_at, retired_at) VALUES (?, ?, ?, ?, ?, NULL)"
+      )
+      .run(ruleId, packId, definition.version, JSON.stringify(definition), now);
+    if (insertResult.changes !== 1) return false;
+    const updateResult = this.database
+      .prepare("UPDATE booster_packs SET active_rule_version = ?, updated_at = ? WHERE id = ?")
+      .run(definition.version, now, packId);
+    return updateResult.changes === 1;
+  }
+
+  /** I30B 停用补充包；保留审计，不删除已发布规则。调用方须处于事务内。 */
+  disablePack(packId: string, reason: string, now: string): boolean {
+    const result = this.database
+      .prepare("UPDATE booster_packs SET enabled = 0, disabled_reason = ?, updated_at = ? WHERE id = ? AND enabled = 1")
+      .run(reason, now, packId);
+    return result.changes === 1;
+  }
+
+  /** I30B 启用补充包；清空停用原因，保留审计。调用方须处于事务内。 */
+  enablePack(packId: string, now: string): boolean {
+    const result = this.database
+      .prepare("UPDATE booster_packs SET enabled = 1, disabled_reason = NULL, updated_at = ? WHERE id = ? AND enabled = 0")
+      .run(now, packId);
+    return result.changes === 1;
+  }
+
   private selectConfigurationSql(): string {
     return `SELECT p.id, p.code, p.name, p.description, p.price_amount, p.enabled, p.disabled_reason,
       p.active_rule_version, p.updated_at, rule.id AS pack_rule_id, rule.definition_json

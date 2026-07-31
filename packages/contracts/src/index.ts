@@ -5,7 +5,7 @@
  * 这里的事件只描述已经提交的业务事实，绝不能被当作结算命令消费。
  */
 
-export const CONTRACTS_VERSION = "2026-07-30" as const;
+export const CONTRACTS_VERSION = "2026-07-31" as const;
 
 export type CurrencyCode = "EUR" | "GAME_CREDIT";
 export type PriceSource = "mtgjson-cardmarket" | "manual-test";
@@ -945,6 +945,207 @@ export type FactEventType =
   | "npc.trade.settled"
   | "p2p.trade.settled"
   | "tournament.settled";
+
+// ---------------------------------------------------------------------------
+// I30B 管理后台 DTO。所有管理路由要求 admin 角色；写路由要求 Idempotency-Key、
+// 原因（适用时）、实体版本与不可变审计。日志与详情只返回脱敏字段，绝不暴露密码哈希、
+// 令牌摘要、Cookie、密钥或未处理的 Provider 敏感输入。
+// ---------------------------------------------------------------------------
+
+/** 管理后台首页聚合：环境、目录/价格新鲜度、失败任务、活动、待复核异常与最近操作摘要。 */
+export interface AdminDashboardDto {
+  environment: "development" | "test" | "production";
+  catalogFreshness: { updatedAt: string | null; status: "fresh" | "stale" | "unavailable" };
+  priceFreshness: { updatedAt: string | null; status: "fresh" | "stale" | "unavailable" };
+  failedJobCount: number;
+  activeCampaignCount: number;
+  pendingReviewExceptionCount: number;
+  recentActions: AdminAuditLogDto[];
+}
+
+/** 脱敏后的审计日志条目；不包含密码、令牌、Cookie 或 Provider 原始响应。 */
+export interface AdminAuditLogDto {
+  id: string;
+  actorId: string | null;
+  action: string;
+  entityType: string;
+  entityId: string;
+  requestId: string | null;
+  occurredAt: string;
+  /** 脱敏摘要；敏感字段已由写入方剔除。 */
+  summary: Record<string, unknown>;
+}
+
+export interface AdminAuditLogDetailDto extends AdminAuditLogDto {
+  /** 关联的近期同实体/同请求记录，便于串起一次操作链；不递归无限展开。 */
+  relatedLogs: AdminAuditLogDto[];
+}
+
+export interface AdminAuditLogQuery {
+  cursor?: string;
+  limit?: number;
+  from?: string;
+  to?: string;
+  actorId?: string;
+  userId?: string;
+  entityType?: string;
+  entityId?: string;
+  action?: string;
+  requestId?: string;
+  taskType?: string;
+}
+
+/** 异常交易/待复核项：聚合 flagged 风控决策与失败任务，供管理员复核。 */
+export interface AdminExceptionTradeDto {
+  id: string;
+  kind: "risk_flagged" | "failed_job";
+  userId: string | null;
+  entityType: string;
+  entityId: string;
+  reason: string;
+  status: string;
+  occurredAt: string;
+  requestId: string | null;
+}
+
+export type CampaignStatus = "draft" | "previewing" | "published" | "paused" | "ended";
+export type CampaignScopeType = "global" | "set" | "sku";
+export type CampaignType = "market_factor";
+
+export interface AdminCampaignDto {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  campaignType: CampaignType;
+  scopeType: CampaignScopeType;
+  scopeId: string | null;
+  factorBps: number;
+  displayText: string;
+  startsAt: string;
+  endsAt: string;
+  status: CampaignStatus;
+  version: number;
+  publishedMarketEventId: string | null;
+  reason: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  publishedAt: string | null;
+  pausedAt: string | null;
+  endedAt: string | null;
+}
+
+export interface AdminCampaignVersionDto {
+  id: string;
+  campaignId: string;
+  version: number;
+  definition: Record<string, unknown>;
+  statusSnapshot: CampaignStatus;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+/** 活动发布前服务端预览：返回可确认的版本、目标范围、UTC 区间、参数上限/冲突与预计任务。 */
+export interface AdminCampaignPreviewDto {
+  campaign: AdminCampaignDto;
+  previewVersion: number;
+  conflicts: Array<{ campaignId: string; code: string; scopeType: CampaignScopeType; scopeId: string | null; startsAt: string; endsAt: string }>;
+  factorBpsInRange: boolean;
+  scheduledReprice: { triggerKey: string; runAfter: string } | null;
+}
+
+export interface AdminUserListItemDto {
+  id: string;
+  email: string;
+  displayName: string;
+  role: Role;
+  frozen: boolean;
+  frozenReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminUserDetailDto extends AdminUserListItemDto {
+  activeSessionCount: number;
+  accountBalance: { currency: CurrencyCode; total: number; available: number; frozen: number } | null;
+  recentAudit: AdminAuditLogDto[];
+}
+
+export interface AdminCompensationResultDto {
+  userId: string;
+  /** 新追加的账本流水 ID（余额补偿）或库存流水 ID（库存补偿）。 */
+  ledgerEntryId: string | null;
+  inventoryEntryId: string | null;
+  newBalance: { currency: CurrencyCode; total: number; available: number; frozen: number } | null;
+  newQuantity: { skuId: string; quantity: number; available: number; orderLocked: number; tournamentLocked: number } | null;
+  auditId: string;
+  reason: string;
+}
+
+/** 市场参数单例的只读投影；管理员可预览并经版本条件更新。 */
+export interface AdminMarketParametersDto {
+  ruleVersion: string;
+  eurCentToGameCreditBps: number;
+  minimumPrice: number;
+  npcBuySpreadBps: number;
+  npcSellSpreadBps: number;
+  npcFeeBps: number;
+  version: number;
+  updatedAt: string;
+}
+
+export interface AdminConfigVersionDto {
+  /** 实体版本号，写操作须回传以检测并发冲突。 */
+  version: number;
+  updatedAt: string;
+}
+
+export type MtgjsonDraftKind = "setlist" | "set" | "sealed_product" | "booster";
+export type MtgjsonDraftMappingStatus = "pending" | "mapped" | "missing" | "conflict";
+export type MtgjsonDraftStatus = "draft" | "validated" | "published" | "discarded";
+
+export interface MtgjsonImportDraftDto {
+  id: string;
+  draftKind: MtgjsonDraftKind;
+  sourceVersion: string;
+  sourceChecksumSha256: string | null;
+  setCode: string | null;
+  mappingStatus: MtgjsonDraftMappingStatus;
+  status: MtgjsonDraftStatus;
+  version: number;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 草稿预览：按本地 Scryfall 系列代码与 SKU 映射展示可导入、缺失与冲突项。 */
+export interface MtgjsonImportDraftSummaryDto {
+  draft: MtgjsonImportDraftDto;
+  importableCount: number;
+  missingCount: number;
+  conflictCount: number;
+  /** 仅展示摘要项，不含 Provider 原始响应或密钥。 */
+  items: Array<{ setCode: string; name: string; status: "importable" | "missing" | "conflict"; detail: string | null }>;
+}
+
+export interface AdminPackRuleDraftDto {
+  packId: string;
+  version: number;
+  definition: Record<string, unknown>;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+/** 补充包规则发布前服务端预览：候选池/卡位/权重/工艺校验与版本预览。 */
+export interface AdminPackRulePreviewDto {
+  packId: string;
+  previewVersion: number;
+  slots: Array<{ id: string; draws: number; rarityProbabilities: Array<{ rarity: string; probabilityBasisPoints: number }> }>;
+  candidatePoolSize: number;
+  valid: boolean;
+  issues: string[];
+}
 
 const requestIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 const idempotencyKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;

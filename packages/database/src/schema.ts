@@ -9,10 +9,13 @@ export const users = sqliteTable(
     displayName: text("display_name").notNull(),
     passwordHash: text("password_hash").notNull(),
     role: text("role").notNull().default("player"),
+    /** I30B：冻结时间戳为空表示活跃；冻结/解冻均追加审计，不删除历史。 */
+    frozenAt: text("frozen_at"),
+    frozenReason: text("frozen_reason"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull()
   },
-  (table) => [uniqueIndex("users_email_unique").on(table.email)]
+  (table) => [uniqueIndex("users_email_unique").on(table.email), index("users_frozen_index").on(table.frozenAt)]
 );
 
 export const sessions = sqliteTable(
@@ -654,3 +657,79 @@ export const achievementRiskLimits = sqliteTable("achievement_risk_limits", {
   maxRepeatParticipationsPerDay: integer("max_repeat_participations_per_day").notNull(),
   updatedAt: text("updated_at").notNull()
 });
+
+/** I30B 活动草稿与状态机；已发布版本不可原地覆盖，发布写入只追加的 market_events。 */
+export const adminCampaigns = sqliteTable(
+  "admin_campaigns",
+  {
+    id: text("id").primaryKey(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    campaignType: text("campaign_type").notNull(),
+    scopeType: text("scope_type").notNull(),
+    scopeId: text("scope_id"),
+    factorBps: integer("factor_bps").notNull(),
+    displayText: text("display_text").notNull(),
+    startsAt: text("starts_at").notNull(),
+    endsAt: text("ends_at").notNull(),
+    status: text("status").notNull().default("draft"),
+    version: integer("version").notNull().default(1),
+    publishedMarketEventId: text("published_market_event_id"),
+    reason: text("reason"),
+    createdBy: text("created_by"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    publishedAt: text("published_at"),
+    pausedAt: text("paused_at"),
+    endedAt: text("ended_at")
+  },
+  (table) => [
+    uniqueIndex("admin_campaigns_code_unique").on(table.code),
+    index("admin_campaigns_status_index").on(table.status),
+    index("admin_campaigns_scope_window_index").on(table.scopeType, table.scopeId, table.startsAt, table.endsAt)
+  ]
+);
+
+/** 不可变的活动版本快照；草稿保存/预览/发布均追加一行。 */
+export const adminCampaignVersions = sqliteTable(
+  "admin_campaign_versions",
+  {
+    id: text("id").primaryKey(),
+    campaignId: text("campaign_id").notNull(),
+    version: integer("version").notNull(),
+    definitionJson: text("definition_json").notNull(),
+    statusSnapshot: text("status_snapshot").notNull(),
+    createdBy: text("created_by"),
+    createdAt: text("created_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("admin_campaign_versions_campaign_version_unique").on(table.campaignId, table.version),
+    index("admin_campaign_versions_campaign_index").on(table.campaignId, table.version)
+  ]
+);
+
+/** I30B MTGJSON 系列/密封产品/booster 导入草稿；绝不直接改写目录、库存或价格快照。 */
+export const mtgjsonImportDrafts = sqliteTable(
+  "mtgjson_import_drafts",
+  {
+    id: text("id").primaryKey(),
+    draftKind: text("draft_kind").notNull(),
+    sourceVersion: text("source_version").notNull(),
+    sourceChecksumSha256: text("source_checksum_sha256"),
+    setCode: text("set_code"),
+    payloadJson: text("payload_json").notNull(),
+    mappingStatus: text("mapping_status").notNull().default("pending"),
+    mappingSummaryJson: text("mapping_summary_json"),
+    status: text("status").notNull().default("draft"),
+    version: integer("version").notNull().default(1),
+    createdBy: text("created_by"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("mtgjson_import_drafts_kind_set_version_unique").on(table.draftKind, table.setCode, table.sourceVersion),
+    index("mtgjson_import_drafts_status_index").on(table.status),
+    index("mtgjson_import_drafts_kind_set_index").on(table.draftKind, table.setCode)
+  ]
+);
