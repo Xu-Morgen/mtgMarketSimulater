@@ -12,6 +12,10 @@ export default defineConfig({
   testDir: "./tests/e2e",
   globalSetup: "./tests/e2e/global-setup.ts",
   timeout: 30_000,
+  // 全量套件会同时运行桌面与窄屏项目。若沿用本机 CPU 数量推导的默认 worker 数，
+  // 多个 Chromium 与 Next dev 按需编译会争抢 CPU/内存，连 page.goto/load 和浏览器输入
+  // 都可能超过 30s。CI 保持串行，本地限制为 4；命令行 --workers 仍可显式覆盖。
+  workers: process.env.CI ? 1 : 4,
   // Next.js dev 模式首次访问路由会按需编译（实测 /catalog 约 4.5s、/inventory 与 /packs 约 2s），
   // 高于 Playwright expect 默认 5s 超时，导致 link.click() 导航后紧跟的断言稳定超时。
   // 提高全局 expect 超时覆盖首次编译窗口；既有 toBeVisible({ timeout: 15_000 }) 显式写法与之同值，互不冲突。

@@ -35,6 +35,7 @@ test("普通玩家没有异常订单入口且管理 API 被拒绝", async ({ pag
   await page.getByLabel("邮箱").fill(email);
   await page.getByRole("textbox", { name: "密码" }).fill("playwright-password-123");
   await page.getByRole("button", { name: "创建账号" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByRole("link", { name: "异常订单" })).toHaveCount(0);
   await page.goto("/admin/orders/risk");
   await expect(page.getByRole("heading", { name: "无权访问此页面" })).toBeVisible();

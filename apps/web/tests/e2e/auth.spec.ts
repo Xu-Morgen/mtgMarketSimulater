@@ -71,6 +71,7 @@ test("普通玩家直接访问管理路由时显示 403，管理 API 同样拒�
   await page.getByLabel("邮箱").fill(email);
   await page.getByRole("textbox", { name: "密码" }).fill(password);
   await page.getByRole("button", { name: "创建账号" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
   await page.goto("/admin");
   await expect(page.getByRole("heading", { name: "无权访问此页面" })).toBeVisible();
   const session = await request.post("http://localhost:3001/v1/auth/login", { data: { email, password } });

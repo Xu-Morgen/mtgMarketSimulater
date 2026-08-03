@@ -127,6 +127,7 @@ test("普通玩家没有活动/玩家/日志入口，深层链接 403，管理 A
   await page.getByLabel("邮箱").fill(email);
   await page.getByRole("textbox", { name: "密码" }).fill("playwright-password-123");
   await page.getByRole("button", { name: "创建账号" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByRole("link", { name: "活动" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "玩家" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "日志" })).toHaveCount(0);
