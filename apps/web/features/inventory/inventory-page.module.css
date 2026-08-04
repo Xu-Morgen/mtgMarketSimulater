@@ -92,3 +92,14 @@
 }
 .previewTrigger:hover { background: rgba(201, 162, 75, 0.12); color: var(--accent-gold-bright); }
 .previewTrigger:focus-visible { outline: 2px solid var(--accent-gold-bright); outline-offset: 1px; }
+
+/* I33F 重复卡批量卖出：跳过明细 */
+.skipList {
+  border-top: 1px dashed var(--border-gold-dim);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 10px 0 0;
+}
+.skipList li + li { margin-top: 4px; }

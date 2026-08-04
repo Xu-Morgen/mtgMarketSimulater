@@ -1,6 +1,6 @@
 "use client";
 
-import type { AccountBalanceDto, InventoryHoldingDto, NpcBuyPreviewDto, NpcSellPreviewDto, NpcTradeDto } from "@mtg-market/contracts";
+import type { AccountBalanceDto, DuplicatesSellResultDto, InventoryHoldingDto, NpcBuyPreviewDto, NpcSellPreviewDto, NpcTradeDto } from "@mtg-market/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { apiRequest } from "./client";
@@ -141,4 +141,49 @@ export function useNpcSellMutation() {
     }
   });
   return { ...mutation, beginNewIntent: () => { intent.current = null; mutation.reset(); } };
+}
+
+/** I33B（C8）：重复卡批量卖出；请求体固定为空，只提交意图，逐 SKU 结算由服务端单事务完成。 */
+export const duplicatesSellApi = {
+  sell: (accessToken: string, idempotencyKey: string) =>
+    apiRequest<{ result: DuplicatesSellResultDto }>("/v1/inventory/duplicates/sell", {
+      method: "POST",
+      body: {},
+      accessToken,
+      idempotencyKey
+    })
+};
+
+/**
+ * I33F（I33B C8）：重复卡一键清仓。同一意图固定复用同一个幂等键（请求体恒定为空），
+ * 网络重试只投递一次；成功后失效库存、账本、图鉴、成就等服务器真相查询。
+ */
+export function useSellDuplicatesMutation() {
+  const { accessToken, user } = useSession();
+  const queryClient = useQueryClient();
+  const keyRef = useRef<string | null>(null);
+  const mutation = useMutation({
+    mutationFn: async () => {
+      if (!keyRef.current) keyRef.current = createIdempotencyKey();
+      return duplicatesSellApi.sell(accessToken!, keyRef.current);
+    },
+    onSuccess: () => {
+      if (user) {
+        void queryClient.invalidateQueries({ queryKey: ["archive", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["ledger", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["inventory", user.id] });
+        // I33F：卖出重复卡会改变收藏图鉴完成度与系列收集率里程碑进度。
+        void queryClient.invalidateQueries({ queryKey: ["collection", "album", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["achievements", user.id] });
+      }
+      keyRef.current = null;
+    }
+  });
+  return {
+    ...mutation,
+    beginNewIntent: () => {
+      keyRef.current = null;
+      mutation.reset();
+    }
+  };
 }

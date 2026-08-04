@@ -1,0 +1,213 @@
+/* I33F 收藏图鉴：系列分组网格 + 未收集灰影占位 + 里程碑联动 */
+.toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  margin: 20px 0 4px;
+}
+.segmented {
+  background: rgba(236, 228, 208, 0.05);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  overflow: hidden;
+}
+.segmented button {
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  padding: 8px 16px;
+}
+.segmented button[aria-pressed="true"] {
+  background: linear-gradient(180deg, rgba(201, 162, 75, 0.22), rgba(201, 162, 75, 0.08));
+  color: var(--accent-gold-bright);
+}
+.segmentActive {
+  box-shadow: inset 0 0 0 1px var(--border-gold);
+}
+.setGrid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  margin-top: 22px;
+}
+.setCard {
+  background:
+    linear-gradient(160deg, rgba(201, 162, 75, 0.06) 0%, rgba(201, 162, 75, 0) 45%), var(--bg-panel);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+.setHeader {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+.setHeader h2 {
+  color: var(--accent-gold-bright);
+  margin: 0;
+}
+.completionChip {
+  background: rgba(201, 162, 75, 0.16);
+  border: 1px solid var(--border-gold);
+  border-radius: 999px;
+  color: var(--accent-gold-bright);
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+.setMeta {
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  margin: 0;
+}
+.setMeta strong {
+  color: var(--accent-gold-bright);
+}
+.progressTrack {
+  background: rgba(236, 228, 208, 0.07);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+.progressFill {
+  background: linear-gradient(90deg, var(--accent-gold), var(--accent-gold-bright));
+  border-radius: 999px;
+  height: 100%;
+}
+.complete {
+  color: #a8cf84;
+  font-size: 0.92rem;
+  margin: 0;
+}
+.uncollectedGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+}
+/* 未收集卡位灰影占位：稀有度描边仅作视觉暗示（纯 CSS，data-rarity 驱动） */
+.silhouette {
+  align-items: start;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(236, 228, 208, 0.04) 0 8px,
+    rgba(236, 228, 208, 0.015) 8px 16px
+  );
+  border: 1px dashed var(--border-gold-dim);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 5px;
+  min-height: 96px;
+  padding: 11px;
+}
+.silhouette[data-rarity="common"] {
+  border-color: var(--rarity-border-common);
+}
+.silhouette[data-rarity="uncommon"] {
+  border-color: var(--rarity-border-uncommon);
+}
+.silhouette[data-rarity="rare"] {
+  border-color: var(--rarity-border-rare);
+}
+.silhouette[data-rarity="mythic"] {
+  border-color: var(--rarity-border-mythic);
+}
+.silhouette[data-rarity="special"] {
+  border-color: var(--rarity-border-special);
+}
+.silhouette strong {
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+.silhouetteMeta {
+  color: var(--text-disabled);
+  font-size: 0.8rem;
+}
+.silhouetteStamp {
+  border: 1px solid var(--border-gold-dim);
+  border-radius: 999px;
+  color: var(--text-disabled);
+  font-size: 0.72rem;
+  padding: 2px 7px;
+  width: fit-content;
+}
+.milestones {
+  border-top: 1px solid var(--border-gold-dim);
+  margin-top: 34px;
+  padding-top: 20px;
+}
+.milestones h2 {
+  color: var(--accent-gold-bright);
+  margin: 0;
+}
+.milestonesIntro {
+  color: var(--text-secondary);
+}
+.milestoneList {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.milestoneList li {
+  align-items: center;
+  background: rgba(236, 228, 208, 0.04);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr auto auto;
+  padding: 13px 15px;
+}
+.milestoneList li > div {
+  display: grid;
+  gap: 3px;
+}
+.milestoneList li strong {
+  color: var(--text-primary);
+}
+.milestoneDesc,
+.milestoneProgress {
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+}
+.milestoneBadge {
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+.milestoneBadge {
+  background: rgba(236, 228, 208, 0.08);
+  border: 1px solid var(--border-gold-dim);
+  color: var(--text-secondary);
+}
+.milestoneUnlocked {
+  background: rgba(127, 166, 90, 0.16);
+  border-color: rgba(127, 166, 90, 0.55);
+  color: #a8cf84;
+}
+@media (max-width: 600px) {
+  .setGrid {
+    grid-template-columns: 1fr;
+  }
+  .uncollectedGrid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  }
+  .milestoneList li {
+    grid-template-columns: 1fr auto;
+  }
+}

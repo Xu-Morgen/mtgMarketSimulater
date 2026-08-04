@@ -86,7 +86,7 @@ type NavLink = { href: string; label: string; icon?: string };
 type NavGroup = { title: string; links: NavLink[] };
 
 const playerGroups: NavGroup[] = [
-  { title: "大厅", links: [{ href: "/dashboard", label: "玩家首页", icon: "dashboard" }, { href: "/collection", label: "收藏册", icon: "collection" }] },
+  { title: "大厅", links: [{ href: "/dashboard", label: "玩家首页", icon: "dashboard" }, { href: "/collection", label: "收藏册", icon: "collection" }, { href: "/collection/album", label: "收藏图鉴", icon: "collection" }] },
   { title: "市场", links: [{ href: "/catalog", label: "卡牌目录", icon: "catalog" }, { href: "/market", label: "市场", icon: "market" }, { href: "/market/history", label: "价格历史", icon: "history" }, { href: "/orders", label: "我的委托", icon: "orders" }] },
   { title: "卡牌经营", links: [{ href: "/packs", label: "补充包商店", icon: "packs" }, { href: "/inventory", label: "我的库存", icon: "inventory" }, { href: "/decks", label: "我的卡组", icon: "decks" }] },
   { title: "赛事与成长", links: [{ href: "/tournaments", label: "比赛", icon: "tournaments" }, { href: "/achievements", label: "成就", icon: "achievements" }] },

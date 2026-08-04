@@ -129,6 +129,12 @@ e2e 验证默认由用户手动执行（见第 7 节 E2E 执行策略）。每�
 - 备注：<阻塞点、需要修复的问题>
 ```
 
+### 2026-08-04：I33F（收藏图鉴与开包体验页面）
+- 状态：**待用户手动 e2e 复跑**（本机自动运行会因超时/内存耗尽使 WSL 崩溃，未代跑）。
+- 已由 Agent 完成并通过的自动化：`pnpm check`（含全仓 lint + 各包 tsc）、`pnpm --filter @mtg-market/web test`（vitest 5 例）、`pnpm --filter @mtg-market/web build`（`next build` 通过，`/collection/album` 路由生成）；全仓单元测试 contracts 12 / rules 84 / database 4 / api 235（1 跳过）/ web 5 全过。
+- 需用户手动验证：`apps/web/tests/e2e/collection-album-i33f.spec.ts`（桌面 + 390px 窄屏各 5 项：图鉴分组/空态/失败重试/仅持有切换/里程碑联动、新卡与重复标记、批量开包重复点击只投递一次、重复卡批量卖出幂等 + 汇总横幅、限时包 ended 禁用购买、库存页清仓入口）；人工记录见 [I33F.md](apps/web/tests/manual/I33F.md)。
+- 备注：现有 packs.spec / inventory.spec / achievements.spec 未改动，仅补充新 spec；导航新增「收藏图鉴」链接不影响既有侧栏断言。
+
 ### 2026-08-04：FIX-visual-redesign（暗色奇幻·卡牌交易所全站视觉重构）
 - 状态：**待用户手动 e2e 复跑**（本机自动运行会因超时/内存耗尽使 WSL 崩溃，已停止后台 sweep）。
 - 已由 Agent 完成并通过的自动化：`pnpm --filter @mtg-market/web check`、`pnpm lint`、web vitest（5 例）、`next build`。

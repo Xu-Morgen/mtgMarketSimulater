@@ -1,0 +1,16 @@
+.image {
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  display: block;
+  max-height: 520px;
+  max-width: 100%;
+}
+
+.placeholder {
+  background: linear-gradient(180deg, rgba(39, 46, 56, 0.6), rgba(18, 21, 26, 0.9));
+  border: 1px dashed var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  padding: 16px;
+}

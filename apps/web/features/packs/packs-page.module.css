@@ -155,3 +155,172 @@
   .cardTop { grid-template-columns: 1fr; }
   .packGraphic { min-height: 96px; }
 }
+
+/* I33F 限时/特殊包：折扣与窗口提示（购买资格仍以服务端 offer.status 与 preview 为准） */
+.offerBadge {
+  align-items: center;
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+}
+.offerChip {
+  background: linear-gradient(180deg, rgba(201, 162, 75, 0.24), rgba(201, 162, 75, 0.08));
+  border: 1px solid var(--border-gold);
+  border-radius: 999px;
+  color: var(--accent-gold-bright);
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 3px 9px;
+}
+.offerCountdown,
+.offerDescription { color: var(--text-secondary); font-size: 0.86rem; }
+
+/* I33F 开包结果卡：卡图 + 稀有度辉光 + 新卡/重复徽标 */
+.openingArt {
+  margin: 4px 0;
+}
+.openingArt :global(.card-frame img) {
+  max-height: 260px;
+  width: auto;
+  margin: 0 auto;
+  display: block;
+}
+.collectionBadge {
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 2px 9px;
+  width: fit-content;
+}
+.collectionNew {
+  background: rgba(127, 166, 90, 0.18);
+  border: 1px solid rgba(127, 166, 90, 0.6);
+  color: #a8cf84;
+}
+.collectionDuplicate {
+  background: rgba(236, 228, 208, 0.08);
+  border: 1px solid var(--border-gold-dim);
+  color: var(--text-secondary);
+}
+
+/* I33F 本包成本与价值对比（盈亏红绿） */
+.delta {
+  border-radius: 999px;
+  font-weight: 700;
+  margin-left: 8px;
+  padding: 2px 9px;
+}
+.profit {
+  background: rgba(127, 166, 90, 0.16);
+  border: 1px solid rgba(127, 166, 90, 0.55);
+  color: #a8cf84;
+}
+.loss {
+  background: rgba(192, 57, 43, 0.18);
+  border: 1px solid rgba(192, 57, 43, 0.6);
+  color: #e08678;
+}
+.neutral {
+  background: rgba(236, 228, 208, 0.08);
+  border: 1px solid var(--border-gold-dim);
+  color: var(--text-secondary);
+}
+
+/* I33F 批量开包：数量选择 + 汇总卡片 + 逐包下钻 */
+.bulkPreview {
+  background: rgba(236, 228, 208, 0.05);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  margin-top: 10px;
+  padding: 12px 14px;
+}
+.bulkPreview p { margin: 6px 0; }
+.countFieldset {
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 12px 0 0;
+  padding: 12px;
+}
+.countFieldset legend { color: var(--text-secondary); padding: 0 6px; }
+.countOption {
+  align-items: center;
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  display: flex;
+  gap: 8px;
+  padding: 9px 10px;
+}
+.countOption:has(input:checked) {
+  background: rgba(201, 162, 75, 0.12);
+  border-color: var(--border-gold);
+}
+.countCost {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  margin-left: auto;
+}
+.bulkSummaryGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 16px 0;
+}
+.bulkSummaryGrid article {
+  background: rgba(201, 162, 75, 0.08);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+.bulkSummaryGrid span { color: var(--text-secondary); font-size: 0.84rem; }
+.bulkSummaryGrid strong { color: var(--accent-gold-bright); font-size: 1.05rem; }
+.bulkDrill {
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  margin-top: 16px;
+  padding: 0 14px 14px;
+}
+.bulkDrill summary {
+  color: var(--accent-gold-bright);
+  cursor: pointer;
+  font-weight: 700;
+  padding: 12px 0;
+}
+.bulkPerPack {
+  border-top: 1px dashed var(--border-gold-dim);
+  display: grid;
+  gap: 14px;
+  padding-top: 12px;
+}
+.bulkPack {
+  background: rgba(236, 228, 208, 0.04);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+.bulkPack h3 { color: var(--accent-gold-bright); margin: 0 0 4px; }
+.bulkPackCards {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+.bulkPackCards li {
+  background: rgba(201, 162, 75, 0.06);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+}
+
+@media (max-width: 700px) {
+  .bulkPackCards { grid-template-columns: 1fr; }
+}

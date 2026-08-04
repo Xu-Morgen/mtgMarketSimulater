@@ -3,36 +3,12 @@
 import { Descriptions, Modal, Spin } from "antd";
 import type { CatalogSkuDto } from "@mtg-market/contracts";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import { useCatalogDetailQuery } from "../api/catalog-api";
-import { loadPublicWebConfig, publicWebEnvironment } from "../config/public";
-import { useSession } from "../providers/session-provider";
 import { ErrorState } from "./ui";
+import { LocalCatalogImage } from "./local-catalog-image";
 import styles from "./catalog-card-detail-modal.module.css";
 
 function sourceLabel(sku: CatalogSkuDto): string { return sku.isManualException ? "运营测试例外" : sku.source === "scryfall" ? "本地 Scryfall 目录" : "人工目录"; }
-
-/** 卡图只经带会话的本地 API 读取，绝不把外部图片 URL 交给浏览器。 */
-function LocalCatalogImage({ path, name, rarity }: { path: string | null; name: string; rarity?: string }) {
-  const { accessToken } = useSession();
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    if (!path || !accessToken) { setImageUrl(null); setFailed(false); return; }
-    let disposed = false;
-    let objectUrl: string | null = null;
-    void fetch(`${loadPublicWebConfig(publicWebEnvironment).apiBaseUrl}${path}`, { credentials: "include", headers: { Authorization: `Bearer ${accessToken}` } })
-      .then(async (response) => { if (!response.ok) throw new Error("图片读取失败"); return response.blob(); })
-      .then((blob) => { objectUrl = URL.createObjectURL(blob); if (!disposed) setImageUrl(objectUrl); })
-      .catch(() => { if (!disposed) setFailed(true); });
-    return () => { disposed = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [accessToken, path]);
-  // 稀有度卡框：data-rarity 驱动描边与微发光（纯 CSS，见 styles.css .card-frame）。
-  const frame = (child: React.ReactNode) => <div className="card-frame" data-rarity={rarity?.toLowerCase()}>{child}</div>;
-  if (!path) return <div className={styles.imagePlaceholder}>暂无本地图片；管理员可按需缓存该印刷的卡图。</div>;
-  if (failed) return <div className={styles.imagePlaceholder}>本地图片暂不可用。</div>;
-  return imageUrl ? frame(<img className={styles.image} src={imageUrl} alt={`${name} 卡图`} />) : frame(<Spin tip="正在读取本地图片" />);
-}
 
 /** 目录和开包结果复用同一只读详情，罕贵度与图片始终来自本地目录。 */
 export function CatalogCardDetailModal({ skuId, onClose }: { skuId: string | null; onClose: () => void }) {

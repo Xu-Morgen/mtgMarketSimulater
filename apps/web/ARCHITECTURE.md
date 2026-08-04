@@ -37,6 +37,16 @@
 - 每个用户可见迭代在 `tests/manual/<迭代ID>.md` 保存人工验收记录；记录构建/提交标识、浏览器、测试数据、步骤结果和截图/录屏路径。
 - 单元、组件或 API 测试通过不能替代页面人工验收；对应页面、Playwright 和人工记录齐备后才满足前端完成定义。
 
+## I33F 收藏图鉴与开包体验页面（2026-08-04）
+
+- `api/collection-api.ts` 是 `/collection/album` 收藏图鉴只读聚合的唯一浏览器入口，只读 `GET /v1/collection/album`；查询键按用户与 `onlyHeld/cursor/limit` 隔离，不提供任何写操作。
+- `/collection/album` 组合 `features/collection/album-page.tsx`：按系列分组网格展示服务端完成度百分比（`formatBasisPoints` 仅为展示格式化）、已收集/全部 SKU 数、进度条与未收集卡位灰影占位（`data-rarity` 稀有度描边仅视觉暗示，无交易/估值入口）；「全部系列/仅持有」分段切换与分页写入 URL 并只重读服务端聚合；底部「收藏里程碑联动」只读展示 `kind === "collection"` 成就的进度/解锁/奖励并跳转成就详情，不提供浏览器解锁或发奖。
+- `api/packs-api.ts` 新增 `useOpenBulkPackMutation`（`POST /v1/packs/:packId/bulk` 10/50/100）：同一 `(packId, ruleVersion, count)` 网络重试复用幂等键，重新预览或任一参数变化才换键；成功后只失效 archive/ledger/inventory/pack-openings/collection album/achievements。`api/npc-trade-api.ts` 新增 `useSellDuplicatesMutation`（`POST /v1/inventory/duplicates/sell` 空请求体）：同一意图固定复用幂等键，成功只失效服务器真相缓存。
+- `features/packs/packs-page.tsx` 升级：开包结果卡展示只读本地卡图（共享 `components/local-catalog-image.tsx`）+ 稀有度辉光 + `isNewToCollection` 新卡/重复徽标 + `collectionProgressAfter` 所在系列进度 + `totalGameValue`/`profitLoss.gameProfitLoss` 本包成本与服务端估值对比（盈亏红绿徽章，浏览器不重算）；`BulkPurchaseDialog` 数量选择 + 二次确认 + 同步双击锁，`BulkResultSection` 只展示服务端汇总卡片并允许逐包下钻只读结果；限时包 `OfferBadge` 展示折扣标签/剩余时间/卡池说明，`scheduled`/`ended` 窗口与下架同语义禁用购买与批量开包（购买资格仍以服务端 `offer.status` 与购买预览为准）。
+- `features/inventory/duplicates-sell-dialog.tsx` 是重复卡一键清仓弹窗与结果横幅：只提交空请求体意图，二次确认 + 同步双击锁只投递一次；横幅只展示服务端返回的张数/收入/费用与跳过明细，刷新即消失不伪造成功。库存页与开包结果页均可进入。
+- 动画边界：开包动画状态仍只存于可丢弃的 `stores/pack-opening-animation-store.ts`；批量开包结果直接展示服务端汇总，无动画；卡图仅经带会话的本地 API 读取，绝不访问外部图片 URL。
+- `tests/e2e/collection-album-i33f.spec.ts` 与 `tests/manual/I33F.md` 覆盖图鉴分组/空态/失败重试/仅持有切换/里程碑联动、新卡与重复标记、批量开包重复点击只投递一次、批量卖出幂等与汇总横幅、限时包过期禁用、库存页清仓入口及桌面/窄屏。
+
 ## I24F Commander 卡组页面（2026-07-29）
 
 - `api/decks-api.ts` 是草稿列表、详情、服务端合法性检查与幂等保存的唯一浏览器入口；成功保存只更新/失效当前用户的卡组查询，卡组草稿不改变库存或锁定状态。

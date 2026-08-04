@@ -1,7 +1,7 @@
 "use client";
 
-import type { PackDto, PackOpeningDto, PackPurchasePreviewDto, Page } from "@mtg-market/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { BulkPackOpeningDto, PackDto, PackOpeningDto, PackPurchasePreviewDto, Page } from "@mtg-market/contracts";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { apiRequest } from "./client";
 import { useSession } from "../providers/session-provider";
@@ -20,6 +20,14 @@ export const packsApi = {
     apiRequest<{ opening: PackOpeningDto }>(`/v1/packs/${packId}/open`, {
       method: "POST",
       body: { ruleVersion },
+      accessToken,
+      idempotencyKey
+    }),
+  /** I33F（I33B C7）：批量开包 10/50/100，同一购买意图复用幂等键。 */
+  openBulk: (accessToken: string, packId: string, ruleVersion: string, count: number, idempotencyKey: string) =>
+    apiRequest<{ bulk: BulkPackOpeningDto }>(`/v1/packs/${packId}/bulk`, {
+      method: "POST",
+      body: { ruleVersion, count },
       accessToken,
       idempotencyKey
     }),
@@ -105,7 +113,56 @@ export function useOpenPackMutation() {
         void queryClient.invalidateQueries({ queryKey: ["ledger", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["inventory", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["pack-openings", user.id] });
+        // I33F：开包会改变收藏图鉴与系列收集率里程碑进度。
+        void queryClient.invalidateQueries({ queryKey: ["collection", "album", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["achievements", user.id] });
       }
+      intent.current = null;
+    }
+  });
+  return {
+    ...mutation,
+    beginNewIntent: () => {
+      intent.current = null;
+      mutation.reset();
+    }
+  };
+}
+
+/** 服务端开包后需要失效的玩家真相缓存；单包与批量开包共用。 */
+export function invalidateOpeningTruth(queryClient: QueryClient, userId: string): void {
+  void queryClient.invalidateQueries({ queryKey: ["archive", userId] });
+  void queryClient.invalidateQueries({ queryKey: ["ledger", userId] });
+  void queryClient.invalidateQueries({ queryKey: ["inventory", userId] });
+  void queryClient.invalidateQueries({ queryKey: ["pack-openings", userId] });
+  void queryClient.invalidateQueries({ queryKey: ["collection", "album", userId] });
+  void queryClient.invalidateQueries({ queryKey: ["achievements", userId] });
+}
+
+type BulkIntent = { key: string; packId: string; ruleVersion: string; count: number };
+
+/**
+ * I33F（I33B C7）：批量开包。同一 `(packId, ruleVersion, count)` 网络重试复用同一幂等键，
+ * 重新预览或任一参数变化才开始新意图；成功后只失效服务器真相查询。
+ */
+export function useOpenBulkPackMutation() {
+  const { accessToken, user } = useSession();
+  const queryClient = useQueryClient();
+  const intent = useRef<BulkIntent | null>(null);
+  const mutation = useMutation({
+    mutationFn: async (input: { packId: string; ruleVersion: string; count: number }) => {
+      if (
+        !intent.current ||
+        intent.current.packId !== input.packId ||
+        intent.current.ruleVersion !== input.ruleVersion ||
+        intent.current.count !== input.count
+      ) {
+        intent.current = { key: createIdempotencyKey(), ...input };
+      }
+      return packsApi.openBulk(accessToken!, input.packId, input.ruleVersion, input.count, intent.current.key);
+    },
+    onSuccess: () => {
+      if (user) invalidateOpeningTruth(queryClient, user.id);
       intent.current = null;
     }
   });
