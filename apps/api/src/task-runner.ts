@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { ensureDailyPriceSyncScheduled, ensureDailyRolloverScheduled, ensureDailyBackupScheduled, TaskRegistry, TaskWorker } from "./modules/jobs/application/task-service.js";
+import { ensureDailyPriceSyncScheduled, ensureDailyRolloverScheduled, ensureDailyBackupScheduled, enqueueWatchlistCheckJob, TaskRegistry, TaskWorker } from "./modules/jobs/application/task-service.js";
 import { SqliteJobRepository } from "./modules/jobs/infrastructure/sqlite-job-repository.js";
 import type { ApiConfig } from "./config/environment.js";
 import { createCatalogSyncService } from "./modules/catalog/api/catalog-routes.js";
@@ -15,6 +15,7 @@ import { createTournamentService } from "./modules/tournaments/api/tournament-ro
 import { createAchievementService } from "./modules/achievements/api/achievement-routes.js";
 import { BackupService } from "./modules/backup/application/backup-service.js";
 import { PackService } from "./modules/packs/application/pack-service.js";
+import { WatchlistService } from "./modules/watchlist/application/watchlist-service.js";
 
 export interface TaskRunner {
   stop(): Promise<void>;
@@ -64,7 +65,15 @@ export function createTaskRegistry(config: ApiConfig, database: Database.Databas
   const backfill = createPriceBackfillService(config, database, priceBackfillLogger);
   registry.register("prices.backfill", async (payload, context) => backfill.backfill((payload ?? {}) as { expectedPricesChecksumSha256?: string; allowChecksumMismatch?: boolean }, context));
   const market = new MarketService(database);
-  registry.register("market.reprice", async (payload) => { market.reprice((payload ?? {}) as { priceSyncRunId?: string; triggerKey?: string }); });
+  registry.register("market.reprice", async (payload) => {
+    const parsed = (payload ?? {}) as { priceSyncRunId?: string; triggerKey?: string };
+    market.reprice(parsed);
+    // I34B（E12）：每次价格刷新成功后投递一次 Watchlist 提醒检测；提醒失败不影响报价与市场。
+    enqueueWatchlistCheckJob(database, `watchlist.check:reprice:${parsed.triggerKey ?? `price-sync:${new Date().toISOString().slice(0, 10)}`}`, new Date().toISOString());
+  });
+  // I34B（E12）：提醒检测任务；只读最新报价并写 watchlist_alerts，唯一约束收敛至多一次提醒。
+  const watchlist = new WatchlistService(database);
+  registry.register("watchlist.check", async () => { watchlist.checkAlerts(); });
   // I20B：到期回收委托（转 expired）或成交（转取消履约）。状态机条件 UPDATE 保证幂等与重复迁移防护。
   const orders = new OrderService(database);
   registry.register("order.expire", async (payload) => { orders.expireByPayload(payload); });

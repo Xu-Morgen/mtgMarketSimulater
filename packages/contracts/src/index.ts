@@ -390,6 +390,33 @@ export interface DuplicatesSellResultDto {
   fee: Money;
 }
 
+/** I34B（D4）：按筛选结果批量向 NPC 卖出的单个已成交 SKU；价格均来自不可变报价快照。 */
+export interface BatchNpcSellItemDto {
+  skuId: string;
+  quantity: number;
+  unitPrice: Money;
+  unitFee: Money;
+  total: Money;
+  fee: Money;
+}
+
+/** I34B（D4）：批量卖出跳过项的原因；全部由服务端在单事务内判定，浏览器不推算。 */
+export type BatchNpcSellSkipReason =
+  | "not_held"
+  | "no_available_quantity"
+  | "quote_unavailable"
+  | "quote_stale"
+  | "trade_limit_reached";
+
+/** I34B（D4）：批量卖出汇总；与 C8 重复卡清仓不同，不保留任何一张可用库存。 */
+export interface BatchNpcSellResultDto {
+  soldItems: BatchNpcSellItemDto[];
+  skippedItems: Array<{ skuId: string; reason: BatchNpcSellSkipReason }>;
+  cardCount: number;
+  income: Money;
+  fee: Money;
+}
+
 /** I33B：收藏图鉴只读聚合；未收集卡位用于灰影占位，浏览器不得统计或估值。 */
 export interface CollectionUncollectedCardDto {
   name: string;
@@ -546,7 +573,7 @@ export interface QuoteDto {
   capturedAt: string;
   /** 服务端规则在本次报价中实际消费的已受界因素；仅供解释，不可用于浏览器重算。 */
   reasons: Array<{
-    kind: "supply-demand" | "series-cycle" | "relation" | "event" | "liquidity";
+    kind: "supply-demand" | "series-cycle" | "relation" | "event" | "liquidity" | "bias";
     factorBasisPoints: number;
     reason: string;
   }>;
@@ -668,6 +695,89 @@ export interface MarketIndexDto {
   gameIndex: number | null;
   quotedSkus: number;
   capturedAt: string | null;
+}
+
+/** I34B：行情屏涨跌榜/活跃榜的单条条目；涨跌幅与方向均由服务端按报价快照与已结算事实聚合。 */
+export interface MarketHeatEntryDto {
+  sku: Pick<CatalogSkuDto, "id" | "name" | "setCode" | "setName" | "collectorNumber" | "finish" | "rarity">;
+  /** 相对基准日期的游戏内中间价变化（bp，10_000 为无变化）；涨跌榜用整数，不可在浏览器重算。 */
+  changeBasisPoints: number;
+  /** 变化方向：up/down/flat，由服务端判定。 */
+  direction: "up" | "down" | "flat";
+  /** 当前游戏内中间价（整数最小货币单位）。 */
+  currentPrice: Money;
+  /** 基准日期的游戏内中间价；无历史采样时为 null。 */
+  basePrice: Money | null;
+}
+
+/** I34B：市场热度只读聚合；含日内/7 日涨跌榜与当日最活跃交易榜（数量与金额）。 */
+export interface MarketHeatDto {
+  intradayGainers: MarketHeatEntryDto[];
+  intradayLosers: MarketHeatEntryDto[];
+  sevenDayGainers: MarketHeatEntryDto[];
+  sevenDayLosers: MarketHeatEntryDto[];
+  /** 当日最活跃：按已结算 NPC/P2P 成交量（张数）排序的服务端聚合。 */
+  mostActive: Array<{
+    sku: MarketHeatEntryDto["sku"];
+    quantity: number;
+    turnover: Money;
+  }>;
+  capturedAt: string;
+}
+
+/** I34B：系列周期/市场活动的只读公告；只暴露标题、影响范围与生效区间，绝不暴露内部系数与配置。 */
+export interface MarketAnnouncementDto {
+  type: "series_cycle" | "market_event";
+  title: string;
+  /** 影响范围：global | set | sku。 */
+  scope: "global" | "set" | "sku";
+  setCode: string | null;
+  setName: string | null;
+  skuName: string | null;
+  startsAt: string;
+  endsAt: string;
+  reason: string;
+}
+
+export interface MarketAnnouncementsDto {
+  items: MarketAnnouncementDto[];
+  /** 只包含当前 UTC 时刻生效中的公告；到期即不再返回。 */
+  capturedAt: string;
+}
+
+/** I34B（E12）：Watchlist 目标价提醒条目；目标价与方向只由服务端保存与判定。 */
+export interface WatchlistItemDto {
+  id: string;
+  skuId: string;
+  targetType: "game_price" | "reference_price";
+  direction: "at_or_below" | "at_or_above";
+  targetAmount: number;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** I34B（E12）：已触达的站内提醒；命中判定与触发价均来自服务端，浏览器不得重判。 */
+export interface WatchlistAlertDto {
+  id: string;
+  watchlistItemId: string;
+  skuId: string;
+  targetType: "game_price" | "reference_price";
+  direction: "at_or_below" | "at_or_above";
+  targetAmount: number;
+  /** 触发时刻的最新报价（整数最小货币单位），引用不可变报价快照。 */
+  triggeredPrice: number;
+  triggeredAt: string;
+  read: boolean;
+}
+
+export interface WatchlistAlertsDto {
+  items: WatchlistAlertDto[];
+  unreadCount: number;
+}
+
+export interface WatchlistLimitsDto {
+  maxItemsPerUser: number;
 }
 
 /** I13B 管理端价格同步状态；下载地址和 Provider 原始内容永不进入 DTO。 */
@@ -815,6 +925,8 @@ export interface BilateralOrderPreviewDto {
 export interface BilateralOrderBookLevelDto {
   limitPrice: Money;
   remainingQuantity: number;
+  /** I34B：从最优档开始逐档累计的委托数量；累计只由服务端计算，浏览器不得自行累加。 */
+  cumulativeQuantity: number;
   orderCount: number;
 }
 
@@ -822,6 +934,12 @@ export interface BilateralOrderBookDto {
   skuId: string;
   bids: BilateralOrderBookLevelDto[];
   asks: BilateralOrderBookLevelDto[];
+  /**
+   * I34B：盘口中间价 =（最优买 + 最优卖）÷ 2（整数 half-up）；买/卖任一档缺失时为 null。
+   * 价差 = 最优卖 − 最优买；任一档缺失时为 null。均由服务端聚合。
+   */
+  midPrice: Money | null;
+  spread: Money | null;
   /** 订单簿数据截至时间；连接失败时浏览器应提示可能过期。 */
   capturedAt: string;
 }
@@ -1189,6 +1307,9 @@ export interface AdminMarketParametersDto {
   npcBuySpreadBps: number;
   npcSellSpreadBps: number;
   npcFeeBps: number;
+  /** I34B：NPC 做市商倾向全局因素（5000–20000 bp），reprice 时写入报价 reason。 */
+  npcBiasBps: number;
+  npcBiasReason: string;
   version: number;
   updatedAt: string;
 }

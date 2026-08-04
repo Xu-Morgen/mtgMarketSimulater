@@ -9,6 +9,9 @@ export interface MarketParametersRow {
   npc_buy_spread_bps: number;
   npc_sell_spread_bps: number;
   npc_fee_bps: number;
+  /** I34B：NPC 做市商倾向全局因素（5000–20000 bp），reprice 时写入报价 reason。 */
+  npc_bias_bps: number;
+  npc_bias_reason: string;
   updated_at: string;
   /** 乐观版本号，每次更新自增；用于并发冲突检测。 */
   version: number;
@@ -20,6 +23,8 @@ export interface UpdateMarketParametersInput {
   npcBuySpreadBps: number;
   npcSellSpreadBps: number;
   npcFeeBps: number;
+  npcBiasBps: number;
+  npcBiasReason: string;
   expectedVersion: number;
   now: string;
 }
@@ -30,7 +35,7 @@ export class SqliteMarketParametersRepository {
   get(): MarketParametersRow | null {
     const row = this.database
       .prepare(
-        "SELECT rule_version, eur_cent_to_game_credit_bps, minimum_price, npc_buy_spread_bps, npc_sell_spread_bps, npc_fee_bps, updated_at, version FROM market_parameters WHERE singleton = 1"
+        "SELECT rule_version, eur_cent_to_game_credit_bps, minimum_price, npc_buy_spread_bps, npc_sell_spread_bps, npc_fee_bps, npc_bias_bps, npc_bias_reason, updated_at, version FROM market_parameters WHERE singleton = 1"
       )
       .get() as MarketParametersRow | undefined;
     return row ?? null;
@@ -44,6 +49,8 @@ export class SqliteMarketParametersRepository {
       npcBuySpreadBps: row.npc_buy_spread_bps,
       npcSellSpreadBps: row.npc_sell_spread_bps,
       npcFeeBps: row.npc_fee_bps,
+      npcBiasBps: row.npc_bias_bps,
+      npcBiasReason: row.npc_bias_reason,
       version: row.version,
       updatedAt: row.updated_at
     };
@@ -53,9 +60,9 @@ export class SqliteMarketParametersRepository {
   update(input: UpdateMarketParametersInput): MarketParametersRow | "stale" {
     const result = this.database
       .prepare(
-        "UPDATE market_parameters SET eur_cent_to_game_credit_bps = ?, minimum_price = ?, npc_buy_spread_bps = ?, npc_sell_spread_bps = ?, npc_fee_bps = ?, updated_at = ?, version = version + 1 WHERE singleton = 1 AND version = ?"
+        "UPDATE market_parameters SET eur_cent_to_game_credit_bps = ?, minimum_price = ?, npc_buy_spread_bps = ?, npc_sell_spread_bps = ?, npc_fee_bps = ?, npc_bias_bps = ?, npc_bias_reason = ?, updated_at = ?, version = version + 1 WHERE singleton = 1 AND version = ?"
       )
-      .run(input.eurCentToGameCreditBps, input.minimumPrice, input.npcBuySpreadBps, input.npcSellSpreadBps, input.npcFeeBps, input.now, input.expectedVersion);
+      .run(input.eurCentToGameCreditBps, input.minimumPrice, input.npcBuySpreadBps, input.npcSellSpreadBps, input.npcFeeBps, input.npcBiasBps, input.npcBiasReason, input.now, input.expectedVersion);
     if (result.changes !== 1) return "stale";
     return this.get()!;
   }

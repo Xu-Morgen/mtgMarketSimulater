@@ -11,6 +11,7 @@ export const registeredJobTypes = [
   "achievement.process",
   "pack-achievement.process",
   "order.expire",
+  "watchlist.check",
   "narrative.generate",
   "backup.create"
 ] as const;

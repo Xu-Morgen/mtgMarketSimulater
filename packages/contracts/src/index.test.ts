@@ -10,15 +10,20 @@ import {
   type AchievementUnlockDto,
   type ApiResponse,
   type BilateralFulfillmentType,
+  type BilateralOrderBookDto,
   type CollectionAlbumDto,
   type DailyWorkFundingStatusDto,
   type DeckPowerSnapshotDto,
   type DuplicatesSellResultDto,
   type EconomicFactEvent,
+  type MarketAnnouncementDto,
+  type MarketHeatDto,
   type PackOfferDto,
   type PackOpeningCardDto,
   type PackOpeningDto,
-  type PlayerBilateralTradeDto
+  type PlayerBilateralTradeDto,
+  type WatchlistAlertsDto,
+  type WatchlistItemDto
 } from "./index.js";
 
 describe("共享契约", () => {
@@ -318,5 +323,54 @@ describe("共享契约", () => {
     expect(parsed.sell.soldItems[0]).toMatchObject({ quantity: 2, unitPrice: { amount: 100 } });
     expect(parsed.sell.skippedItems[0]).toMatchObject({ reason: "quote_unavailable" });
     expect(parsed.offer).toMatchObject({ discountBps: 8000, status: "active" });
+  });
+
+  it("I34B 公告 DTO 序列化后不泄露内部系数，热度与 Watchlist DTO 固定形状", () => {
+    const announcement: MarketAnnouncementDto = {
+      type: "market_event",
+      title: "新系列预热",
+      scope: "set",
+      setCode: "TST",
+      setName: "测试系列",
+      skuName: null,
+      startsAt: "2026-08-04T00:00:00.000Z",
+      endsAt: "2026-08-11T00:00:00.000Z",
+      reason: "运营活动"
+    };
+    const heat: MarketHeatDto = {
+      intradayGainers: [{ sku: { id: "sku-1", name: "甲", setCode: "TST", setName: "测试系列", collectorNumber: "1", finish: "nonfoil", rarity: "rare" }, changeBasisPoints: 500, direction: "up", currentPrice: { amount: 105, currency: "GAME_CREDIT" }, basePrice: { amount: 100, currency: "GAME_CREDIT" } }],
+      intradayLosers: [],
+      sevenDayGainers: [],
+      sevenDayLosers: [],
+      mostActive: [{ sku: { id: "sku-2", name: "乙", setCode: "TST", setName: "测试系列", collectorNumber: "2", finish: "nonfoil", rarity: "common" }, quantity: 20, turnover: { amount: 2000, currency: "GAME_CREDIT" } }],
+      capturedAt: "2026-08-04T00:00:00.000Z"
+    };
+    const item: WatchlistItemDto = { id: "wl-1", skuId: "sku-1", targetType: "game_price", direction: "at_or_below", targetAmount: 90, enabled: true, createdAt: "2026-08-04T00:00:00.000Z", updatedAt: "2026-08-04T00:00:00.000Z" };
+    const alerts: WatchlistAlertsDto = { items: [{ id: "al-1", watchlistItemId: "wl-1", skuId: "sku-1", targetType: "game_price", direction: "at_or_below", targetAmount: 90, triggeredPrice: 85, triggeredAt: "2026-08-04T01:00:00.000Z", read: false }], unreadCount: 1 };
+    const book: BilateralOrderBookDto = {
+      skuId: "sku-1",
+      bids: [{ limitPrice: { amount: 100, currency: "GAME_CREDIT" }, remainingQuantity: 2, cumulativeQuantity: 2, orderCount: 1 }],
+      asks: [{ limitPrice: { amount: 110, currency: "GAME_CREDIT" }, remainingQuantity: 3, cumulativeQuantity: 3, orderCount: 1 }],
+      midPrice: { amount: 105, currency: "GAME_CREDIT" },
+      spread: { amount: 10, currency: "GAME_CREDIT" },
+      capturedAt: "2026-08-04T00:00:00.000Z"
+    };
+    const parsed = JSON.parse(JSON.stringify({ announcement, heat, item, alerts, book })) as {
+      announcement: MarketAnnouncementDto;
+      heat: MarketHeatDto;
+      item: WatchlistItemDto;
+      alerts: WatchlistAlertsDto;
+      book: BilateralOrderBookDto;
+    };
+    // 公告绝不暴露内部系数或配置字段。
+    expect(parsed.announcement).not.toHaveProperty("factorBps");
+    expect(parsed.announcement).not.toHaveProperty("factorBasisPoints");
+    expect(parsed.announcement).toMatchObject({ type: "market_event", scope: "set" });
+    expect(parsed.heat.intradayGainers[0]).toMatchObject({ changeBasisPoints: 500, direction: "up" });
+    expect(parsed.heat.mostActive[0]).toMatchObject({ quantity: 20 });
+    expect(parsed.item).toMatchObject({ targetType: "game_price", targetAmount: 90 });
+    expect(parsed.alerts).toMatchObject({ unreadCount: 1 });
+    expect(parsed.book.bids[0]).toMatchObject({ cumulativeQuantity: 2 });
+    expect(parsed.book).toMatchObject({ midPrice: { amount: 105 }, spread: { amount: 10 } });
   });
 });

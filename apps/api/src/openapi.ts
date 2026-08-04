@@ -11,10 +11,13 @@ export const publicApiPaths = [
   "/v1/market/quotes/{skuId}/history",
   "/v1/market/index",
   "/v1/market/index/history",
+  "/v1/market/heat",
+  "/v1/market/announcements",
   "/v1/npc-trades/buy/{skuId}/preview",
   "/v1/npc-trades/buy/{skuId}",
   "/v1/npc-trades/sell/{skuId}/preview",
   "/v1/npc-trades/sell/{skuId}",
+  "/v1/npc-trades/sell/batch",
   "/v1/orders/buy/{skuId}/preview",
   "/v1/orders/sell/{skuId}/preview",
   "/v1/orders/buy/{skuId}",
@@ -78,6 +81,10 @@ export const publicApiPaths = [
   "/v1/pack-openings",
   "/v1/collection/album",
   "/v1/inventory/duplicates/sell",
+  "/v1/watchlist",
+  "/v1/watchlist/{skuId}",
+  "/v1/watchlist/alerts",
+  "/v1/watchlist/alerts/{alertId}/read",
   "/v1/admin/jobs",
   "/v1/admin/jobs/{id}/retry",
   "/v1/admin/catalog/sync",
@@ -163,6 +170,18 @@ export const openApiDocument = {
         responses: { "200": { description: "市场指数历史" }, "401": { description: "认证无效或过期" } }
       }
     },
+    "/v1/market/heat": {
+      get: {
+        summary: "行情屏只读聚合：日内/7 日涨跌榜与当日最活跃交易榜（服务端按报价快照与已结算成交计算）",
+        responses: { "200": { description: "市场热度" }, "401": { description: "认证无效或过期" } }
+      }
+    },
+    "/v1/market/announcements": {
+      get: {
+        summary: "系列周期与市场活动的只读公告（标题、影响范围、生效区间；不暴露内部系数）",
+        responses: { "200": { description: "市场公告" }, "401": { description: "认证无效或过期" } }
+      }
+    },
     "/v1/npc-trades/buy/{skuId}/preview": {
       get: {
         summary: "取得服务端 NPC 买入预览、不可变报价标识和额度",
@@ -185,6 +204,12 @@ export const openApiDocument = {
       post: {
         summary: "以最低可接受价和幂等键确认 NPC 卖出",
         responses: { "201": { description: "成交已结算" }, "200": { description: "幂等重放" }, "400": { description: "请求无效或缺少幂等键" }, "404": { description: "无可结算报价" }, "409": { description: "报价过期、库存不足、额度或幂等冲突" } }
+      }
+    },
+    "/v1/npc-trades/sell/batch": {
+      post: {
+        summary: "按筛选结果批量向 NPC 卖出（SKU 列表，逐 SKU 复用报价与额度，单事务回滚）",
+        responses: { "201": { description: "卖出汇总（张数/收入/费用与跳过项）" }, "200": { description: "幂等重放" }, "400": { description: "缺少幂等键或请求无效" }, "409": { description: "存档缺失或幂等冲突" } }
       }
     },
     "/v1/orders/buy/{skuId}/preview": {
@@ -495,6 +520,34 @@ export const openApiDocument = {
           "400": { description: "缺少幂等键或请求无效" },
           "409": { description: "存档缺失或幂等冲突" }
         }
+      }
+    },
+    "/v1/watchlist": {
+      get: {
+        summary: "读取当前玩家的 Watchlist 条目与额度上限",
+        responses: { "200": { description: "Watchlist 条目" }, "401": { description: "认证无效或过期" } }
+      },
+      post: {
+        summary: "以幂等键新增/更新一条目标价提醒（每 SKU 去重，超上限拒绝）",
+        responses: { "200": { description: "已保存或幂等重放" }, "400": { description: "缺少幂等键或请求无效" }, "404": { description: "SKU 不存在" }, "409": { description: "超出条目上限或幂等冲突" } }
+      }
+    },
+    "/v1/watchlist/{skuId}": {
+      delete: {
+        summary: "以幂等键删除当前玩家某 SKU 的 Watchlist 条目",
+        responses: { "200": { description: "已删除（含幂等重放）" }, "400": { description: "缺少幂等键" }, "401": { description: "认证无效或过期" } }
+      }
+    },
+    "/v1/watchlist/alerts": {
+      get: {
+        summary: "读取当前玩家的目标价触达提醒与未读数",
+        responses: { "200": { description: "提醒列表" }, "401": { description: "认证无效或过期" } }
+      }
+    },
+    "/v1/watchlist/alerts/{alertId}/read": {
+      post: {
+        summary: "以幂等键将一条提醒标记为已读（只读自己，越权 404）",
+        responses: { "200": { description: "已读或幂等重放" }, "400": { description: "缺少幂等键" }, "404": { description: "提醒不存在" }, "401": { description: "认证无效或过期" } }
       }
     },
     "/v1/admin/catalog/sync": {

@@ -272,6 +272,8 @@ describe("I30B admin routes", () => {
     const get = await app.inject({ method: "GET", url: "/v1/admin/market-parameters", headers: { authorization: admin.authorization } });
     expect(get.statusCode).toBe(200);
     const version = get.json().data.version as number;
+    // I34B：默认倾向为中性（10000），旧请求体（不含倾向字段）沿用现值而非重置。
+    expect(get.json().data).toMatchObject({ npcBiasBps: 10000, npcBiasReason: "NPC 做市商倾向" });
     const update = await app.inject({
       method: "POST", url: "/v1/admin/market-parameters",
       headers: { authorization: admin.authorization, "idempotency-key": idKey("mp-update") },
@@ -286,6 +288,20 @@ describe("I30B admin routes", () => {
     });
     expect(stale.statusCode).toBe(409);
     expect(stale.json().error.code).toBe("VERSION_STALE");
+    // I34B：更新倾向字段（受 5000–20000 界约束），并拒绝界外值。
+    const biasUpdate = await app.inject({
+      method: "POST", url: "/v1/admin/market-parameters",
+      headers: { authorization: admin.authorization, "idempotency-key": idKey("mp-bias") },
+      payload: { eurCentToGameCreditBps: 10000, minimumPrice: 1, npcBuySpreadBps: 1200, npcSellSpreadBps: 1000, npcFeeBps: 0, npcBiasBps: 12000, npcBiasReason: "NPC 本周扫货测试系列", expectedVersion: update.json().data.version }
+    });
+    expect(biasUpdate.statusCode).toBe(200);
+    expect(biasUpdate.json().data).toMatchObject({ npcBiasBps: 12000, npcBiasReason: "NPC 本周扫货测试系列" });
+    const outOfBounds = await app.inject({
+      method: "POST", url: "/v1/admin/market-parameters",
+      headers: { authorization: admin.authorization, "idempotency-key": idKey("mp-bias-oob") },
+      payload: { eurCentToGameCreditBps: 10000, minimumPrice: 1, npcBuySpreadBps: 1200, npcSellSpreadBps: 1000, npcFeeBps: 0, npcBiasBps: 20001, npcBiasReason: "越界", expectedVersion: biasUpdate.json().data.version }
+    });
+    expect(outOfBounds.statusCode).toBe(400);
     await app.close();
     database.close();
   });

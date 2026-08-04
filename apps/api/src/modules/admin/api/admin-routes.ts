@@ -78,6 +78,10 @@ const marketParametersBodySchema = z.object({
   npcBuySpreadBps: z.number().int().min(0).max(9999),
   npcSellSpreadBps: z.number().int().min(0).max(100000),
   npcFeeBps: z.number().int().min(0).max(100000),
+  // I34B：NPC 做市商倾向全局因素；bp 界与市场系数一致（5000–20000），reason 为面向玩家的公开说明。
+  // 可缺省——I30F 既有管理页不提交时，服务端沿用当前值而非重置为中性。
+  npcBiasBps: z.number().int().min(5000).max(20000).optional(),
+  npcBiasReason: z.string().trim().min(1).max(120).optional(),
   expectedVersion: z.number().int().min(0)
 }).strict();
 const packRuleBodySchema = z.object({
@@ -269,7 +273,18 @@ export async function registerAdminRoutes(app: FastifyInstance, config: ApiConfi
     const keyCheck = requireIdempotencyKey(request.requestId, key);
     if (!keyCheck.valid) return reply.code(400).send(keyCheck.response);
     const body = marketParametersBodySchema.parse(request.body);
-    const result = admin.updateMarketParameters({ ...body, actorId: request.actor!.id, idempotencyKey: key!, requestId: request.requestId, now: now() });
+    // I34B：倾向字段可缺省（既有管理页不提交时沿用现值），仅在显式提供时透传。
+    const result = admin.updateMarketParameters({
+      eurCentToGameCreditBps: body.eurCentToGameCreditBps,
+      minimumPrice: body.minimumPrice,
+      npcBuySpreadBps: body.npcBuySpreadBps,
+      npcSellSpreadBps: body.npcSellSpreadBps,
+      npcFeeBps: body.npcFeeBps,
+      expectedVersion: body.expectedVersion,
+      ...(body.npcBiasBps !== undefined ? { npcBiasBps: body.npcBiasBps } : {}),
+      ...(body.npcBiasReason !== undefined ? { npcBiasReason: body.npcBiasReason } : {}),
+      actorId: request.actor!.id, idempotencyKey: key!, requestId: request.requestId, now: now()
+    });
     return sendWriteReply(request, reply, result, 200);
   });
 

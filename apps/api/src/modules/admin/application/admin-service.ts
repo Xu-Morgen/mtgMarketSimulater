@@ -344,10 +344,18 @@ export class AdminService {
     return row ? this.marketParameters.toDto(row) : null;
   }
 
-  updateMarketParameters(input: { eurCentToGameCreditBps: number; minimumPrice: number; npcBuySpreadBps: number; npcSellSpreadBps: number; npcFeeBps: number; expectedVersion: number; actorId: string; idempotencyKey: string; requestId: string; now: string }): AdminWriteResult<AdminMarketParametersDto> | AdminErrorResult {
+  updateMarketParameters(input: { eurCentToGameCreditBps: number; minimumPrice: number; npcBuySpreadBps: number; npcSellSpreadBps: number; npcFeeBps: number; npcBiasBps?: number; npcBiasReason?: string; expectedVersion: number; actorId: string; idempotencyKey: string; requestId: string; now: string }): AdminWriteResult<AdminMarketParametersDto> | AdminErrorResult {
     return this.runIdempotent(input.actorId, input.idempotencyKey, input.requestId, input.now, input, (complete) => {
       return withinTransaction(this.database, () => {
-        const updateInput: UpdateMarketParametersInput = { eurCentToGameCreditBps: input.eurCentToGameCreditBps, minimumPrice: input.minimumPrice, npcBuySpreadBps: input.npcBuySpreadBps, npcSellSpreadBps: input.npcSellSpreadBps, npcFeeBps: input.npcFeeBps, expectedVersion: input.expectedVersion, now: input.now };
+        // I34B：倾向字段可缺省（I30F 既有管理页不提交时保持现值），缺省时沿用当前参数，不重置为中性。
+        const current = this.marketParameters.get();
+        const updateInput: UpdateMarketParametersInput = {
+          eurCentToGameCreditBps: input.eurCentToGameCreditBps, minimumPrice: input.minimumPrice,
+          npcBuySpreadBps: input.npcBuySpreadBps, npcSellSpreadBps: input.npcSellSpreadBps, npcFeeBps: input.npcFeeBps,
+          npcBiasBps: input.npcBiasBps ?? current?.npc_bias_bps ?? 10_000,
+          npcBiasReason: input.npcBiasReason ?? current?.npc_bias_reason ?? "NPC 做市商倾向",
+          expectedVersion: input.expectedVersion, now: input.now
+        };
         const result = this.marketParameters.update(updateInput);
         if (result === "stale") return complete(409, failure(input.requestId, "VERSION_STALE", "市场参数版本已变更，请重新预览"));
         enqueueMarketRepriceJob(this.database, `market-parameters:${input.now}`, input.now);

@@ -595,6 +595,7 @@ export class OrderService {
     return { items: rows.slice(0, filters.limit).map((row) => this.toOrderDto(row)), page: { total, hasMore, nextCursor: hasMore ? String(offset + filters.limit) : null } };
   }
 
+  /** I18B 只读订单簿；I34B 扩展为按价格档聚合的盘口深度（逐档累计量、中间价、价差）。 */
   book(skuId: string, now = new Date().toISOString()): BilateralOrderBookDto {
     const aggregate = (side: OrderSide): BilateralOrderBookLevelDto[] => {
       const rows = this.database.prepare(
@@ -602,9 +603,23 @@ export class OrderService {
          WHERE sku_id = ? AND side = ? AND status IN ('open', 'partially_filled') AND expires_at > ?
          GROUP BY limit_price_amount ORDER BY ${side === "buy" ? "limit_price_amount DESC" : "limit_price_amount ASC"}, limit_price_amount`
       ).all(skuId, side, now) as Array<{ limit_price_amount: number; qty: number; cnt: number }>;
-      return rows.map((row) => ({ limitPrice: money(row.limit_price_amount), remainingQuantity: row.qty, orderCount: row.cnt }));
+      let cumulative = 0;
+      return rows.map((row) => {
+        cumulative += row.qty;
+        return { limitPrice: money(row.limit_price_amount), remainingQuantity: row.qty, cumulativeQuantity: cumulative, orderCount: row.cnt };
+      });
     };
-    return { skuId, bids: aggregate("buy"), asks: aggregate("sell"), capturedAt: now };
+    const bids = aggregate("buy");
+    const asks = aggregate("sell");
+    const bestBid = bids[0]?.limitPrice.amount ?? null;
+    const bestAsk = asks[0]?.limitPrice.amount ?? null;
+    const midPrice = bestBid !== null && bestAsk !== null
+      ? { amount: Math.floor((bestBid + bestAsk) / 2), currency: "GAME_CREDIT" as const }
+      : null;
+    const spread = bestBid !== null && bestAsk !== null
+      ? { amount: bestAsk - bestBid, currency: "GAME_CREDIT" as const }
+      : null;
+    return { skuId, bids, asks, midPrice, spread, capturedAt: now };
   }
 
   /**

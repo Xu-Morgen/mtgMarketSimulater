@@ -4,6 +4,8 @@ import {
   canonicalizeRequest,
   type AccountBalanceDto,
   type ApiResponse,
+  type BatchNpcSellResultDto,
+  type BatchNpcSellSkipReason,
   type DuplicatesSellItemDto,
   type DuplicatesSellResultDto,
   type DuplicatesSellSkipReason,
@@ -38,6 +40,11 @@ export type NpcSellCommandResult =
 export type NpcSellDuplicatesCommandResult =
   | { state: "completed"; statusCode: number; response: ApiResponse<{ result: DuplicatesSellResultDto }> }
   | { state: "replayed"; statusCode: number; response: ApiResponse<{ result: DuplicatesSellResultDto }> }
+  | { state: "conflict" }
+  | { state: "in-progress" };
+export type NpcSellBatchCommandResult =
+  | { state: "completed"; statusCode: number; response: ApiResponse<{ result: BatchNpcSellResultDto }> }
+  | { state: "replayed"; statusCode: number; response: ApiResponse<{ result: BatchNpcSellResultDto }> }
   | { state: "conflict" }
   | { state: "in-progress" };
 
@@ -325,6 +332,114 @@ export class NpcTradeService {
     });
   }
 
+  /**
+   * I34B（D4）：按筛选结果批量向 NPC 卖出。逐 SKU 复用既有 NPC 卖出规则、报价快照与每日额度，
+   * 卖出「当前可用库存」的全部（不保留一张，区别于 C8 重复卡清仓）；任一 SKU 结算失败整批回滚。
+   * 幂等键指纹依赖规范化后的 skuIds 数组，同一意图的网络重试复用键、换 SKU 列表才换键。
+   */
+  sellBatch(input: {
+    userId: string;
+    skuIds: string[];
+    idempotencyKey: string;
+    requestFingerprint: string;
+    requestId: string;
+    now?: Date;
+  }): NpcSellBatchCommandResult {
+    const now = (input.now ?? new Date()).toISOString();
+    return this.inventory.withLedgerTransaction(() => {
+      const existing = this.findIdempotency(input.userId, input.idempotencyKey);
+      if (existing) return this.batchIdempotencyResult(existing, input.requestFingerprint);
+      try {
+        this.database.prepare(
+          "INSERT INTO idempotency_requests (id, actor_id, idempotency_key, request_fingerprint, status, response_status, response_json, created_at, completed_at) VALUES (?, ?, ?, ?, 'running', NULL, NULL, ?, NULL)"
+        ).run(randomUUID(), input.userId, input.idempotencyKey, input.requestFingerprint, now);
+      } catch {
+        const raced = this.findIdempotency(input.userId, input.idempotencyKey);
+        return raced ? this.batchIdempotencyResult(raced, input.requestFingerprint) : { state: "in-progress" };
+      }
+      if (!this.users.balance(input.userId))
+        return this.completeBatchFailure(input, now, 409, "RESOURCE_CONFLICT", "请先创建游戏存档");
+
+      const limits = this.limits();
+      const day = now.slice(0, 10);
+      const uniqueSkuIds = [...new Set(input.skuIds)];
+      const holdings = new Map((this.database.prepare(
+        "SELECT sku_id, available_quantity FROM inventory_holdings WHERE user_id = ? AND sku_id IN (" + uniqueSkuIds.map(() => "?").join(", ") + ")"
+      ).all(input.userId, ...uniqueSkuIds) as Array<{ sku_id: string; available_quantity: number }>).map((row) => [row.sku_id, row.available_quantity]));
+
+      const soldItems: BatchNpcSellResultDto["soldItems"] = [];
+      const skippedItems: Array<{ skuId: string; reason: BatchNpcSellSkipReason }> = [];
+      let cardCount = 0;
+      let incomeAmount = 0;
+      let feeAmount = 0;
+
+      for (const skuId of uniqueSkuIds) {
+        const availableQuantity = holdings.get(skuId) ?? 0;
+        if (!holdings.has(skuId)) { skippedItems.push({ skuId, reason: "not_held" }); continue; }
+        if (availableQuantity <= 0) { skippedItems.push({ skuId, reason: "no_available_quantity" }); continue; }
+        const quote = this.market.npcSettlementQuote(skuId, "sell");
+        if (!quote || !quote.tradable) { skippedItems.push({ skuId, reason: "quote_unavailable" }); continue; }
+        if (quote.validUntil <= now) { skippedItems.push({ skuId, reason: "quote_stale" }); continue; }
+        const used = (this.database.prepare(
+          "SELECT COALESCE(SUM(quantity), 0) AS quantity FROM npc_trades WHERE user_id = ? AND sku_id = ? AND side = 'sell' AND settlement_date = ?"
+        ).get(input.userId, skuId, day) as { quantity: number }).quantity;
+        const remaining = Math.max(0, limits.max_quantity_per_user_sku_day - used);
+        if (remaining === 0) { skippedItems.push({ skuId, reason: "trade_limit_reached" }); continue; }
+        // 卖完可用库存（锁定库存不可卖），并受单笔与当日额度共同约束。
+        const quantity = Math.min(availableQuantity, remaining, limits.max_quantity_per_trade);
+
+        const tradeId = randomUUID();
+        const holdingAfter = this.inventory.disposeAvailableInLedgerTransaction({
+          userId: input.userId,
+          skuId,
+          quantityDelta: -quantity,
+          reason: "npc_sell_batch",
+          correlationId: tradeId,
+          now
+        });
+        if (holdingAfter === "insufficient") throw new Error("批量卖出库存写入失败");
+        const totalAmount = multiply(quote.unitPriceAmount, quantity, "NPC 批量卖出总价");
+        const feeTotalAmount = multiply(quote.unitFeeAmount, quantity, "NPC 批量卖出费用");
+        const balance = this.users.creditForNpcSell(input.userId, totalAmount, now, `npc-sell:${tradeId}`);
+        if (balance === "missing") throw new Error("批量卖出账户写入失败");
+
+        this.database.prepare(
+          "INSERT INTO npc_trades (id, user_id, sku_id, side, quote_id, quote_version, unit_price_amount, unit_fee_amount, total_amount, quantity, settlement_date, created_at) VALUES (?, ?, ?, 'sell', ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(tradeId, input.userId, skuId, quote.quoteId, quote.quoteVersion, quote.unitPriceAmount, quote.unitFeeAmount, totalAmount, quantity, day, now);
+        const trade = this.tradeDto(tradeId, input.userId, skuId, "sell", quantity, quote, totalAmount, now);
+        const eventId = this.writeSettlementEvent(trade, input.userId, skuId, "sell", quantity, quote, now);
+        enqueueMarketRepriceJob(this.database, `fact-event:${eventId}`, now);
+        this.users.writeEconomicAudit(input.userId, "npc.trade.settled", "npc_trade", tradeId, input.requestId, {
+          skuId, side: "sell", quantity, quoteId: quote.quoteId, quoteVersion: quote.quoteVersion,
+          unitPriceAmount: quote.unitPriceAmount, unitFeeAmount: quote.unitFeeAmount, totalAmount,
+          batch: "selection"
+        }, now);
+        soldItems.push({
+          skuId,
+          quantity,
+          unitPrice: money(quote.unitPriceAmount),
+          unitFee: money(quote.unitFeeAmount),
+          total: money(totalAmount),
+          fee: money(feeTotalAmount)
+        });
+        cardCount += quantity;
+        incomeAmount += totalAmount;
+        feeAmount += feeTotalAmount;
+      }
+
+      const result: BatchNpcSellResultDto = {
+        soldItems,
+        skippedItems,
+        cardCount,
+        income: money(incomeAmount),
+        fee: money(feeAmount)
+      };
+      const response = success(input.requestId, { result });
+      this.completeBatchIdempotency(input.userId, input.idempotencyKey, 201, response, now);
+      return { state: "completed", statusCode: 201, response };
+    });
+  }
+
   private previewForQuote(userId: string, quantity: number, quote: NpcSettlementQuote, now: string): NpcBuyPreviewDto {
     const limits = this.limits();
     const day = now.slice(0, 10);
@@ -486,6 +601,25 @@ export class NpcTradeService {
     ).run(statusCode, JSON.stringify(response), now, actorId, key);
     if (updated.changes !== 1) throw new Error("重复卡批量卖出幂等请求状态损坏");
   }
+
+  private batchIdempotencyResult(existing: IdempotencyRow, fingerprint: string): NpcSellBatchCommandResult {
+    if (existing.request_fingerprint !== fingerprint) return { state: "conflict" };
+    if (existing.status !== "completed" || !existing.response_status || !existing.response_json) return { state: "in-progress" };
+    return { state: "replayed", statusCode: existing.response_status, response: JSON.parse(existing.response_json) as ApiResponse<{ result: BatchNpcSellResultDto }> };
+  }
+
+  private completeBatchFailure(input: { userId: string; idempotencyKey: string; requestId: string }, now: string, statusCode: number, code: "RESOURCE_CONFLICT", message: string): NpcSellBatchCommandResult {
+    const response = failure(input.requestId, code, message);
+    this.completeBatchIdempotency(input.userId, input.idempotencyKey, statusCode, response, now);
+    return { state: "completed", statusCode, response };
+  }
+
+  private completeBatchIdempotency(actorId: string, key: string, statusCode: number, response: ApiResponse<{ result: BatchNpcSellResultDto }>, now: string): void {
+    const updated = this.database.prepare(
+      "UPDATE idempotency_requests SET status = 'completed', response_status = ?, response_json = ?, completed_at = ? WHERE actor_id = ? AND idempotency_key = ? AND status = 'running'"
+    ).run(statusCode, JSON.stringify(response), now, actorId, key);
+    if (updated.changes !== 1) throw new Error("批量卖出幂等请求状态损坏");
+  }
 }
 
 function money(amount: number) { return { amount, currency: "GAME_CREDIT" as const }; }
@@ -499,5 +633,10 @@ export function npcBuyRequestFingerprint(body: unknown): string {
 }
 
 export function npcSellRequestFingerprint(body: unknown): string {
+  return createHash("sha256").update(canonicalizeRequest(body)).digest("hex");
+}
+
+/** I34B（D4）：批量卖出指纹依赖规范化后的 skuIds；同一意图的网络重试复用键，换 SKU 列表才换键。 */
+export function npcSellBatchRequestFingerprint(body: unknown): string {
   return createHash("sha256").update(canonicalizeRequest(body)).digest("hex");
 }

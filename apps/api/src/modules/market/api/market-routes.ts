@@ -39,4 +39,11 @@ export async function registerMarketRoutes(app: FastifyInstance, database: Datab
     const { range } = historyQuerySchema.parse(request.query);
     return success(request.requestId, market.indexHistory(range));
   });
+  // I34B：行情屏涨跌榜/活跃榜与公告，均为只读服务端聚合；浏览器不计算涨跌、不接触内部系数。
+  app.get("/v1/market/heat", { preHandler: requireRole("player") }, async (request) =>
+    success(request.requestId, market.heat())
+  );
+  app.get("/v1/market/announcements", { preHandler: requireRole("player") }, async (request) =>
+    success(request.requestId, market.announcements())
+  );
 }

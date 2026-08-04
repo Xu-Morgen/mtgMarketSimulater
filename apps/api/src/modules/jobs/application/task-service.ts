@@ -64,6 +64,19 @@ export function enqueuePackAchievementProcessJob(
 }
 
 /**
+ * I34B（E12）：在每次 market.reprice 成功后投递一次 Watchlist 提醒检测（uniqueKey 以 triggerKey
+ * 去重）。提醒任务只读价格并写 `watchlist_alerts`，不结算、不扣费；任务失败走既有重试，
+ * 绝不影响报价与市场。
+ */
+export function enqueueWatchlistCheckJob(
+  database: ConstructorParameters<typeof SqliteJobRepository>[0],
+  uniqueKey: string,
+  runAfter: string
+): void {
+  new SqliteJobRepository(database).enqueue({ type: "watchlist.check", payload: {}, uniqueKey, runAfter, maxAttempts: 5 }, runAfter);
+}
+
+/**
  * I17B 每日价格同步调度。以 UTC 自然日为唯一键：`last_scheduled_date` 落后于今日时
  * 投递一次 `prices.sync`（uniqueKey=`prices.sync:daily:<date>`）。停机多日只补投一次
  * 而非逐日补投——历史回填由独立的 `prices.backfill` 负责。条件 UPDATE + 任务唯一键

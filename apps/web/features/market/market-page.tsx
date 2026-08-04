@@ -18,7 +18,7 @@ import styles from "./market-page.module.css";
 const defaultPageSize = 20;
 const pageSizeOptions = [20, 50, 100];
 const finishes: Array<{ value: CardFinish; label: string }> = [{ value: "nonfoil", label: "非闪" }, { value: "foil", label: "闪" }, { value: "etched", label: "蚀刻" }];
-const factorLabels: Record<QuoteDto["reasons"][number]["kind"], string> = { "supply-demand": "供需", "series-cycle": "系列周期", relation: "卡牌关联", event: "市场活动", liquidity: "流动性" };
+const factorLabels: Record<QuoteDto["reasons"][number]["kind"], string> = { "supply-demand": "供需", "series-cycle": "系列周期", relation: "卡牌关联", event: "市场活动", liquidity: "流动性", bias: "NPC 倾向" };
 
 function formatEurCents(amount: number): string { return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "EUR" }).format(amount / 100); }
 function formatDate(value: string): string { return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }

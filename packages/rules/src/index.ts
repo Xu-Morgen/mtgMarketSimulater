@@ -187,7 +187,7 @@ export const MARKET_FACTOR_MAX_BPS = 20_000;
 export const MARKET_QUOTE_VALIDITY_MS = 15 * 60 * 1_000;
 
 export interface MarketFactorInput {
-  kind: "supply-demand" | "series-cycle" | "relation" | "event" | "liquidity";
+  kind: "supply-demand" | "series-cycle" | "relation" | "event" | "liquidity" | "bias";
   /** 10_000 代表不影响报价；每项先校验，再在总和阶段统一截断。 */
   factorBasisPoints: number;
   reason: string;

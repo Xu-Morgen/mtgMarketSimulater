@@ -270,6 +270,10 @@ describe("I18B 双边订单簿与我的委托查询", () => {
 
     const book = (await app.inject({ method: "GET", url: `/v1/orders/book/${ids.sku}`, headers: { authorization: buyAuth } })).json().data.book;
     expect(book).toMatchObject({ skuId: ids.sku, bids: [{ limitPrice: { amount: 210 }, remainingQuantity: 2, orderCount: 1 }], asks: [{ limitPrice: { amount: 220 }, remainingQuantity: 2, orderCount: 1 }] });
+    // I34B：盘口深度由服务端逐档累计，并给出中间价与价差；买 210 / 卖 220。
+    expect(book.bids[0]).toMatchObject({ cumulativeQuantity: 2 });
+    expect(book.asks[0]).toMatchObject({ cumulativeQuantity: 2 });
+    expect(book).toMatchObject({ midPrice: { amount: 215, currency: "GAME_CREDIT" }, spread: { amount: 10, currency: "GAME_CREDIT" } });
 
     const mine = (await app.inject({ method: "GET", url: "/v1/orders", headers: { authorization: buyAuth } })).json().data;
     expect(mine.items).toHaveLength(1);

@@ -223,3 +223,82 @@ describe("I19 市场排序", () => {
     database.close();
   });
 });
+
+describe("I34B 市场热度与公告", () => {
+  /** 写入一条历史报价（日期为 calculatedAt 当天），返回 market_quotes id。 */
+  function seedQuoteForDay(database: ReturnType<typeof fixture>, targetSkuId: string, calculatedAt: string, amount: number, index: number, snapshotEntryId: string): string {
+    const id = `82000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    database.prepare("INSERT INTO market_quotes (id, sku_id, price_snapshot_entry_id, trigger_key, rule_version, reference_price_eur_cents, market_price_amount, npc_buy_price_amount, npc_sell_price_amount, npc_buy_fee_amount, npc_sell_fee_amount, parameters_json, reasons_json, calculated_at, valid_until) VALUES (?, ?, ?, ?, 'market/v1', 100, ?, 90, 110, 0, 0, '{}', '[]', ?, ?)").run(id, targetSkuId, snapshotEntryId, `heat:${index}`, amount, calculatedAt, calculatedAt);
+    return id;
+  }
+
+  it("热度按自然日采样计算日内/7 日涨跌榜，无历史基准返回 flat", () => {
+    const database = fixture();
+    // 主卡：7 月 20 日 100 → 7 月 25 日 120（7 日榜内上涨 2000bp）。
+    seedQuoteForDay(database, skuId, "2026-07-20T08:00:00.000Z", 100, 1, snapshotId);
+    seedQuoteForDay(database, skuId, "2026-07-25T08:00:00.000Z", 120, 2, snapshotId);
+    // 第二张卡只有当日 90（无基准，flat）。
+    const secondSku = "30000000-0000-4000-8000-000000000011";
+    const secondPrinting = "20000000-0000-4000-8000-000000000011";
+    database.prepare("INSERT INTO card_printings (id, set_id, name, collector_number, scryfall_id, rarity, legalities_json, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, '热度乙', '2', ?, 'common', '{}', 'scryfall', ?, 0, ?, ?)").run(secondPrinting, setId, secondPrinting, secondPrinting, now, now);
+    database.prepare("INSERT INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, 'nonfoil', 1, 'scryfall', ?, 0, ?, ?)").run(secondSku, secondPrinting, secondPrinting, now, now);
+    seedQuoteForDay(database, secondSku, "2026-07-25T08:00:00.000Z", 90, 3, snapshotId);
+    const market = new MarketService(database);
+    const heat = market.heat("2026-07-25T12:00:00.000Z");
+    // 甲在 7 日榜为涨幅第 1；乙无基准为 flat 不进入涨跌榜。
+    expect(heat.sevenDayGainers).toHaveLength(1);
+    expect(heat.sevenDayGainers[0]).toMatchObject({ sku: { id: skuId }, changeBasisPoints: 2000, direction: "up", currentPrice: { amount: 120, currency: "GAME_CREDIT" }, basePrice: { amount: 100, currency: "GAME_CREDIT" } });
+    // 日内榜同样只有甲有涨跌幅；乙无基准为 flat、basePrice=null，不进涨跌榜。
+    expect(heat.intradayGainers.map((entry) => entry.sku.id)).toEqual([skuId]);
+    expect(heat.intradayLosers).toEqual([]);
+    const flat = [...heat.intradayGainers, ...heat.intradayLosers, ...heat.sevenDayGainers, ...heat.sevenDayLosers].find((entry) => entry.sku.id === secondSku);
+    expect(flat).toBeUndefined();
+    database.close();
+  });
+
+  it("热度最活跃榜按当日已结算 NPC 成交聚合数量与金额", () => {
+    const database = fixture();
+    const userId = "80000000-0000-4000-8000-000000000001";
+    const quoteId = seedQuoteForDay(database, skuId, "2026-07-25T08:00:00.000Z", 100, 1, snapshotId);
+    database.prepare("INSERT INTO users (id, email, display_name, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, ?, 'player', ?, ?)").run(userId, "heat-player@example.test", "热度玩家", "x".repeat(64), now, now);
+    database.prepare("INSERT INTO npc_trades (id, user_id, sku_id, side, quote_id, quote_version, unit_price_amount, unit_fee_amount, total_amount, quantity, settlement_date, created_at) VALUES (?, ?, ?, 'sell', ?, 'market/v1', 100, 0, 200, 2, ?, ?)").run("91000000-0000-4000-8000-000000000001", userId, skuId, quoteId, "2026-07-25", "2026-07-25T08:00:00.000Z");
+    const market = new MarketService(database);
+    const heat = market.heat("2026-07-25T12:00:00.000Z");
+    expect(heat.mostActive).toHaveLength(1);
+    expect(heat.mostActive[0]).toMatchObject({ sku: { id: skuId }, quantity: 2, turnover: { amount: 200, currency: "GAME_CREDIT" } });
+    database.close();
+  });
+
+  it("公告只返回生效中的系列周期与市场活动，且不暴露内部系数", () => {
+    const database = fixture();
+    database.prepare("INSERT INTO market_series_cycles (id, set_id, factor_bps, starts_at, ends_at, reason, created_at) VALUES (?, ?, 12000, ?, ?, '新系列热度', ?)").run("93000000-0000-4000-8000-000000000001", setId, "2026-07-24T00:00:00.000Z", "2026-07-27T00:00:00.000Z", now);
+    database.prepare("INSERT INTO market_events (id, scope_type, scope_id, factor_bps, starts_at, ends_at, reason, created_at) VALUES (?, 'global', NULL, 15000, ?, ?, '测试活动', ?)").run("94000000-0000-4000-8000-000000000001", "2026-07-24T00:00:00.000Z", "2026-07-27T00:00:00.000Z", now);
+    // 已到期的不返回。
+    database.prepare("INSERT INTO market_events (id, scope_type, scope_id, factor_bps, starts_at, ends_at, reason, created_at) VALUES (?, 'global', NULL, 15000, ?, ?, '已到期', ?)").run("94000000-0000-4000-8000-000000000002", "2026-07-10T00:00:00.000Z", "2026-07-20T00:00:00.000Z", now);
+    const market = new MarketService(database);
+    const result = market.announcements("2026-07-25T12:00:00.000Z");
+    expect(result.items).toHaveLength(2);
+    const serialized = JSON.parse(JSON.stringify(result.items)) as Array<Record<string, unknown>>;
+    for (const item of serialized) {
+      expect(item).not.toHaveProperty("factorBps");
+      expect(item).not.toHaveProperty("factorBasisPoints");
+    }
+    expect(result.items.map((item) => item.type).sort()).toEqual(["market_event", "series_cycle"]);
+    database.close();
+  });
+
+  it("bias 因素进入 reprice 的 reason，且默认中性不改变报价结果", () => {
+    const database = fixture();
+    const market = new MarketService(database);
+    market.reprice({ priceSyncRunId: runId, triggerKey: "bias-neutral" }, now);
+    const neutralQuote = market.quote(skuId)!;
+    expect(neutralQuote.reasons.some((reason) => reason.kind === "bias" && reason.factorBasisPoints === 10_000 && reason.reason === "NPC 做市商倾向")).toBe(true);
+    // 提高倾向（12000 bp）后重新 reprice，报价应有变化且 reason 保留 bias 说明。
+    database.prepare("UPDATE market_parameters SET npc_bias_bps = 12000, npc_bias_reason = 'NPC 本周扫货测试系列' WHERE singleton = 1").run();
+    market.reprice({ priceSyncRunId: runId, triggerKey: "bias-up" }, now);
+    const biasedQuote = market.quote(skuId)!;
+    expect(biasedQuote.reasons.some((reason) => reason.kind === "bias" && reason.factorBasisPoints === 12_000 && reason.reason === "NPC 本周扫货测试系列")).toBe(true);
+    expect(biasedQuote.marketPrice.amount).toBeGreaterThan(neutralQuote.marketPrice.amount);
+    database.close();
+  });
+});

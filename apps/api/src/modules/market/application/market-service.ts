@@ -1,16 +1,17 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { calculateMarketQuote, marketQuoteValidUntil, MARKET_RULE_VERSION, propagateMarketPressure, type MarketFactorInput } from "@mtg-market/rules";
-import type { MarketIndexDto, MarketIndexHistoryDto, MarketIndexHistoryPointDto, MarketQuoteListItemDto, Page, PriceHistoryDto, PriceHistoryPointDto, PriceHistoryRange, QuoteDto } from "@mtg-market/contracts";
+import type { MarketAnnouncementDto, MarketAnnouncementsDto, MarketHeatDto, MarketHeatEntryDto, MarketIndexDto, MarketIndexHistoryDto, MarketIndexHistoryPointDto, MarketQuoteListItemDto, Page, PriceHistoryDto, PriceHistoryPointDto, PriceHistoryRange, QuoteDto } from "@mtg-market/contracts";
 import { withinTransaction } from "@mtg-market/database";
 import { publicImagePath } from "../../../shared/catalog/image-path.js";
 
-type ParametersRow = { rule_version: string; eur_cent_to_game_credit_bps: number; minimum_price: number; npc_buy_spread_bps: number; npc_sell_spread_bps: number; npc_fee_bps: number };
+type ParametersRow = { rule_version: string; eur_cent_to_game_credit_bps: number; minimum_price: number; npc_buy_spread_bps: number; npc_sell_spread_bps: number; npc_fee_bps: number; npc_bias_bps: number; npc_bias_reason: string };
 type SnapshotRow = { id: string; sku_id: string; price_amount: number; captured_at: string; source_version: string; set_id: string };
 type MarketReason = NonNullable<QuoteDto["reasons"]>[number];
 type QuoteRow = { id: string; sku_id: string; rule_version: string; reference_price_eur_cents: number; market_price_amount: number; npc_buy_price_amount: number; npc_sell_price_amount: number; npc_buy_fee_amount: number; npc_sell_fee_amount: number; calculated_at: string; valid_until: string; reasons_json: string };
 type MarketListRow = QuoteRow & { name: string; set_code: string; set_name: string; collector_number: string; finish: "nonfoil" | "foil" | "etched"; rarity: string; tradable: number; image_path: string | null };
 type FactRow = { id: string; event_type: string; payload_json: string };
+type HeatQuoteRow = { sku_id: string; day: string; market_price_amount: number; calculated_at: string; name: string; set_code: string; set_name: string; collector_number: string; finish: "nonfoil" | "foil" | "etched"; rarity: string };
 
 export type MarketRepricePayload = { priceSyncRunId?: string; triggerKey?: string };
 export type MarketQuoteFilters = {
@@ -66,7 +67,7 @@ export class MarketService {
       const validUntil = marketQuoteValidUntil(parameters.rule_version, now);
       let written = 0;
       for (const snapshot of snapshots) {
-        const factors = this.factorsFor(snapshot, pressure, now);
+        const factors = this.factorsFor(snapshot, pressure, parameters, now);
         const result = calculateMarketQuote({
           version: parameters.rule_version,
           referencePriceEurCents: snapshot.price_amount,
@@ -278,8 +279,137 @@ export class MarketService {
     };
   }
 
+  /**
+   * I34B：市场热度只读聚合。涨跌幅按 `market_quotes` 自然日采样（复用 I17B 取样语义）：
+   * 日内基准为「当前日之前最近一个采样日」，7 日基准为窗口内最早采样日；无基准（首日）返回
+   * `basePrice: null` 且 direction=flat。`mostActive` 按当日已结算 NPC/P2P 成交（张数与金额）
+   * 聚合。全部计算只读服务端快照与事实，浏览器不得重算。
+   */
+  heat(now = new Date().toISOString()): MarketHeatDto {
+    const today = now.slice(0, 10);
+    const since = new Date(Date.parse(today + "T00:00:00.000Z") - 8 * 86_400_000).toISOString().slice(0, 10);
+    const rows = this.database.prepare(
+      `SELECT quote.sku_id, quote.market_price_amount, substr(quote.calculated_at, 1, 10) AS day,
+        p.name, s.code AS set_code, s.name AS set_name, p.collector_number, sku.finish, p.rarity
+       FROM market_quotes quote
+       JOIN card_skus sku ON sku.id = quote.sku_id
+       JOIN card_printings p ON p.id = sku.printing_id
+       JOIN card_sets s ON s.id = p.set_id
+       WHERE substr(quote.calculated_at, 1, 10) >= ?
+       ORDER BY quote.calculated_at DESC, quote.rowid DESC`
+    ).all(since) as HeatQuoteRow[];
+    const bySku = new Map<string, { sku: MarketHeatEntryDto["sku"]; days: Array<{ day: string; price: number }> }>();
+    for (const row of rows) {
+      const entry = bySku.get(row.sku_id) ?? {
+        sku: { id: row.sku_id, name: row.name, setCode: row.set_code, setName: row.set_name, collectorNumber: row.collector_number, finish: row.finish, rarity: row.rarity },
+        days: []
+      };
+      if (!entry.days.some((point) => point.day === row.day)) entry.days.push({ day: row.day, price: row.market_price_amount });
+      bySku.set(row.sku_id, entry);
+    }
+    const compute = (base: { day: string; price: number } | null | undefined, current: { day: string; price: number }) => {
+      if (!base || base.price === current.price) return { changeBasisPoints: 0, direction: "flat" as const, basePrice: base ? { amount: base.price, currency: "GAME_CREDIT" as const } : null };
+      if (!Number.isSafeInteger(Math.abs(current.price - base.price) * 10_000)) return { changeBasisPoints: 0, direction: "flat" as const, basePrice: { amount: base.price, currency: "GAME_CREDIT" as const } };
+      const changeBasisPoints = Math.trunc(((current.price - base.price) * 10_000) / base.price);
+      return { changeBasisPoints, direction: (changeBasisPoints > 0 ? "up" : "down") as "up" | "down", basePrice: { amount: base.price, currency: "GAME_CREDIT" as const } };
+    };
+    const intraday: MarketHeatEntryDto[] = [];
+    const sevenDay: MarketHeatEntryDto[] = [];
+    for (const { sku, days } of bySku.values()) {
+      const current = days[0]!;
+      const intradayBase = days.find((point) => point.day !== current.day);
+      const sevenDayBase = days[days.length - 1];
+      intraday.push({ sku, ...compute(intradayBase, current), currentPrice: { amount: current.price, currency: "GAME_CREDIT" } });
+      sevenDay.push({ sku, ...compute(sevenDayBase, current), currentPrice: { amount: current.price, currency: "GAME_CREDIT" } });
+    }
+    const topGainers = (entries: MarketHeatEntryDto[]) => entries.filter((entry) => entry.direction === "up").sort((a, b) => b.changeBasisPoints - a.changeBasisPoints).slice(0, 10);
+    const topLosers = (entries: MarketHeatEntryDto[]) => entries.filter((entry) => entry.direction === "down").sort((a, b) => a.changeBasisPoints - b.changeBasisPoints).slice(0, 10);
+
+    const npcActivity = this.database.prepare(
+      `SELECT sku_id, SUM(quantity) AS quantity, SUM(total_amount) AS turnover
+       FROM npc_trades WHERE settlement_date = ? GROUP BY sku_id`
+    ).all(today) as Array<{ sku_id: string; quantity: number; turnover: number }>;
+    const p2pActivity = this.database.prepare(
+      `SELECT sku_id, SUM(quantity) AS quantity, SUM(execution_price_amount * quantity) AS turnover
+       FROM bilateral_trades WHERE status = 'fulfilled' AND substr(created_at, 1, 10) = ? GROUP BY sku_id`
+    ).all(today) as Array<{ sku_id: string; quantity: number; turnover: number }>;
+    const activity = new Map<string, { quantity: number; turnover: number }>();
+    for (const row of [...npcActivity, ...p2pActivity]) {
+      const current = activity.get(row.sku_id) ?? { quantity: 0, turnover: 0 };
+      activity.set(row.sku_id, { quantity: current.quantity + row.quantity, turnover: current.turnover + row.turnover });
+    }
+    const skuInfo = new Map(bySku);
+    const mostActive = [...activity.entries()]
+      .map(([skuId, stats]) => ({ skuId, ...stats, sku: (skuInfo.get(skuId)?.sku ?? { id: skuId, name: "未知卡牌", setCode: "", setName: "", collectorNumber: "", finish: "nonfoil" as const, rarity: "" }) }))
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, 10)
+      .map(({ sku, quantity, turnover }) => ({ sku, quantity, turnover: { amount: turnover, currency: "GAME_CREDIT" as const } }));
+
+    return {
+      intradayGainers: topGainers(intraday),
+      intradayLosers: topLosers(intraday),
+      sevenDayGainers: topGainers(sevenDay),
+      sevenDayLosers: topLosers(sevenDay),
+      mostActive,
+      capturedAt: now
+    };
+  }
+
+  /**
+   * I34B：系列周期与市场活动公告只读聚合。只暴露标题、影响范围与生效区间，绝不暴露
+   * factor_bps 等内部系数与配置；只返回当前 UTC 时刻生效中的公告，到期即不再返回。
+   */
+  announcements(now = new Date().toISOString()): MarketAnnouncementsDto {
+    const items: MarketAnnouncementDto[] = [];
+    const cycles = this.database.prepare(
+      `SELECT s.code AS set_code, s.name AS set_name, cycle.starts_at, cycle.ends_at, cycle.reason
+       FROM market_series_cycles cycle JOIN card_sets s ON s.id = cycle.set_id
+       WHERE cycle.starts_at <= ? AND cycle.ends_at > ?
+       ORDER BY cycle.starts_at ASC, cycle.id ASC`
+    ).all(now, now) as Array<{ set_code: string; set_name: string; starts_at: string; ends_at: string; reason: string }>;
+    for (const cycle of cycles) {
+      items.push({
+        type: "series_cycle",
+        title: `系列周期：${cycle.set_name}`,
+        scope: "set",
+        setCode: cycle.set_code,
+        setName: cycle.set_name,
+        skuName: null,
+        startsAt: cycle.starts_at,
+        endsAt: cycle.ends_at,
+        reason: cycle.reason
+      });
+    }
+    const events = this.database.prepare(
+      `SELECT event.scope_type, event.scope_id, event.starts_at, event.ends_at, event.reason, campaign.name AS campaign_name,
+        s.code AS set_code, s.name AS set_name, p.name AS sku_name
+       FROM market_events event
+       LEFT JOIN admin_campaigns campaign ON campaign.published_market_event_id = event.id
+       LEFT JOIN card_sets s ON s.id = event.scope_id AND event.scope_type = 'set'
+       LEFT JOIN card_skus sku ON sku.id = event.scope_id AND event.scope_type = 'sku'
+       LEFT JOIN card_printings p ON p.id = sku.printing_id
+       WHERE event.starts_at <= ? AND event.ends_at > ?
+       ORDER BY event.starts_at ASC, event.id ASC`
+    ).all(now, now) as Array<{ scope_type: string; scope_id: string | null; starts_at: string; ends_at: string; reason: string; campaign_name: string | null; set_code: string | null; set_name: string | null; sku_name: string | null }>;
+    for (const event of events) {
+      const scope = event.scope_type === "global" ? "global" as const : event.scope_type === "set" ? "set" as const : "sku" as const;
+      items.push({
+        type: "market_event",
+        title: event.campaign_name ?? "市场活动",
+        scope,
+        setCode: event.set_code,
+        setName: event.set_name,
+        skuName: event.sku_name,
+        startsAt: event.starts_at,
+        endsAt: event.ends_at,
+        reason: event.reason
+      });
+    }
+    return { items, capturedAt: now };
+  }
+
   private parameters(): ParametersRow {
-    const parameters = this.database.prepare("SELECT rule_version, eur_cent_to_game_credit_bps, minimum_price, npc_buy_spread_bps, npc_sell_spread_bps, npc_fee_bps FROM market_parameters WHERE singleton = 1").get() as ParametersRow | undefined;
+    const parameters = this.database.prepare("SELECT rule_version, eur_cent_to_game_credit_bps, minimum_price, npc_buy_spread_bps, npc_sell_spread_bps, npc_fee_bps, npc_bias_bps, npc_bias_reason FROM market_parameters WHERE singleton = 1").get() as ParametersRow | undefined;
     if (!parameters || parameters.rule_version !== MARKET_RULE_VERSION) throw new Error("市场参数或规则版本未初始化");
     return parameters;
   }
@@ -309,7 +439,7 @@ export class MarketService {
         const reason = item as Record<string, unknown>;
         const kind = reason.kind;
         const factorBasisPoints = reason.factorBasisPoints;
-        if (!(kind === "supply-demand" || kind === "series-cycle" || kind === "relation" || kind === "event" || kind === "liquidity") || typeof factorBasisPoints !== "number" || !Number.isSafeInteger(factorBasisPoints) || typeof reason.reason !== "string") return [];
+        if (!(kind === "supply-demand" || kind === "series-cycle" || kind === "relation" || kind === "event" || kind === "liquidity" || kind === "bias") || typeof factorBasisPoints !== "number" || !Number.isSafeInteger(factorBasisPoints) || typeof reason.reason !== "string") return [];
         return [{ kind, factorBasisPoints, reason: reason.reason }];
       });
     } catch { return []; }
@@ -348,13 +478,16 @@ export class MarketService {
     return pressure;
   }
 
-  private factorsFor(snapshot: SnapshotRow, pressure: Map<string, { demand: number; supply: number; liquidity: number }>, now: string): MarketFactorInput[] {
+  private factorsFor(snapshot: SnapshotRow, pressure: Map<string, { demand: number; supply: number; liquidity: number }>, parameters: ParametersRow, now: string): MarketFactorInput[] {
     const own = pressure.get(snapshot.sku_id) ?? { demand: 0, supply: 0, liquidity: 0 };
     const pressureFactor = (demand: number, supply: number) => Math.max(5_000, Math.min(20_000, 10_000 + Math.max(-100, Math.min(100, demand - supply)) * 25));
     const factors: MarketFactorInput[] = [
       { kind: "supply-demand", factorBasisPoints: pressureFactor(own.demand, own.supply), reason: `已结算需求 ${own.demand}、供给 ${own.supply}` },
       { kind: "liquidity", factorBasisPoints: Math.max(9_500, 10_000 - Math.min(own.liquidity, 100) * 5), reason: `已结算流动性 ${own.liquidity}` }
     ];
+    // I34B（E8/E14 增强）：NPC 做市商倾向是管理员可配置的全局因素（受 5000–20000 界约束），
+    // 作为独立 reason 写入每个 SKU 的报价，不改变外部参考价快照。
+    factors.push({ kind: "bias", factorBasisPoints: parameters.npc_bias_bps, reason: parameters.npc_bias_reason });
     const cycles = this.database.prepare("SELECT factor_bps, reason FROM market_series_cycles WHERE set_id = ? AND starts_at <= ? AND ends_at > ? ORDER BY starts_at ASC, id ASC").all(snapshot.set_id, now, now) as Array<{ factor_bps: number; reason: string }>;
     for (const cycle of cycles) factors.push({ kind: "series-cycle", factorBasisPoints: cycle.factor_bps, reason: cycle.reason });
     const relations = this.database.prepare("SELECT source_sku_id, weight_bps, reason FROM market_card_relations WHERE target_sku_id = ? ORDER BY id ASC").all(snapshot.sku_id) as Array<{ source_sku_id: string; weight_bps: number; reason: string }>;

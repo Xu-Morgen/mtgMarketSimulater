@@ -81,6 +81,16 @@ describe("I14B 市场报价规则", () => {
     expect(() => calculateMarketQuote({ ...input, factors: [{ kind: "event", factorBasisPoints: 4_999, reason: "越界" }] })).toThrow("bp");
   });
 
+  it("I34B NPC 做市商倾向作为受界因素叠加并保留 reason", () => {
+    const biased = calculateMarketQuote({ ...input, factors: [...input.factors, { kind: "bias", factorBasisPoints: 12_000, reason: "NPC 本周扫货测试系列" }] });
+    // 中性偏差（10000）+12000 → rawFactor = 10050 + 2000 = 12050，仍受 5000–20000 截断。
+    expect(biased.marketFactorBasisPoints).toBe(12_050);
+    expect(biased.reasons).toContainEqual({ kind: "bias", factorBasisPoints: 12_000, reason: "NPC 本周扫货测试系列" });
+    // bias 超出上下限被拒绝，与其它因素同一套界。
+    expect(() => calculateMarketQuote({ ...input, factors: [{ kind: "bias", factorBasisPoints: 20_001, reason: "越界" }] })).toThrow("bp");
+    expect(() => calculateMarketQuote({ ...input, factors: [{ kind: "bias", factorBasisPoints: 10_000, reason: "" }] })).toThrow("原因");
+  });
+
   it("以固定窗口生成可重放报价有效期，并拒绝非 UTC 时间", () => {
     expect(marketQuoteValidUntil(MARKET_RULE_VERSION, "2026-07-27T00:00:00.000Z")).toBe("2026-07-27T00:15:00.000Z");
     expect(() => marketQuoteValidUntil(MARKET_RULE_VERSION, "2026-07-27")).toThrow("UTC ISO 8601");

@@ -20,7 +20,7 @@ describe("database foundation", () => {
     const database = openSqliteDatabase(join(directory, "test.db"));
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
     expect(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get()).toEqual({
-      count: 35
+      count: 36
     });
     expect(
       database
@@ -127,6 +127,10 @@ describe("database foundation", () => {
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'achievement_definitions'").get()).toEqual({ name: "achievement_definitions" });
     expect(database.prepare("SELECT COUNT(*) AS count FROM achievement_definitions").get()).toEqual({ count: 10 });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pack_offers'").get()).toEqual({ name: "pack_offers" });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'watchlist_items'").get()).toEqual({ name: "watchlist_items" });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'watchlist_alerts'").get()).toEqual({ name: "watchlist_alerts" });
+    expect(database.prepare("SELECT max_items_per_user FROM watchlist_limits WHERE singleton = 1").get()).toEqual({ max_items_per_user: 50 });
+    expect(database.prepare("SELECT npc_bias_bps, npc_bias_reason FROM market_parameters WHERE singleton = 1").get()).toEqual({ npc_bias_bps: 10000, npc_bias_reason: "NPC 做市商倾向" });
     expect(database.prepare("SELECT max_rewards_per_day FROM achievement_risk_limits WHERE singleton = 1").get()).toEqual({ max_rewards_per_day: 20 });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'backup_records'").get()).toEqual({ name: "backup_records" });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'export_records'").get()).toEqual({ name: "export_records" });
