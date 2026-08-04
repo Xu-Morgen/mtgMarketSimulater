@@ -15,6 +15,7 @@ import type {
   ApiResponse,
   MtgjsonImportDraftDto,
   MtgjsonImportDraftSummaryDto,
+  PackOfferDto,
   Page
 } from "@mtg-market/contracts";
 import { failure, success } from "../../../shared/http/api-response.js";
@@ -500,6 +501,32 @@ export class AdminService {
         if (!disabled) return complete(409, failure(input.requestId, "RESOURCE_CONFLICT", "补充包已停用或不存在"));
         this.writeAudit(input.actorId, "pack.disabled", "booster_pack", input.packId, input.requestId, { packId: input.packId, reason: input.reason }, input.now);
         return complete(200, success(input.requestId, { packId: input.packId, enabled: false }));
+      });
+    });
+  }
+
+  // ----- I33B（C6）特殊补充包限时销售窗口 -----
+
+  createPackOffer(input: { packId: string; name: string; description: string | null; discountBps: number; startsAt: string; endsAt: string; actorId: string; idempotencyKey: string; requestId: string; now: string }): AdminWriteResult<{ offer: PackOfferDto }> | AdminErrorResult {
+    const fingerprint = campaignRequestFingerprint({ packId: input.packId, name: input.name, discountBps: input.discountBps, startsAt: input.startsAt, endsAt: input.endsAt });
+    return this.runIdempotentWithFingerprint(input.actorId, input.idempotencyKey, fingerprint, input.requestId, input.now, (complete) => {
+      return withinTransaction(this.database, () => {
+        const result = this.packs.createOffer({ packId: input.packId, name: input.name, description: input.description, discountBps: input.discountBps, startsAt: input.startsAt, endsAt: input.endsAt, actorId: input.actorId, now: input.now });
+        if (result === "not-found") return complete(404, failure(input.requestId, "RESOURCE_NOT_FOUND", "补充包不存在"));
+        if (result === "offer-conflict") return complete(409, failure(input.requestId, "RESOURCE_CONFLICT", "该补充包已存在未结束的限时销售窗口"));
+        this.writeAudit(input.actorId, "pack_offer.created", "pack_offer", result.offer.id, input.requestId, { packId: input.packId, offerId: result.offer.id, discountBps: input.discountBps, startsAt: input.startsAt, endsAt: input.endsAt }, input.now);
+        return complete(201, success(input.requestId, { offer: result.offer }));
+      });
+    });
+  }
+
+  endPackOffer(input: { offerId: string; actorId: string; idempotencyKey: string; requestId: string; now: string }): AdminWriteResult<{ offerId: string; status: "ended" }> | AdminErrorResult {
+    return this.runIdempotent(input.actorId, input.idempotencyKey, input.requestId, input.now, { offerId: input.offerId }, (complete) => {
+      return withinTransaction(this.database, () => {
+        const ended = this.packs.endOffer(input.offerId, input.now);
+        if (!ended) return complete(409, failure(input.requestId, "RESOURCE_CONFLICT", "销售窗口不存在或已结束"));
+        this.writeAudit(input.actorId, "pack_offer.ended", "pack_offer", input.offerId, input.requestId, { offerId: input.offerId }, input.now);
+        return complete(200, success(input.requestId, { offerId: input.offerId, status: "ended" }));
       });
     });
   }

@@ -10,9 +10,14 @@ import {
   type AchievementUnlockDto,
   type ApiResponse,
   type BilateralFulfillmentType,
+  type CollectionAlbumDto,
   type DailyWorkFundingStatusDto,
   type DeckPowerSnapshotDto,
+  type DuplicatesSellResultDto,
   type EconomicFactEvent,
+  type PackOfferDto,
+  type PackOpeningCardDto,
+  type PackOpeningDto,
   type PlayerBilateralTradeDto
 } from "./index.js";
 
@@ -235,5 +240,83 @@ describe("共享契约", () => {
     expect(parsed.progress).toMatchObject({ status: "unlocked", currentValue: 1 });
     expect(parsed.unlock.source).toMatchObject({ type: "tournament.settled", aggregateId: "registration-0001" });
     expect(parsed.unlock).toMatchObject({ rewardStatus: "granted" });
+  });
+
+  it("I33B 开包 DTO 携带新卡标记、系列完成度快照与总成本/总价值", () => {
+    const card: PackOpeningCardDto = {
+      skuId: "sku-0001",
+      quantity: 2,
+      cost: { amount: 250, currency: "GAME_CREDIT" },
+      referencePrice: { amount: 120, currency: "EUR" },
+      gamePrice: { amount: 300, currency: "GAME_CREDIT" },
+      priceStatus: "available",
+      isNewToCollection: true,
+      collectionProgressAfter: { setCode: "PKT", collectedSkuCount: 5, totalSkuCount: 10, completionBasisPoints: 5000 }
+    };
+    const opening: PackOpeningDto = {
+      id: "opening-0001",
+      packId: "pack-0001",
+      packRuleVersion: "pack/v1",
+      spent: { amount: 500, currency: "GAME_CREDIT" },
+      received: [card],
+      profitLoss: {
+        spent: { amount: 500, currency: "GAME_CREDIT" },
+        referenceValue: { amount: 240, currency: "EUR" },
+        gameValue: { amount: 600, currency: "GAME_CREDIT" },
+        referenceProfitLoss: null,
+        gameProfitLoss: { amount: 100, currency: "GAME_CREDIT" },
+        priceStatus: "available"
+      },
+      totalCost: { amount: 500, currency: "GAME_CREDIT" },
+      totalGameValue: { amount: 600, currency: "GAME_CREDIT" },
+      openedAt: "2026-08-04T00:00:00.000Z"
+    };
+    const parsed = JSON.parse(JSON.stringify({ card, opening })) as { card: PackOpeningCardDto; opening: PackOpeningDto };
+    expect(parsed.card).toMatchObject({ isNewToCollection: true });
+    expect(parsed.card.collectionProgressAfter).toMatchObject({ setCode: "PKT", completionBasisPoints: 5000 });
+    expect(parsed.opening.totalCost).toMatchObject({ amount: 500, currency: "GAME_CREDIT" });
+    expect(parsed.opening.totalGameValue).toMatchObject({ amount: 600, currency: "GAME_CREDIT" });
+  });
+
+  it("I33B 图鉴/批量卖出/特殊包 offer DTO 只承载服务端只读聚合", () => {
+    const album: CollectionAlbumDto = {
+      sets: {
+        items: [
+          {
+            setCode: "PKT",
+            setName: "补充包测试系列",
+            collectedSkuCount: 3,
+            totalSkuCount: 10,
+            completionBasisPoints: 3000,
+            uncollectedCards: [{ name: "未收集卡", setCode: "PKT", collectorNumber: "7", rarity: "common" }]
+          }
+        ],
+        page: { hasMore: false, nextCursor: null }
+      }
+    };
+    const sell: DuplicatesSellResultDto = {
+      soldItems: [{ skuId: "sku-1", quantity: 2, unitPrice: { amount: 100, currency: "GAME_CREDIT" }, unitFee: { amount: 5, currency: "GAME_CREDIT" }, total: { amount: 200, currency: "GAME_CREDIT" }, fee: { amount: 10, currency: "GAME_CREDIT" } }],
+      skippedItems: [{ skuId: "sku-2", reason: "quote_unavailable" }],
+      cardCount: 2,
+      income: { amount: 200, currency: "GAME_CREDIT" },
+      fee: { amount: 10, currency: "GAME_CREDIT" }
+    };
+    const offer: PackOfferDto = {
+      id: "offer-0001",
+      packId: "pack-0001",
+      name: "限时折扣",
+      description: null,
+      discountBps: 8000,
+      startsAt: "2026-08-04T00:00:00.000Z",
+      endsAt: "2026-08-11T00:00:00.000Z",
+      status: "active",
+      version: 1,
+      updatedAt: "2026-08-04T00:00:00.000Z"
+    };
+    const parsed = JSON.parse(JSON.stringify({ album, sell, offer })) as { album: CollectionAlbumDto; sell: DuplicatesSellResultDto; offer: PackOfferDto };
+    expect(parsed.album.sets.items[0]).toMatchObject({ completionBasisPoints: 3000 });
+    expect(parsed.sell.soldItems[0]).toMatchObject({ quantity: 2, unitPrice: { amount: 100 } });
+    expect(parsed.sell.skippedItems[0]).toMatchObject({ reason: "quote_unavailable" });
+    expect(parsed.offer).toMatchObject({ discountBps: 8000, status: "active" });
   });
 });

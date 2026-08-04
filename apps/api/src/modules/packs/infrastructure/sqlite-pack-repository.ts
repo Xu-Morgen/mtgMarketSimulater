@@ -20,6 +20,23 @@ export type StoredPackConfiguration = Omit<PackConfigurationRow, "definition_jso
   definition: PackRuleInput;
 };
 
+export type StoredPackOfferRow = {
+  id: string;
+  pack_id: string;
+  name: string;
+  description: string | null;
+  discount_bps: number;
+  starts_at: string;
+  ends_at: string;
+  status: "scheduled" | "active" | "ended";
+  version: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type StoredPackOffer = StoredPackOfferRow;
+
 function decodeDefinition(row: PackConfigurationRow): StoredPackConfiguration {
   let definition: PackRuleInput;
   try {
@@ -166,6 +183,38 @@ export class SqlitePackRepository {
       .prepare("UPDATE booster_packs SET enabled = 1, disabled_reason = NULL, updated_at = ? WHERE id = ? AND enabled = 0")
       .run(now, packId);
     return result.changes === 1;
+  }
+
+  /** I33B（C6）：该包当前生效的限时销售窗口；无 offer 返回 null。 */
+  findOffer(packId: string): StoredPackOffer | null {
+    const row = this.database.prepare(
+      "SELECT id, pack_id, name, description, discount_bps, starts_at, ends_at, status, version, created_by, created_at, updated_at FROM pack_offers WHERE pack_id = ? ORDER BY created_at DESC, id DESC LIMIT 1"
+    ).get(packId) as StoredPackOffer | undefined;
+    return row ?? null;
+  }
+
+  /** I33B（C6）：管理员配置限时销售窗口。同一包活动窗口由唯一索引拦截，返回 false 表示存在并发活动窗口。 */
+  createOffer(input: { id: string; packId: string; name: string; description: string | null; discountBps: number; startsAt: string; endsAt: string; createdBy: string | null; now: string }): boolean {
+    const result = this.database.prepare(
+      "INSERT OR IGNORE INTO pack_offers (id, pack_id, name, description, discount_bps, starts_at, ends_at, status, version, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'scheduled', 1, ?, ?, ?)"
+    ).run(input.id, input.packId, input.name, input.description, input.discountBps, input.startsAt, input.endsAt, input.createdBy, input.now, input.now);
+    return result.changes === 1;
+  }
+
+  /** I33B（C6）：提前结束限时销售窗口；已 ended 返回 false。调用方须处于事务内。 */
+  endOffer(offerId: string, now: string): boolean {
+    const result = this.database.prepare(
+      "UPDATE pack_offers SET status = 'ended', updated_at = ? WHERE id = ? AND status IN ('scheduled', 'active')"
+    ).run(now, offerId);
+    return result.changes === 1;
+  }
+
+  /** I33B（C6）：到期窗口批量标记 ended；按 now 判定，返回本次变更行数。 */
+  expireOffers(now: string): number {
+    const result = this.database.prepare(
+      "UPDATE pack_offers SET status = 'ended', updated_at = ? WHERE status IN ('scheduled', 'active') AND ends_at <= ?"
+    ).run(now, now);
+    return result.changes;
   }
 
   private selectConfigurationSql(): string {

@@ -8,6 +8,8 @@ import { packOpenRequestFingerprint, PackService } from "../application/pack-ser
 
 const packParamsSchema = z.object({ packId: z.string().uuid() }).strict();
 const openPackBodySchema = z.object({ ruleVersion: z.string().trim().min(1).max(120) }).strict();
+/** I33B（C7）批量开包：10/50/100 包，单事务批量结算，任一包失败整批回滚。 */
+const bulkOpenBodySchema = z.object({ ruleVersion: z.string().trim().min(1).max(120), count: z.union([z.literal(10), z.literal(50), z.literal(100)]) }).strict();
 const openingHistoryQuerySchema = z
   .object({
     cursor: z.string().regex(/^\d+$/).optional(),
@@ -53,6 +55,10 @@ export async function registerPackRoutes(
         return reply
           .code(409)
           .send(failure(request.requestId, "RULE_VIOLATION", "补充包配置包含无效卡牌"));
+      if (preview === "offer-not-active")
+        return reply
+          .code(409)
+          .send(failure(request.requestId, "RESOURCE_CONFLICT", "限时补充包当前不在销售窗口内"));
       return success(request.requestId, { preview });
     }
   );
@@ -76,6 +82,46 @@ export async function registerPackRoutes(
         userId: request.actor!.id,
         packId: packParamsSchema.parse(request.params).packId,
         ruleVersion: body.ruleVersion,
+        idempotencyKey: key,
+        requestFingerprint: packOpenRequestFingerprint(body),
+        requestId: request.requestId
+      });
+      if (result.state === "conflict")
+        return reply
+          .code(409)
+          .send(
+            failure(request.requestId, "IDEMPOTENCY_CONFLICT", "Idempotency-Key 已用于不同请求")
+          );
+      if (result.state === "in-progress")
+        return reply
+          .code(409)
+          .send(failure(request.requestId, "IDEMPOTENCY_IN_PROGRESS", "相同请求正在处理中"));
+      return reply
+        .code(result.state === "replayed" && result.response.ok ? 200 : result.statusCode)
+        .send(result.response);
+    }
+  );
+  app.post(
+    "/v1/packs/:packId/bulk",
+    { preHandler: requireRole("player") },
+    async (request, reply) => {
+      const key = request.headers["idempotency-key"];
+      if (typeof key !== "string" || !isValidIdempotencyKey(key))
+        return reply
+          .code(400)
+          .send(
+            failure(
+              request.requestId,
+              "IDEMPOTENCY_KEY_REQUIRED",
+              "写请求必须携带格式正确的 Idempotency-Key"
+            )
+          );
+      const body = bulkOpenBodySchema.parse(request.body);
+      const result = packs.openBulk({
+        userId: request.actor!.id,
+        packId: packParamsSchema.parse(request.params).packId,
+        ruleVersion: body.ruleVersion,
+        count: body.count,
         idempotencyKey: key,
         requestFingerprint: packOpenRequestFingerprint(body),
         requestId: request.requestId

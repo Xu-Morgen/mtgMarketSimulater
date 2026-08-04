@@ -272,6 +272,8 @@ export interface PackDto {
   disabledReason: string | null;
   ruleVersion: string;
   slots: PackSlotDto[];
+  /** I33B：关联的限时销售窗口；无 offer 的普通包为 null。 */
+  offer: PackOfferDto | null;
   updatedAt: string;
 }
 
@@ -295,6 +297,15 @@ export interface PackOpeningCardDto {
   referencePrice: Money | null;
   gamePrice: Money | null;
   priceStatus: PackOpeningPriceStatus;
+  /** I33B：本次结算前该 SKU 是否已持有（同一印刷任意工艺任一持有即视为已收集）；浏览器不得自行比对库存。 */
+  isNewToCollection: boolean;
+  /** I33B：开包后该 SKU 所在系列的完成度快照（按服务端目录与库存投影计算）。 */
+  collectionProgressAfter: {
+    setCode: string;
+    collectedSkuCount: number;
+    totalSkuCount: number;
+    completionBasisPoints: number;
+  };
 }
 
 export interface PackOpeningProfitLossDto {
@@ -314,7 +325,94 @@ export interface PackOpeningDto {
   spent: Money;
   received: PackOpeningCardDto[];
   profitLoss: PackOpeningProfitLossDto;
+  /** I33B：本包总成本（= spent），与 received 各卡成本之和恒等。 */
+  totalCost: Money;
+  /** I33B：本包总价值，按结算时已持久化报价快照计算；任一卡无有效报价时为 null，不掩盖缺价状态。 */
+  totalGameValue: Money | null;
   openedAt: string;
+}
+
+/** I33B：特殊补充包限时销售窗口；有 offer 的包只在该窗口内以折扣价可购买，窗口外与下架同语义拒绝。 */
+export interface PackOfferDto {
+  id: string;
+  packId: string;
+  name: string;
+  description: string | null;
+  /** 10_000 = 无折扣；窗口内实际售价 = price × discountBps ÷ 10_000，整数向下取整。 */
+  discountBps: number;
+  startsAt: string;
+  endsAt: string;
+  status: "scheduled" | "active" | "ended";
+  version: number;
+  updatedAt: string;
+}
+
+/** I33B：批量开包汇总；每包仍保留独立 opening/replay/fact，仅汇总服务端计算值。 */
+export interface BulkPackOpeningSummaryDto {
+  packId: string;
+  packRuleVersion: string;
+  count: number;
+  rarityCounts: Array<{ rarity: string; quantity: number }>;
+  totalCost: Money;
+  totalGameValue: Money | null;
+  /** 本次批量中新加入收藏（结算前未持有）的不同 SKU 数。 */
+  newSkuCount: number;
+}
+
+export interface BulkPackOpeningDto {
+  summary: BulkPackOpeningSummaryDto;
+  /** 逐包结果，供前端下钻；顺序与结算顺序一致。 */
+  openings: PackOpeningDto[];
+}
+
+/** I33B：重复卡批量向 NPC 卖出的逐 SKU 结果；全部结算在同一短事务内，任何写入失败整批回滚。 */
+export interface DuplicatesSellItemDto {
+  skuId: string;
+  quantity: number;
+  unitPrice: Money;
+  unitFee: Money;
+  total: Money;
+  fee: Money;
+}
+
+export type DuplicatesSellSkipReason =
+  | "no_duplicate"
+  | "locked"
+  | "quote_unavailable"
+  | "quote_stale"
+  | "trade_limit_reached";
+
+export interface DuplicatesSellResultDto {
+  soldItems: DuplicatesSellItemDto[];
+  skippedItems: Array<{ skuId: string; reason: DuplicatesSellSkipReason }>;
+  cardCount: number;
+  income: Money;
+  fee: Money;
+}
+
+/** I33B：收藏图鉴只读聚合；未收集卡位用于灰影占位，浏览器不得统计或估值。 */
+export interface CollectionUncollectedCardDto {
+  name: string;
+  setCode: string;
+  collectorNumber: string;
+  rarity: string;
+}
+
+export interface CollectionSetGroupDto {
+  setCode: string;
+  setName: string;
+  /** 该系列玩家已持有（quantity > 0）的不同 SKU 数；按印刷工艺粒度。 */
+  collectedSkuCount: number;
+  totalSkuCount: number;
+  /** 完成度 = collectedSkuCount × 10_000 ÷ totalSkuCount，服务端整数计算。 */
+  completionBasisPoints: number;
+  /** 该系列未收集卡位（按印刷去重，任一工艺已持有即视为已收集）；用于灰影占位。 */
+  uncollectedCards: CollectionUncollectedCardDto[];
+}
+
+export interface CollectionAlbumDto {
+  /** 按系列分组的图鉴；分页按系列排序。 */
+  sets: Page<CollectionSetGroupDto>;
 }
 
 export interface InventoryDto {

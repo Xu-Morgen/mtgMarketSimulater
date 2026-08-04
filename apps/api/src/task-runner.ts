@@ -14,6 +14,7 @@ import { DailyRolloverService, type DailyRolloverPayload } from "./modules/users
 import { createTournamentService } from "./modules/tournaments/api/tournament-routes.js";
 import { createAchievementService } from "./modules/achievements/api/achievement-routes.js";
 import { BackupService } from "./modules/backup/application/backup-service.js";
+import { PackService } from "./modules/packs/application/pack-service.js";
 
 export interface TaskRunner {
   stop(): Promise<void>;
@@ -69,9 +70,12 @@ export function createTaskRegistry(config: ApiConfig, database: Database.Databas
   registry.register("order.expire", async (payload) => { orders.expireByPayload(payload); });
   const dailyRollover = new DailyRolloverService(database);
   const tournaments = createTournamentService(database, config);
+  const packs = new PackService(database);
   registry.register("daily.rollover", async (payload) => {
     const day = dailyRollover.rollover(payload as DailyRolloverPayload);
     tournaments.refreshDaily(day.natural_date, day.timezone);
+    // I33B（C6）：每日把到期的限时销售窗口批量标记为 ended；到期判定只按服务端时间。
+    packs.expireOffers();
   });
   registry.register("tournament.settle", async (payload) => {
     const parsed = payload as { registrationId?: string; playerTournamentId?: string };
@@ -91,6 +95,12 @@ export function createTaskRegistry(config: ApiConfig, database: Database.Databas
     const parsed = payload as { factEventId?: string };
     if (!parsed.factEventId) throw new Error("成就处理任务缺少 factEventId");
     achievements.processFactEvent({ factEventId: parsed.factEventId });
+  });
+  // I33B：系列收集率成就以独立任务消费 pack.opened fact；幂等语义与 achievement.process 一致。
+  registry.register("pack-achievement.process", async (payload) => {
+    const parsed = payload as { factEventId?: string };
+    if (!parsed.factEventId) throw new Error("系列收集成就处理任务缺少 factEventId");
+    achievements.processPackFactEvent({ factEventId: parsed.factEventId });
   });
   // I31B：备份在事务外产出 WAL 一致副本，失败只追加 failed 记录、绝不删最近成功备份。
   // payload.kind 可为 scheduled（每日）/predeploy（部署前）；scheduled 以 UTC 自然日唯一键去重。

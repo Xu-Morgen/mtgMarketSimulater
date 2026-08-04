@@ -34,3 +34,8 @@ export async function registerAchievementRoutes(app: FastifyInstance, database: 
 export function createAchievementService(database: Database.Database, config: Pick<ApiConfig, "APP_TIMEZONE">): AchievementService {
   return new AchievementService(database, { timezone: config.APP_TIMEZONE });
 }
+
+/** I33B：系列收集率成就也复用同一服务（processPackFactEvent 消费 pack.opened fact）。 */
+export function createPackAchievementService(database: Database.Database, config: Pick<ApiConfig, "APP_TIMEZONE">): AchievementService {
+  return new AchievementService(database, { timezone: config.APP_TIMEZONE });
+}

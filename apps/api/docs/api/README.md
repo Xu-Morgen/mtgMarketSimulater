@@ -178,3 +178,12 @@
 
 - `GET /v1/achievements`、`GET /v1/achievements/unlocks` 和 `GET /v1/achievements/detail?definitionId=<id>` 都要求 player 会话，且只读当前玩家的数据。定义 ID 可包含 `/v1` 后缀，因此详情使用查询参数而非路径参数；未知 ID 返回 `404 RESOURCE_NOT_FOUND`。
 - 概览返回受控定义及服务端进度；解锁返回不可变来源（`tournament.settled` fact 与报名 aggregate）、规则版本、奖励明细、关联 correlation ID 和 `rewardStatus`。`granted` 表示奖励已经在服务端事务中发放，`blocked` 表示成就已经解锁但奖励被每日风控拦截；两个状态都不是浏览器可变更的资源。
+- I33B 系列收集率成就 `set-completion-80/v1`/`set-completion-100/v1` 的来源类型为 `collection`，由 `pack.opened` fact 驱动；同一查询端点返回，浏览器不得自行按库存计算完成度或解锁/发奖。
+
+## I33B 收藏图鉴、开包增强、批量开包、重复卡批量卖出与限时包协议
+
+- `GET /v1/collection/album?onlyHeld=any|held&cursor=&limit=`（player）返回 `CollectionAlbumDto`：按系列分组图鉴、每系列已收集/全部印刷×工艺 SKU 数与完成度 bp（`completionBasisPoints`）、未收集卡位列表（卡名/系列/编号/稀有度，供灰影占位）；`onlyHeld=held` 只返回有持有的系列。数据全部来自目录与库存快照，不写任何经济表，浏览器不得自行统计或估值。
+- 开包结果 DTO（`POST /v1/packs/{packId}/open` 与 `GET /v1/pack-openings`）扩展：每张开出的卡新增 `isNewToCollection`（本次结算前该 SKU 是否已持有）与 `collectionProgressAfter`（开包后所在系列完成度快照）；`PackOpeningDto` 新增 `totalCost`（= spent）与 `totalGameValue`（按结算时已持久化报价快照计算，任一卡缺价则为 null）。浏览器不得自行比对库存推导新卡或盈亏。
+- `POST /v1/packs/{packId}/bulk`（player，需 `Idempotency-Key`）批量开包：请求体严格为 `{ ruleVersion, count }`，`count` 仅允许 `10|50|100`。单事务逐包结算（每包独立 replay/扣款/入库/`pack_openings`/`pack.opened` fact/outbox/重定价任务），任一包失败整批回滚；成功 `201` 返回 `BulkPackOpeningDto{summary, openings}`，`summary` 含各稀有度计数、总成本、总价值与新增 SKU 数。幂等/费用/版本/下架语义与单包完全一致（`IDEMPOTENCY_CONFLICT`/`VERSION_STALE`/`INSUFFICIENT_BALANCE`/`RESOURCE_CONFLICT`/`RULE_VIOLATION`）。
+- `POST /v1/inventory/duplicates/sell`（player，请求体严格为 `{}`，需 `Idempotency-Key`）重复卡批量向 NPC 卖出：只卖持有量 >1 的可用库存（保留至少一张），逐 SKU 复用 NPC 卖出规则、报价快照与每日额度；单事务追加账本/库存流水/成交/事实/审计，成功 `201` 返回 `DuplicatesSellResultDto{soldItems, skippedItems, cardCount, income, fee}`。无报价/报价过期/额度用尽/无重复的 SKU 在 `skippedItems` 中给出明确原因，不产生部分结算；不提供直接删除卡牌能力。
+- 特殊补充包（C6）：`PackDto.offer` 携带关联限时销售窗口 `PackOfferDto{name, description, discountBps, startsAt, endsAt, status}`；有 offer 的包只在窗口内以折扣价（`price × discountBps ÷ 10_000`）可购买，窗口未开始/已结束与下架同语义返回 `409 RESOURCE_CONFLICT`。`POST /v1/admin/packs/{packId}/offer`（admin，需幂等键）配置窗口，`POST /v1/admin/pack-offers/{offerId}/end`（admin，需幂等键）提前结束；同一包同时至多一个未结束窗口（`409 RESOURCE_CONFLICT`）。`daily.rollover` 顺带批量结束到期窗口。

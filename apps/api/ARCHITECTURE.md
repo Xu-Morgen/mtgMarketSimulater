@@ -176,6 +176,15 @@ api (HTTP / OpenAPI) → application (用例、事务编排) → domain (规则�
 - `modules/achievements` 只消费已结算的 `tournament.settled` fact，绝不改写赛事结果，也不依赖 outbox dispatcher。`TournamentService` 在写入事实的同一事务投递以 fact ID 唯一的 `achievement.process`；任务至少执行一次，业务结果由成就解锁唯一约束收敛。
 - `AchievementService` 在 `InventoryService.withLedgerTransaction` 中读取事实和报名卡组快照、调用 `@mtg-market/rules` 的 `achievement/v1`，然后原子写入进度、解锁、奖励发放状态、每日风控计数及审计。货币奖励走 users application 账本，SKU 奖励走 inventory application，徽章仅作为不可交易展示物记录；任一写入失败均回滚。
 
+## 收藏图鉴只读聚合与开包体验增强（I33B）
+
+- `modules/collection` 是收藏图鉴的只读聚合入口。`GET /v1/collection/album` 按系列分组返回每系列已收集/全部印刷×工艺 SKU 数、完成度 bp 与未收集卡位（卡名/系列/编号/稀有度），支持 `onlyHeld=held` 与游标分页；数据全部来自 `card_sets`/`card_printings`/`card_skus` 与 `inventory_holdings` 快照，不写任何经济表，浏览器不得自行统计或估值。
+- `PackService.openForPurchase` 结算时每张开出的卡返回 `isNewToCollection`（本次结算前该 SKU 是否已持有）与 `collectionProgressAfter`（开包后所在系列完成度快照）；`PackOpeningDto` 新增 `totalCost`（= spent）与 `totalGameValue`（按结算时已持久化 `market_quotes.market_price` 计算，任一缺价则为 null）。浏览器不得自行比对库存推导新卡或盈亏。
+- 批量开包 `POST /v1/packs/bulk`（10/50/100）在同一个 `InventoryService.withLedgerTransaction` 内逐包独立结算（每包 replay/扣款/入库/`pack_openings`/`pack.opened` fact/outbox/重定价任务），以批量结算单位内已见过的 SKU 集合决定新卡标记；任一包失败整批回滚。幂等与费用约束复用单包语义。
+- 重复卡批量卖出 `POST /v1/inventory/duplicates/sell`（Orders `NpcTradeService`）：只卖持有量 >1 的可用库存（保留至少一张），逐 SKU 复用 NPC 卖出规则、报价快照与每日额度，单事务追加账本/库存流水/成交/事件/审计并返回张数/收入/费用汇总；不提供直接删除卡牌能力。
+- 系列收集率里程碑成就：迁移 `0035_set_completion_achievements.sql` 固定 `set-completion-80/v1`/`set-completion-100/v1`（goal 以 bp 表达），`achievement/v1` 规则新增 `evaluateSetCompletionAchievements`（纯函数、可重放）。开包结算以 fact ID 唯一投递 `pack-achievement.process` 任务；`AchievementService.processPackFactEvent` 消费 `pack.opened` fact，在同一短事务内按各系列完成度档案推进进度/解锁/奖励，复用 `achievement_unlocks`/`achievement_reward_grants` 唯一约束防重复发奖。
+- 特殊补充包（C6）：迁移 `0034_pack_offers.sql` 增加限时销售窗口（折扣价 + UTC 生效区间，`discount_bps` 10_000 = 无折扣）。有 offer 的包只在窗口内以折扣价可购买，窗口外/已结束与下架同语义返回 `RESOURCE_CONFLICT`；管理端 `POST /v1/admin/packs/{packId}/offer` 与 `POST /v1/admin/pack-offers/{offerId}/end` 配置（幂等键 + 审计），`daily.rollover` 顺带批量结束到期窗口。主题包的限定卡池/概率覆盖仍由不可变 `booster_pack_rules` 版本承载。
+
 ## 玩家首页聚合只读投影（I27F）
 
 - `modules/dashboard/application/PlayerDashboardService` 仅组合 users、inventory、decks、market 与 tournaments 的 application 查询；不直接读写其他模块基础设施或数据表，不建立缓存表，也不参与经济事务。

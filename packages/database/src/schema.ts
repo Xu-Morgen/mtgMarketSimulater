@@ -496,6 +496,31 @@ export const boosterPackRules = sqliteTable(
   ]
 );
 
+/** I33B（C6）：特殊补充包限时销售窗口；有 offer 的包只在该窗口内以折扣价可购买。 */
+export const packOffers = sqliteTable(
+  "pack_offers",
+  {
+    id: text("id").primaryKey(),
+    packId: text("pack_id")
+      .notNull()
+      .references(() => boosterPacks.id),
+    name: text("name").notNull(),
+    description: text("description"),
+    discountBps: integer("discount_bps").notNull(),
+    startsAt: text("starts_at").notNull(),
+    endsAt: text("ends_at").notNull(),
+    status: text("status").notNull(),
+    version: integer("version").notNull().default(1),
+    createdBy: text("created_by"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull()
+  },
+  (table) => [
+    index("pack_offers_pack_index").on(table.packId, table.createdAt),
+    uniqueIndex("pack_offers_pack_active_unique").on(table.packId)
+  ]
+);
+
 export const packRuleReplays = sqliteTable(
   "pack_rule_replays",
   {

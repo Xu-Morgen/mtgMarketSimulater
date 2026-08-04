@@ -15,6 +15,7 @@ import { registerUserRoutes } from "./modules/users/api/user-routes.js";
 import { registerCatalogRoutes } from "./modules/catalog/api/catalog-routes.js";
 import { registerInventoryRoutes } from "./modules/inventory/api/inventory-routes.js";
 import { registerPackRoutes } from "./modules/packs/api/pack-routes.js";
+import { registerCollectionRoutes } from "./modules/collection/api/collection-routes.js";
 import { registerPricingRoutes } from "./modules/pricing/api/pricing-routes.js";
 import { registerMarketRoutes } from "./modules/market/api/market-routes.js";
 import { registerNpcTradeRoutes } from "./modules/orders/api/npc-trade-routes.js";
@@ -110,6 +111,7 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
   await registerCatalogRoutes(app, config, database);
   await registerInventoryRoutes(app, database);
   await registerPackRoutes(app, database);
+  await registerCollectionRoutes(app, database);
   await registerPricingRoutes(app, config, database);
   await registerMarketRoutes(app, database);
   await registerNpcTradeRoutes(app, database);

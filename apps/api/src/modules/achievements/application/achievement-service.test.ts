@@ -80,7 +80,7 @@ describe("AchievementService", () => {
     new UserService(database).createArchive({ userId, idempotencyKey: "achievement-fresh", requestFingerprint: "achievement-fresh", requestId: "request-fresh", now: new Date("2026-07-30T02:00:00.000Z") });
     const service = achievementService(database);
     const overview = service.overview(userId);
-    expect(overview.length).toBe(8);
+    expect(overview.length).toBe(10);
     expect(overview.every((entry) => entry.progress === null)).toBe(true);
     const first = overview.find((entry) => entry.definition.id === "first-tournament/v1")!;
     expect(first.definition.ruleVersion).toBe(ACHIEVEMENT_RULE_VERSION);
@@ -241,6 +241,76 @@ describe("AchievementService", () => {
     expect(service.processFactEvent({ factEventId, now: new Date("2026-07-29T02:31:00.000Z") })).toEqual({ processed: true });
     const grants = (database.prepare("SELECT COUNT(*) AS count FROM achievement_reward_grants WHERE user_id = ? AND definition_id = 'first-tournament/v1'").get(userId) as { count: number }).count;
     expect(grants).toBe(1);
+    database.close();
+  });
+
+  it("I33B unlocks set completion milestones from a pack.opened fact and grants exactly once", () => {
+    const directory = mkdtempSync(join(tmpdir(), "mtg-achievement-")); directories.push(directory);
+    const database = openSqliteDatabase(join(directory, "test.db"));
+    const userId = "27000000-0000-4000-8000-000000000001";
+    const now = "2026-08-04T02:00:00.000Z";
+    registerUser(database, userId, "i33b@test.local");
+    new UserService(database).createArchive({ userId, idempotencyKey: "achievement-i33b", requestFingerprint: "achievement-i33b", requestId: "request-i33b", now: new Date(now) });
+    // 系列只有 5 个 SKU；玩家持有其中 4 个 → 完成度 8000bp。
+    const setId = "c0000000-0000-4000-8000-000000000002";
+    database.prepare("INSERT OR IGNORE INTO card_sets (id, code, name, source, created_at) VALUES (?, 'S80', '八成测试系列', 'manual-test', ?)").run(setId, now);
+    for (let index = 0; index < 5; index += 1) {
+      const printingId = `p2000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+      const skuId = `k2000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+      database.prepare("INSERT OR IGNORE INTO card_printings (id, set_id, name, collector_number, scryfall_id, oracle_id, oracle_text, rarity, legalities_json, color_identity_json, type_line, keywords_json, mana_value, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, ?, '', 'common', '{}', '[]', '', '[]', 1, 'manual-test', 'fixture', 1, ?, ?)").run(printingId, setId, `S80 卡${index}`, String(index), printingId, now, now);
+      database.prepare("INSERT OR IGNORE INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, 'nonfoil', 0, 'manual-test', 'fixture', 1, ?, ?)").run(skuId, printingId, now, now);
+      if (index < 4) {
+        database.prepare("INSERT INTO inventory_holdings (id, user_id, sku_id, quantity, available_quantity, order_locked_quantity, tournament_locked_quantity, average_cost_amount, market_value_amount, market_value_captured_at, updated_at) VALUES (?, ?, ?, 1, 1, 0, 0, 0, NULL, NULL, ?)").run(`h2000000-0000-4000-8000-${String(index).padStart(12, "0")}`, userId, skuId, now);
+      }
+    }
+    // 构造 pack.opened fact（收到第 5 张卡，使系列完成度达到 100%）。
+    const factId = "f0000000-0000-4000-8000-000000000001";
+    const sku5 = "k2000000-0000-4000-8000-000000000004";
+    const event = { id: factId, type: "pack.opened", version: 1, occurredAt: now, correlationId: "opening-i33b", payload: { userId, packId: "40000000-0000-4000-8000-000000000001", packRuleVersion: "pack/v1", spent: { amount: 100, currency: "GAME_CREDIT" }, received: [{ skuId: sku5, quantity: 1 }] } };
+    database.prepare("INSERT INTO fact_events (id, event_type, aggregate_type, aggregate_id, version, payload_json, occurred_at) VALUES (?, 'pack.opened', 'pack_opening', ?, 1, ?, ?)").run(factId, "opening-i33b", JSON.stringify(event), now);
+    database.prepare("INSERT INTO inventory_holdings (id, user_id, sku_id, quantity, available_quantity, order_locked_quantity, tournament_locked_quantity, average_cost_amount, market_value_amount, market_value_captured_at, updated_at) VALUES (?, ?, ?, 1, 1, 0, 0, 0, NULL, NULL, ?)").run("h2000000-0000-4000-8000-000000000004", userId, sku5, now);
+
+    const service = achievementService(database);
+    const before = available(database, userId);
+    expect(service.processPackFactEvent({ factEventId: factId, now: new Date("2026-08-04T02:30:00.000Z") })).toEqual({ processed: true });
+    // 80% 与 100% 同时达成：80% 发 GAME_CREDIT 300，100% 只发徽章（无货币）。
+    expect(available(database, userId) - before).toBe(300);
+    expect(service.detail(userId, "set-completion-80/v1")?.progress).toMatchObject({ status: "unlocked", currentValue: 8000, goalValue: 8000 });
+    expect(service.detail(userId, "set-completion-100/v1")?.progress).toMatchObject({ status: "unlocked", currentValue: 10000, goalValue: 10000 });
+    expect(service.detail(userId, "set-completion-80/v1")?.unlock?.source).toMatchObject({ type: "collection", factId });
+    // 重复处理同一 fact 不重复发奖。
+    service.processPackFactEvent({ factEventId: factId, now: new Date("2026-08-04T02:31:00.000Z") });
+    expect(available(database, userId) - before).toBe(300);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM achievement_reward_grants WHERE user_id = ? AND definition_id = 'set-completion-80/v1'").get(userId)).toEqual({ count: 1 });
+    database.close();
+  });
+
+  it("I33B keeps set completion pending below 80% and rejects unknown fact event types", () => {
+    const directory = mkdtempSync(join(tmpdir(), "mtg-achievement-")); directories.push(directory);
+    const database = openSqliteDatabase(join(directory, "test.db"));
+    const userId = "28000000-0000-4000-8000-000000000001";
+    const now = "2026-08-04T02:00:00.000Z";
+    registerUser(database, userId, "i33b2@test.local");
+    new UserService(database).createArchive({ userId, idempotencyKey: "achievement-i33b2", requestFingerprint: "achievement-i33b2", requestId: "request-i33b2", now: new Date(now) });
+    const setId = "c0000000-0000-4000-8000-000000000003";
+    database.prepare("INSERT OR IGNORE INTO card_sets (id, code, name, source, created_at) VALUES (?, 'S79', '七成测试系列', 'manual-test', ?)").run(setId, now);
+    for (let index = 0; index < 10; index += 1) {
+      const printingId = `p3000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+      const skuId = `k3000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+      database.prepare("INSERT OR IGNORE INTO card_printings (id, set_id, name, collector_number, rarity, legalities_json, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, ?, ?, 'common', '{}', 'manual-test', 'fixture', 1, ?, ?)").run(printingId, setId, `S79 卡${index}`, String(index), now, now);
+      database.prepare("INSERT OR IGNORE INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, 'nonfoil', 0, 'manual-test', 'fixture', 1, ?, ?)").run(skuId, printingId, now, now);
+      if (index < 7) {
+        database.prepare("INSERT INTO inventory_holdings (id, user_id, sku_id, quantity, available_quantity, order_locked_quantity, tournament_locked_quantity, average_cost_amount, market_value_amount, market_value_captured_at, updated_at) VALUES (?, ?, ?, 1, 1, 0, 0, 0, NULL, NULL, ?)").run(`h3000000-0000-4000-8000-${String(index).padStart(12, "0")}`, userId, skuId, now);
+      }
+    }
+    const factId = "f0000000-0000-4000-8000-000000000002";
+    const event = { id: factId, type: "pack.opened", version: 1, occurredAt: now, correlationId: "opening-i33b2", payload: { userId, packId: "40000000-0000-4000-8000-000000000001", packRuleVersion: "pack/v1", spent: { amount: 100, currency: "GAME_CREDIT" }, received: [] } };
+    database.prepare("INSERT INTO fact_events (id, event_type, aggregate_type, aggregate_id, version, payload_json, occurred_at) VALUES (?, 'pack.opened', 'pack_opening', ?, 1, ?, ?)").run(factId, "opening-i33b2", JSON.stringify(event), now);
+    const service = achievementService(database);
+    service.processPackFactEvent({ factEventId: factId, now: new Date("2026-08-04T02:30:00.000Z") });
+    expect(service.detail(userId, "set-completion-80/v1")?.progress).toMatchObject({ status: "pending", currentValue: 7000 });
+    // 不存在的 fact 返回未处理。
+    expect(service.processPackFactEvent({ factEventId: "f0000000-0000-4000-8000-000000000099", now: new Date("2026-08-04T02:30:00.000Z") })).toEqual({ processed: false });
     database.close();
   });
 });

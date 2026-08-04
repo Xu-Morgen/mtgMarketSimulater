@@ -50,6 +50,14 @@ export interface DeckAchievementProfile {
   dominantSetCode: string | null;
 }
 
+/** I33B：系列收集率成就的玩家档案：按系列聚合的收集/总数完成度（bp）。 */
+export interface SetCompletionProfile {
+  /** 该系列已持有（quantity > 0）的不同 SKU 数。 */
+  collectedSkuCount: number;
+  /** 该系列全部印刷×工艺 SKU 数（目录全量，供完成度计算）。 */
+  totalSkuCount: number;
+}
+
 /** 单条成就的评估结论。 */
 export interface AchievementEvaluation {
   definitionId: string;
@@ -116,7 +124,11 @@ export function resolveFirstAchievements(version: string): AchievementDefinition
     { id: "series-pilot/v1", kind: "deck", category: "deck", ruleVersion: version, goal: 1, reward: { kind: "badge", amount: 0, packId: null, skuId: null, badgeId: "series-pilot" }, display: { title: "系列先锋", description: "使用同一系列占主导的卡组参赛并夺冠", badge: "series-pilot" }, hidden: true },
     { id: "collection-10/v1", kind: "collection", category: "collection", ruleVersion: version, goal: 10, reward: { kind: "GAME_CREDIT", amount: 100, packId: null, skuId: null, badgeId: null }, display: { title: "收藏起步", description: "持有 10 种不同卡牌 SKU", badge: "collection-10" }, hidden: false },
     { id: "collection-50/v1", kind: "collection", category: "collection", ruleVersion: version, goal: 50, reward: { kind: "GAME_CREDIT", amount: 500, packId: null, skuId: null, badgeId: null }, display: { title: "收藏进阶", description: "持有 50 种不同卡牌 SKU", badge: "collection-50" }, hidden: false },
-    { id: "collection-100/v1", kind: "collection", category: "collection", ruleVersion: version, goal: 100, reward: { kind: "GAME_CREDIT", amount: 1_000, packId: null, skuId: null, badgeId: null }, display: { title: "收藏家", description: "持有 100 种不同卡牌 SKU", badge: "collection-100" }, hidden: false }
+    { id: "collection-100/v1", kind: "collection", category: "collection", ruleVersion: version, goal: 100, reward: { kind: "GAME_CREDIT", amount: 1_000, packId: null, skuId: null, badgeId: null }, display: { title: "收藏家", description: "持有 100 种不同卡牌 SKU", badge: "collection-100" }, hidden: false },
+    // I33B：系列收集率里程碑。goal 为完成度 bp 阈值（80% = 8000、100% = 10000），
+    // 与 0035_set_completion_achievements.sql 的 definition_id 一一对应。
+    { id: "set-completion-80/v1", kind: "collection", category: "collection-set", ruleVersion: version, goal: 8000, reward: { kind: "GAME_CREDIT", amount: 300, packId: null, skuId: null, badgeId: null }, display: { title: "系列图鉴·八成", description: "任意一个系列的收集率达到 80%", badge: "set-completion-80" }, hidden: false },
+    { id: "set-completion-100/v1", kind: "collection", category: "collection-set", ruleVersion: version, goal: 10000, reward: { kind: "badge", amount: 0, packId: null, skuId: null, badgeId: "set-completion-100" }, display: { title: "系列图鉴·圆满", description: "任意一个系列的收集率达到 100%", badge: "set-completion-100" }, hidden: false }
   ];
   for (const definition of definitions) {
     validateDefinition(definition);
@@ -217,6 +229,37 @@ export function evaluateCollectionAchievements(input: {
       continue;
     }
     const progress = Math.min(definition.goal, input.distinctSkuCount);
+    evaluations.push({ definitionId: id, unlocked: progress >= definition.goal, progress, goal: definition.goal });
+  }
+  return { ruleVersion: input.ruleVersion, evaluations: evaluations.sort((left, right) => left.definitionId.localeCompare(right.definitionId)) };
+}
+
+/**
+ * I33B：系列收集率里程碑评估。对每个收藏-系列成就，以玩家在该系列的完成度 bp
+ * （collectedSkuCount × 10_000 ÷ totalSkuCount，按目标封顶）为进度；任一系列达到
+ * 80%/100% 即解锁。totalSkuCount 为 0 时完成度计 0，绝不除以零；纯函数可重放。
+ */
+export function evaluateSetCompletionAchievements(input: {
+  ruleVersion: string;
+  definitionIds: string[];
+  /** 系列收集率成就定义的 goal 以 bp 表达（8000/10000）。 */
+  profile: SetCompletionProfile;
+}): AchievementEvaluationResult {
+  if (input.ruleVersion !== ACHIEVEMENT_RULE_VERSION) throw new RangeError(`不支持的成就规则版本：${input.ruleVersion}`);
+  nonNegativeSafeInteger(input.profile.collectedSkuCount, "系列已收集 SKU 数");
+  nonNegativeSafeInteger(input.profile.totalSkuCount, "系列总 SKU 数");
+  if (input.profile.collectedSkuCount > input.profile.totalSkuCount) throw new RangeError("系列已收集 SKU 数不能超过总数");
+  const completionBp = input.profile.totalSkuCount === 0
+    ? 0
+    : Math.min(10_000, Math.floor((input.profile.collectedSkuCount * 10_000) / input.profile.totalSkuCount));
+  const selected = resolveDefinitions(input.ruleVersion, input.definitionIds);
+  const evaluations: AchievementEvaluation[] = [];
+  for (const [id, definition] of selected) {
+    if (definition.kind !== "collection" || definition.category !== "collection-set") {
+      evaluations.push({ definitionId: id, unlocked: false, progress: 0, goal: definition.goal });
+      continue;
+    }
+    const progress = Math.min(definition.goal, completionBp);
     evaluations.push({ definitionId: id, unlocked: progress >= definition.goal, progress, goal: definition.goal });
   }
   return { ruleVersion: input.ruleVersion, evaluations: evaluations.sort((left, right) => left.definitionId.localeCompare(right.definitionId)) };

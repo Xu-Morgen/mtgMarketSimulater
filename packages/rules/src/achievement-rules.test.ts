@@ -4,6 +4,7 @@ import {
   evaluateCollectionAchievements,
   evaluateDeckAchievements,
   evaluateRewardRisk,
+  evaluateSetCompletionAchievements,
   evaluateTournamentAchievements,
   resolveFirstAchievements
 } from "./achievement-rules.js";
@@ -11,6 +12,7 @@ import {
 const TOURNAMENT_IDS = ["first-tournament/v1", "tournament-champion/v1", "win-streak-3/v1"];
 const DECK_IDS = ["mono-color-commander/v1", "series-pilot/v1"];
 const COLLECTION_IDS = ["collection-10/v1", "collection-50/v1", "collection-100/v1"];
+const SET_COMPLETION_IDS = ["set-completion-80/v1", "set-completion-100/v1"];
 
 describe("I26B achievement-rules", () => {
   describe("resolveFirstAchievements", () => {
@@ -26,7 +28,9 @@ describe("I26B achievement-rules", () => {
         "series-pilot/v1",
         "collection-10/v1",
         "collection-50/v1",
-        "collection-100/v1"
+        "collection-100/v1",
+        "set-completion-80/v1",
+        "set-completion-100/v1"
       ]);
       for (const definition of first) {
         expect(definition.ruleVersion).toBe(ACHIEVEMENT_RULE_VERSION);
@@ -138,6 +142,30 @@ describe("I26B achievement-rules", () => {
     it("rejects negative or fractional counts", () => {
       expect(() => evaluateCollectionAchievements({ ruleVersion: ACHIEVEMENT_RULE_VERSION, definitionIds: COLLECTION_IDS, distinctSkuCount: -1 })).toThrow();
       expect(() => evaluateCollectionAchievements({ ruleVersion: ACHIEVEMENT_RULE_VERSION, definitionIds: COLLECTION_IDS, distinctSkuCount: 1.5 })).toThrow();
+    });
+  });
+
+  describe("evaluateSetCompletionAchievements", () => {
+    it("unlocks 80% at 8000bp and 100% only at full collection, goals in bp", () => {
+      const partial = evaluateSetCompletionAchievements({ ruleVersion: ACHIEVEMENT_RULE_VERSION, definitionIds: SET_COMPLETION_IDS, profile: { collectedSkuCount: 4, totalSkuCount: 5 } });
+      const byId = new Map(partial.evaluations.map((evaluation) => [evaluation.definitionId, evaluation]));
+      expect(byId.get("set-completion-80/v1")).toMatchObject({ unlocked: true, progress: 8000, goal: 8000 });
+      expect(byId.get("set-completion-100/v1")).toMatchObject({ unlocked: false, progress: 8000, goal: 10000 });
+      const full = evaluateSetCompletionAchievements({ ruleVersion: ACHIEVEMENT_RULE_VERSION, definitionIds: SET_COMPLETION_IDS, profile: { collectedSkuCount: 5, totalSkuCount: 5 } });
+      expect(full.evaluations.every((evaluation) => evaluation.unlocked)).toBe(true);
+    });
+
+    it("treats empty sets as zero progress without division by zero", () => {
+      const empty = evaluateSetCompletionAchievements({ ruleVersion: ACHIEVEMENT_RULE_VERSION, definitionIds: SET_COMPLETION_IDS, profile: { collectedSkuCount: 0, totalSkuCount: 0 } });
+      expect(empty.evaluations.every((evaluation) => !evaluation.unlocked && evaluation.progress === 0)).toBe(true);
+    });
+
+    it("is deterministic on replay and rejects illegal counts or versions", () => {
+      const input = { ruleVersion: ACHIEVEMENT_RULE_VERSION, definitionIds: SET_COMPLETION_IDS, profile: { collectedSkuCount: 3, totalSkuCount: 10 } };
+      expect(evaluateSetCompletionAchievements(input)).toEqual(evaluateSetCompletionAchievements(input));
+      expect(() => evaluateSetCompletionAchievements({ ruleVersion: ACHIEVEMENT_RULE_VERSION, definitionIds: SET_COMPLETION_IDS, profile: { collectedSkuCount: -1, totalSkuCount: 10 } })).toThrow();
+      expect(() => evaluateSetCompletionAchievements({ ruleVersion: ACHIEVEMENT_RULE_VERSION, definitionIds: SET_COMPLETION_IDS, profile: { collectedSkuCount: 11, totalSkuCount: 10 } })).toThrow();
+      expect(() => evaluateSetCompletionAchievements({ ruleVersion: "bad", definitionIds: SET_COMPLETION_IDS, profile: { collectedSkuCount: 1, totalSkuCount: 10 } })).toThrow();
     });
   });
 

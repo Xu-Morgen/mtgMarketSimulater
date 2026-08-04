@@ -49,7 +49,7 @@ describe("I26B 成就查询路由", () => {
     const response = await app.inject({ method: "GET", url: "/v1/achievements", headers: { authorization } });
     expect(response.statusCode).toBe(200);
     const items = response.json().data.items as Array<{ definition: { id: string }; progress: unknown }>;
-    expect(items.length).toBe(8);
+    expect(items.length).toBe(10);
     expect(items.every((item) => item.progress === null)).toBe(true);
     await app.close();
     database.close();

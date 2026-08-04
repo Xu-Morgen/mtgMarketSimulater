@@ -13,6 +13,7 @@ import {
   evaluateCollectionAchievements,
   evaluateDeckAchievements,
   evaluateRewardRisk,
+  evaluateSetCompletionAchievements,
   evaluateTournamentAchievements,
   resolveFirstAchievements,
   type AchievementDefinition,
@@ -54,6 +55,14 @@ type SettlementPayload = {
   reward: { amount: number; currency: string };
   ruleVersion: string;
   randomSeedHash: string;
+};
+
+type PackOpenedPayload = {
+  userId: string;
+  packId: string;
+  packRuleVersion: string;
+  spent: { amount: number; currency: string };
+  received: Array<{ skuId: string; quantity: number }>;
 };
 
 /**
@@ -122,6 +131,81 @@ export class AchievementService {
       }
       return { processed: true };
     });
+  }
+
+  /**
+   * I33B：系列收集率里程碑的幂等消费者。任务处理器唯一调用入口；读取指定 `pack.opened`
+   * fact 并派生该玩家的系列完成度档案、调用纯规则评估，在同一经济事务内原子写入进度/解锁/
+   * 奖励/风控/审计。幂等：已处理或已解锁的 fact/定义组合直接跳过，不重复发奖。
+   */
+  processPackFactEvent(input: { factEventId: string; now?: Date }): { processed: boolean } {
+    const now = (input.now ?? new Date()).toISOString();
+    const naturalDate = naturalDateAt(input.now ?? new Date(), this.config.timezone);
+    return this.inventory.withLedgerTransaction(() => {
+      const fact = this.database.prepare(
+        "SELECT id, aggregate_type, aggregate_id, payload_json, occurred_at FROM fact_events WHERE id = ? AND event_type = 'pack.opened'"
+      ).get(input.factEventId) as FactRow | undefined;
+      if (!fact) return { processed: false };
+      const alreadyProcessed = this.database.prepare(
+        "SELECT 1 FROM achievement_progress WHERE last_evaluated_fact_id = ? LIMIT 1"
+      ).get(input.factEventId);
+      if (alreadyProcessed) return { processed: true };
+
+      const parsed = JSON.parse(fact.payload_json) as { payload?: PackOpenedPayload };
+      const payload = parsed.payload ?? (parsed as unknown as PackOpenedPayload);
+      const playerId = payload.userId;
+      if (!playerId) return { processed: false };
+      const definitions = this.definitions();
+      const definitionIds = definitions.map((definition) => definition.id);
+      // 该玩家在全部系列上的完成度档案；开包后的持有投影驱动进度。
+      const setProfiles = this.deriveSetCompletionProfiles(playerId);
+      const merged = new Map<string, { unlocked: boolean; progress: number; goal: number; kind: string }>();
+      for (const profile of setProfiles) {
+        const evaluations = evaluateSetCompletionAchievements({ ruleVersion: ACHIEVEMENT_RULE_VERSION, definitionIds, profile });
+        for (const evaluation of evaluations.evaluations) {
+          const definition = definitions.find((entry) => entry.id === evaluation.definitionId)!;
+          const current = merged.get(evaluation.definitionId);
+          // 任一系列达标即解锁；进度取各系列中的最大值（按定义目标封顶）。
+          if (!current || evaluation.unlocked || evaluation.progress > current.progress) {
+            merged.set(evaluation.definitionId, { unlocked: current?.unlocked === true || evaluation.unlocked, progress: Math.max(current?.progress ?? 0, evaluation.progress), goal: evaluation.goal, kind: definition.kind });
+          }
+        }
+      }
+
+      const riskLimits = this.riskLimits();
+      for (const [definitionId, evaluation] of merged) {
+        this.upsertProgress(playerId, definitionId, evaluation.progress, evaluation.goal, evaluation.unlocked, input.factEventId, now);
+        if (!evaluation.unlocked) continue;
+        const unlockId = this.insertPackUnlock(playerId, definitionId, input.factEventId, now);
+        if (!unlockId) continue;
+        const grant = this.tryGrantReward(playerId, definitionId, input.factEventId, fact.aggregate_id, riskLimits, naturalDate, now);
+        this.writePackRewardGrant(playerId, definitionId, unlockId, input.factEventId, grant, now);
+      }
+      return { processed: true };
+    });
+  }
+
+  /** 玩家在每个系列的完成度档案（bp）；totalSkuCount 为该系列全部印刷×工艺 SKU。 */
+  private deriveSetCompletionProfiles(userId: string): Array<{ collectedSkuCount: number; totalSkuCount: number }> {
+    const totals = this.database.prepare(
+      `SELECT s.code AS set_code, COUNT(*) AS total_sku_count
+       FROM card_skus sku JOIN card_printings p ON p.id = sku.printing_id JOIN card_sets s ON s.id = p.set_id
+       GROUP BY s.code`
+    ).all() as Array<{ set_code: string; total_sku_count: number }>;
+    const collected = this.database.prepare(
+      `SELECT s.code AS set_code, COUNT(DISTINCT sku.id) AS collected_sku_count
+       FROM inventory_holdings h
+       JOIN card_skus sku ON sku.id = h.sku_id
+       JOIN card_printings p ON p.id = sku.printing_id
+       JOIN card_sets s ON s.id = p.set_id
+       WHERE h.user_id = ? AND h.quantity > 0
+       GROUP BY s.code`
+    ).all(userId) as Array<{ set_code: string; collected_sku_count: number }>;
+    const collectedBySet = new Map(collected.map((row) => [row.set_code, row.collected_sku_count]));
+    return totals.map((row) => ({
+      collectedSkuCount: collectedBySet.get(row.set_code) ?? 0,
+      totalSkuCount: row.total_sku_count
+    }));
   }
 
   /** 列出全部成就定义及其当前玩家的进度；按定义顺序（迁移顺序）返回。 */
@@ -293,12 +377,30 @@ export class AchievementService {
     return result.changes === 1 ? unlockId : null;
   }
 
+  /** I33B：系列收集率解锁记录，来源类型为 collection；唯一约束收敛补跑与并发。 */
+  private insertPackUnlock(userId: string, definitionId: string, factEventId: string, now: string): string | null {
+    const unlockId = randomUUID();
+    const result = this.database.prepare(
+      "INSERT OR IGNORE INTO achievement_unlocks (id, user_id, definition_id, source_type, source_fact_id, source_aggregate_id, rule_version, unlocked_at) VALUES (?, ?, ?, 'collection', ?, NULL, ?, ?)"
+    ).run(unlockId, userId, definitionId, factEventId, ACHIEVEMENT_RULE_VERSION, now);
+    return result.changes === 1 ? unlockId : null;
+  }
+
   private writeRewardGrant(userId: string, definitionId: string, unlockId: string, factEventId: string, aggregateId: string, grant: { status: "granted" | "blocked"; reward: AchievementRewardDetailDto; correlationId: string }, now: string): void {
     const definition = this.definitions().find((entry) => entry.id === definitionId)!;
     this.database.prepare(
       "INSERT INTO achievement_reward_grants (id, user_id, definition_id, unlock_id, reward_kind, reward_amount, reward_sku_id, reward_badge_id, grant_status, correlation_id, granted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(randomUUID(), userId, definitionId, unlockId, definition.reward_kind, definition.reward_amount, definition.reward_sku_id, definition.reward_badge_id, grant.status, grant.correlationId, now);
-    this.users.writeEconomicAudit(userId, "achievement.unlocked", "achievement_definition", definitionId, `job:achievement.process:${factEventId}`, { definitionId, aggregateId, rewardKind: definition.reward_kind, rewardAmount: definition.reward_amount, rewardStatus: grant.status }, now);
+    this.users.writeEconomicAudit(userId, "achievement.unlocked", "achievement_definition", definitionId, `job:pack-achievement.process:${factEventId}`, { definitionId, aggregateId, rewardKind: definition.reward_kind, rewardAmount: definition.reward_amount, rewardStatus: grant.status }, now);
+  }
+
+  /** I33B：系列收集率奖励发放流水；与解锁同事务写入，唯一键防止重复发奖。 */
+  private writePackRewardGrant(userId: string, definitionId: string, unlockId: string, factEventId: string, grant: { status: "granted" | "blocked"; reward: AchievementRewardDetailDto; correlationId: string }, now: string): void {
+    const definition = this.definitions().find((entry) => entry.id === definitionId)!;
+    this.database.prepare(
+      "INSERT INTO achievement_reward_grants (id, user_id, definition_id, unlock_id, reward_kind, reward_amount, reward_sku_id, reward_badge_id, grant_status, correlation_id, granted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(randomUUID(), userId, definitionId, unlockId, definition.reward_kind, definition.reward_amount, definition.reward_sku_id, definition.reward_badge_id, grant.status, grant.correlationId, now);
+    this.users.writeEconomicAudit(userId, "achievement.unlocked", "achievement_definition", definitionId, `job:pack-achievement.process:${factEventId}`, { definitionId, rewardKind: definition.reward_kind, rewardAmount: definition.reward_amount, rewardStatus: grant.status }, now);
   }
 
   private definitions(): DefinitionRow[] {

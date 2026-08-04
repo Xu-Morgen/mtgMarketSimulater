@@ -72,9 +72,12 @@ export const publicApiPaths = [
   "/v1/packs",
   "/v1/packs/{packId}",
   "/v1/packs/{packId}/open",
+  "/v1/packs/{packId}/bulk",
   "/v1/store/packs",
   "/v1/store/packs/{packId}/purchase-preview",
   "/v1/pack-openings",
+  "/v1/collection/album",
+  "/v1/inventory/duplicates/sell",
   "/v1/admin/jobs",
   "/v1/admin/jobs/{id}/retry",
   "/v1/admin/catalog/sync",
@@ -111,6 +114,8 @@ export const publicApiPaths = [
   "/v1/admin/packs/{packId}/rule-preview",
   "/v1/admin/packs/{packId}/rule-publish",
   "/v1/admin/packs/{packId}/disable",
+  "/v1/admin/packs/{packId}/offer",
+  "/v1/admin/pack-offers/{offerId}/end",
   "/v1/admin/backups",
   "/v1/admin/backups/{id}",
   "/v1/admin/backups/{id}/download",
@@ -463,6 +468,35 @@ export const openApiDocument = {
         }
       }
     },
+    "/v1/packs/{packId}/bulk": {
+      post: {
+        summary: "批量开包（10/50/100 包，单事务结算，任一包失败整批回滚）",
+        responses: {
+          "201": { description: "批量开包结果与汇总" },
+          "400": { description: "缺少幂等键或请求无效" },
+          "409": { description: "余额不足、版本过期、包不可用或幂等冲突" }
+        }
+      }
+    },
+    "/v1/collection/album": {
+      get: {
+        summary: "按系列分组的收藏图鉴只读聚合（完成度与未收集卡位）",
+        responses: {
+          "200": { description: "图鉴分组与完成度" },
+          "401": { description: "认证无效或过期" }
+        }
+      }
+    },
+    "/v1/inventory/duplicates/sell": {
+      post: {
+        summary: "重复卡批量向 NPC 卖出（逐 SKU 复用卖出规则与额度，单事务回滚）",
+        responses: {
+          "201": { description: "卖出汇总（张数/收入/费用与跳过项）" },
+          "400": { description: "缺少幂等键或请求无效" },
+          "409": { description: "存档缺失或幂等冲突" }
+        }
+      }
+    },
     "/v1/admin/catalog/sync": {
       get: {
         summary: "查询 Scryfall 目录同步状态",
@@ -534,6 +568,8 @@ export const openApiDocument = {
     "/v1/admin/packs/{packId}/rule-preview": { post: { summary: "补充包规则发布前预览", responses: { "200": { description: "概率与校验结果" }, "404": { description: "补充包不存在" }, "403": { description: "需要管理员权限" } } } },
     "/v1/admin/packs/{packId}/rule-publish": { post: { summary: "发布新版本补充包规则（不可原地覆盖）", responses: { "201": { description: "已发布" }, "409": { description: "版本已存在" }, "403": { description: "需要管理员权限" } } } },
     "/v1/admin/packs/{packId}/disable": { post: { summary: "停用补充包", responses: { "200": { description: "已停用" }, "409": { description: "已停用或不存在" }, "403": { description: "需要管理员权限" } } } },
+    "/v1/admin/packs/{packId}/offer": { post: { summary: "配置限时销售窗口（折扣价与生效区间）", responses: { "201": { description: "已创建销售窗口" }, "409": { description: "已存在未结束窗口或补充包不存在" }, "403": { description: "需要管理员权限" } } } },
+    "/v1/admin/pack-offers/{offerId}/end": { post: { summary: "提前结束限时销售窗口", responses: { "200": { description: "已结束" }, "409": { description: "窗口不存在或已结束" }, "403": { description: "需要管理员权限" } } } },
     "/v1/admin/backups": {
       get: { summary: "管理员只读分页查询备份记录", responses: { "200": { description: "备份列表" }, "403": { description: "需要管理员权限" } } },
       post: { summary: "以幂等键手动触发 SQLite 一致性备份", responses: { "201": { description: "备份完成" }, "202": { description: "备份进行中" }, "400": { description: "缺少幂等键" }, "403": { description: "需要管理员权限" } } }

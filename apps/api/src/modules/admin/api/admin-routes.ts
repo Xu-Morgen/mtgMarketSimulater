@@ -94,6 +94,14 @@ const packRuleBodySchema = z.object({
   })).min(1)
 }).strict();
 const disablePackBodySchema = z.object({ reason: z.string().trim().min(1).max(500) }).strict();
+/** I33B（C6）：限时销售窗口配置；discountBps 10_000 = 无折扣，窗口内实际售价由服务端计算。 */
+const createPackOfferBodySchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(500).nullable().optional(),
+  discountBps: z.number().int().min(1).max(10_000),
+  startsAt: z.string().datetime(),
+  endsAt: z.string().datetime()
+}).strict().refine((value) => value.endsAt > value.startsAt, "endsAt 必须晚于 startsAt");
 const setlistDraftBodySchema = z.object({
   sourceVersion: z.string().trim().min(1).max(64),
   sourceChecksumSha256: z.string().regex(/^[a-f0-9]{64}$/i).nullable().optional(),
@@ -371,6 +379,26 @@ export async function registerAdminRoutes(app: FastifyInstance, config: ApiConfi
     const { packId } = z.object({ packId: z.string().uuid() }).parse(request.params);
     const body = disablePackBodySchema.parse(request.body);
     const result = admin.disablePack({ packId, reason: body.reason, actorId: request.actor!.id, idempotencyKey: key!, requestId: request.requestId, now: now() });
+    return sendWriteReply(request, reply, result, 200);
+  });
+
+  // ----- I33B（C6）特殊补充包限时销售窗口 -----
+  app.post("/v1/admin/packs/:packId/offer", { preHandler: requireRole("admin") }, async (request, reply) => {
+    const key = idempotencyKeyHeader(request);
+    const keyCheck = requireIdempotencyKey(request.requestId, key);
+    if (!keyCheck.valid) return reply.code(400).send(keyCheck.response);
+    const { packId } = z.object({ packId: z.string().uuid() }).parse(request.params);
+    const body = createPackOfferBodySchema.parse(request.body);
+    const result = admin.createPackOffer({ packId, name: body.name, description: body.description ?? null, discountBps: body.discountBps, startsAt: body.startsAt, endsAt: body.endsAt, actorId: request.actor!.id, idempotencyKey: key!, requestId: request.requestId, now: now() });
+    return sendWriteReply(request, reply, result, 201);
+  });
+
+  app.post("/v1/admin/pack-offers/:offerId/end", { preHandler: requireRole("admin") }, async (request, reply) => {
+    const key = idempotencyKeyHeader(request);
+    const keyCheck = requireIdempotencyKey(request.requestId, key);
+    if (!keyCheck.valid) return reply.code(400).send(keyCheck.response);
+    const { offerId } = z.object({ offerId: z.string().uuid() }).parse(request.params);
+    const result = admin.endPackOffer({ offerId, actorId: request.actor!.id, idempotencyKey: key!, requestId: request.requestId, now: now() });
     return sendWriteReply(request, reply, result, 200);
   });
 }

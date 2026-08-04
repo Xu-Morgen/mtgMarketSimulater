@@ -9,6 +9,7 @@ export const registeredJobTypes = [
   "market.reprice",
   "tournament.settle",
   "achievement.process",
+  "pack-achievement.process",
   "order.expire",
   "narrative.generate",
   "backup.create"

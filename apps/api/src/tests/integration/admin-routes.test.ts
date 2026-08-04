@@ -328,6 +328,46 @@ describe("I30B admin routes", () => {
     database.close();
   });
 
+  it("creates and ends a limited-time pack offer with idempotency and duplicate-window rejection", async () => {
+    const { app, database } = await createTestApp();
+    const { skuId } = seedCatalog(database);
+    const now = "2026-07-31T00:00:00.000Z";
+    const packId = "70000000-0000-4000-8000-000000000302";
+    database.prepare("INSERT INTO booster_packs (id, code, name, description, price_amount, enabled, disabled_reason, active_rule_version, created_at, updated_at) VALUES (?, 'ADM-02', '管理测试包二', NULL, 500, 1, NULL, 'pack/v1', ?, ?)").run(packId, now, now);
+    database.prepare("INSERT INTO booster_pack_rules (id, pack_id, version, definition_json, created_at, retired_at) VALUES (?, ?, 'pack/v1', ?, ?, NULL)").run("80000000-0000-4000-8000-000000000302", packId, JSON.stringify({ version: "pack/v1", pools: [{ id: "p", rarity: "common", candidates: [{ skuId, weight: 1 }] }], slots: [{ id: "s", draws: 1, poolWeights: [{ poolId: "p", weight: 1 }] }] }), now);
+
+    const admin = await registerAndPromoteAdmin(app, database);
+    const payload = { name: "限时折扣", description: "八折", discountBps: 8000, startsAt: "2026-08-01T00:00:00.000Z", endsAt: "2026-08-10T00:00:00.000Z" };
+    const create = await app.inject({ method: "POST", url: `/v1/admin/packs/${packId}/offer`, headers: { authorization: admin.authorization, "idempotency-key": idKey("offer-create") }, payload });
+    expect(create.statusCode).toBe(201);
+    expect(create.json().data.offer).toMatchObject({ packId, discountBps: 8000, status: "active" });
+    const offerId = create.json().data.offer.id as string;
+
+    // 重放返回首次结果
+    const replay = await app.inject({ method: "POST", url: `/v1/admin/packs/${packId}/offer`, headers: { authorization: admin.authorization, "idempotency-key": idKey("offer-create") }, payload });
+    expect(replay.statusCode).toBe(201);
+
+    // 同一包已有未结束窗口 → 冲突
+    const conflict = await app.inject({ method: "POST", url: `/v1/admin/packs/${packId}/offer`, headers: { authorization: admin.authorization, "idempotency-key": idKey("offer-dup") }, payload: { ...payload, name: "另一窗口" } });
+    expect(conflict.statusCode).toBe(409);
+
+    // 普通玩家 403
+    const player = await registerPlayer(app, "offer-player@example.test");
+    const forbidden = await app.inject({ method: "POST", url: `/v1/admin/packs/${packId}/offer`, headers: { authorization: player.authorization, "idempotency-key": idKey("offer-player") }, payload });
+    expect(forbidden.statusCode).toBe(403);
+
+    // 结束窗口；重复结束被拒
+    const end = await app.inject({ method: "POST", url: `/v1/admin/pack-offers/${offerId}/end`, headers: { authorization: admin.authorization, "idempotency-key": idKey("offer-end") }, payload: {} });
+    expect(end.statusCode).toBe(200);
+    expect(end.json().data).toMatchObject({ offerId, status: "ended" });
+    const endAgain = await app.inject({ method: "POST", url: `/v1/admin/pack-offers/${offerId}/end`, headers: { authorization: admin.authorization, "idempotency-key": idKey("offer-end-again") }, payload: {} });
+    expect(endAgain.statusCode).toBe(409);
+    // 结束时写审计
+    expect(database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'pack_offer.ended'").get()).toEqual({ count: 1 });
+    await app.close();
+    database.close();
+  });
+
   it("creates a setlist draft, previews mapping, and dedupes on same source version", async () => {
     const { app, database } = await createTestApp();
     seedCatalog(database); // 本地 ADM 系列

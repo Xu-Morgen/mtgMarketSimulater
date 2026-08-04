@@ -127,6 +127,15 @@
 - `achievement.process` 的 payload 只有 `{ factEventId }`，由写入 `tournament.settled` fact 时以 `achievement.process:{factEventId}` 唯一键投递。任务失败可按既有 jobs 重试语义安全重领；缺少、非赛事或重复 fact 均不得直接补写赛事、账本或库存。
 - 从 fact ID 只读关联 `achievement_progress.last_evaluated_fact_id`、`achievement_unlocks.source_fact_id/source_aggregate_id`、`achievement_reward_grants.correlation_id`、账本/库存流水和 `audit_logs`（`achievement.unlocked` 或 `achievement.reward_blocked`）。`rewardStatus=blocked` 是风控结果，不得通过直接更新 grant、计数或余额“补发”；后续补偿只能由受审计 application 命令实现。
 
+## I33B 收藏图鉴、开包增强、批量开包、重复卡批量卖出与限时包排障
+
+- **收藏图鉴只读**：`GET /v1/collection/album` 只读聚合 `card_sets`/`card_printings`/`card_skus` 与 `inventory_holdings`，不写任何经济表；完成度/未收集卡位由服务端计算。若玩家反馈图鉴异常，先核对目录系列/印刷行与 `inventory_holdings.quantity`，不得手工改图鉴数据（没有对应持久化表）或让浏览器自行统计估值。
+- **开包新卡标记与总价值**：`isNewToCollection` 以本次结算前 `inventory_holdings.quantity > 0` 判定，`collectionProgressAfter` 按开包入库后的持有投影计算；`totalGameValue` 按结算时已持久化 `market_quotes.market_price` 累加（任一缺价则为 null）。开包历史按 `pack_openings.result_summary_json` 原样回放；禁止手工改写历史摘要或补算盈亏。
+- **批量开包**：`POST /v1/packs/{packId}/bulk` 以 `(actor_id, idempotency_key)` 收敛，单事务逐包结算；任一包失败整笔回滚，`pack_openings`/`fact_events`/账本/库存流水都不应出现半完成。排障按请求 ID、幂等键关联 `idempotency_requests`、`pack_rule_replays`、`pack_openings`、`ledger_entries(reason=pack_purchase)`、`inventory_entries(reason=pack_opened)` 与 `fact_events(pack.opened)`；任何缺失均按故障处理，不得手补流水或重复开包。
+- **重复卡批量卖出**：`POST /v1/inventory/duplicates/sell` 只卖持有量 >1 的可用库存（保留至少一张），逐 SKU 复用报价快照与每日额度；`skippedItems` 给出 `no_duplicate`/`locked`/`quote_unavailable`/`quote_stale`/`trade_limit_reached` 原因，不产生部分结算。排障按请求 ID、幂等键或 `npc_trades.id` 关联账本/库存流水/成交/事件/审计；不要手工删除库存或修改 `npc_trades` 来“补”清仓结果。
+- **限时销售窗口**：`pack_offers` 由 `daily.rollover` 顺带批量结束到期窗口（`status='ended'`），管理端 `POST /v1/admin/packs/{packId}/offer`/`POST /v1/admin/pack-offers/{offerId}/end` 以幂等键与审计配置。同一包同时至多一个未结束窗口由唯一索引保证；窗口外购买与下架同语义返回 `RESOURCE_CONFLICT`。不要手工修改 `pack_offers` 状态或 `booster_packs.price_amount` 模拟折扣；折扣价只由 `discount_bps` 在服务端计算。
+- **系列收集率成就**：`pack-achievement.process` 的 payload 只有 `{ factEventId }`，由写入 `pack.opened` fact 时以 `pack-achievement.process:{factEventId}` 唯一键投递。从 fact ID 只读关联 `achievement_progress.last_evaluated_fact_id`、`achievement_unlocks`（`source_type='collection'`）、`achievement_reward_grants` 与审计；`rewardStatus=blocked` 是风控结果，不得通过直接更新 grant、计数或余额“补发”。
+
 ## I32B 发布门禁与首周观察
 
 I32B 是发布质量门禁迭代，不新增业务能力。本节把发布阻断条件、首周观察指标、回滚与值守流程收敛为可执行手册；任一门禁或观察指标异常即视为发布阻断或需介入处置。详细的部署/恢复/回滚命令见 [deploy.md](../../../docs/deploy.md)。
