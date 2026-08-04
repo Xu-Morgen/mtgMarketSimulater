@@ -479,7 +479,6 @@ button:focus-visible {
 .auth-page {
   display: grid;
   min-height: 100vh;
-  overflow: hidden;
   padding: 24px;
   place-items: center;
   position: relative;
@@ -524,7 +523,10 @@ button:focus-visible {
 .auth-card {
   background: linear-gradient(165deg, rgba(201, 162, 75, 0.09) 0%, rgba(201, 162, 75, 0) 34%), var(--bg-leather);
   border: 1px solid var(--border-gold);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-raise);
+  margin: auto;
+  padding: 24px;
   position: relative;
   width: min(100%, 440px);
   z-index: 2;
