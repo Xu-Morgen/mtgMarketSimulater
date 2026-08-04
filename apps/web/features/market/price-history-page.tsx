@@ -16,8 +16,8 @@ import styles from "./price-history-page.module.css";
 
 const finishes: Array<{ value: CardFinish; label: string }> = [{ value: "nonfoil", label: "非闪" }, { value: "foil", label: "闪" }, { value: "etched", label: "蚀刻" }];
 const ranges: Array<{ value: "7d" | "30d" | "all"; label: string }> = [{ value: "7d", label: "近 7 天" }, { value: "30d", label: "近 30 天" }, { value: "all", label: "全部" }];
-const referenceColor = "#ba8e38";
-const gameColor = "#334f70";
+const referenceColor = "#c9a24b";
+const gameColor = "#3b7dd8";
 
 function formatEurCents(amount: number): string { return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "EUR" }).format(amount / 100); }
 function finishLabel(finish: CardFinish): string { return finishes.find((item) => item.value === finish)?.label ?? finish; }

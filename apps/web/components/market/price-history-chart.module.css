@@ -1,8 +1,9 @@
+/* 双曲线图表：图例与色标（与 ECharts 系列色一致） */
 .chart { height: 360px; width: 100%; }
-.legend { color: #596153; font-size: .85rem; margin: 8px 0; }
+.legend { color: var(--text-secondary); font-size: 0.85rem; margin: 8px 0; }
 .legend ul { display: flex; flex-wrap: wrap; gap: 14px; list-style: none; margin: 6px 0 0; padding: 0; }
 .legend li { align-items: center; display: flex; gap: 6px; }
 .swatch { border-radius: 3px; display: inline-block; height: 12px; width: 18px; }
-.swatchReference { background: #ba8e38; }
-.swatchGame { background: #334f70; }
+.swatchReference { background: #c9a24b; }
+.swatchGame { background: #3b7dd8; }
 @media (max-width: 700px) { .chart { height: 280px; } }

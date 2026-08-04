@@ -1,58 +1,181 @@
-.tableWrap { background: #fff; border: 1px solid #d8d6c5; border-radius: 12px; overflow-x: auto; }
+/* 委托：方向用色（买=绿/金、卖=红）、状态徽章、订单簿与待履约资产 */
+.tableWrap {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  overflow-x: auto;
+}
 .pagination { margin-top: 18px; }
-.secondary { color: #596153; font-size: .82rem; }
+.secondary { color: var(--text-secondary); font-size: 0.82rem; }
 .sideSwitch { display: flex; gap: 8px; margin: 12px 0; }
 .quantityForm { align-items: end; display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
-.quantityForm label { display: grid; font-size: .9rem; font-weight: 700; gap: 5px; }
-.quantityForm input { border: 1px solid #9b9a8e; border-radius: 7px; min-height: 40px; padding: 7px 9px; width: 130px; }
-.limitField { display: grid; font-size: .9rem; font-weight: 700; gap: 5px; margin-top: 12px; }
-.limitField input { border: 1px solid #9b9a8e; border-radius: 7px; min-height: 40px; padding: 7px 9px; max-width: 220px; }
+.quantityForm label { display: grid; font-size: 0.9rem; font-weight: 700; gap: 5px; color: var(--text-primary); }
+.quantityForm input {
+  background: rgba(18, 21, 26, 0.7);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  min-height: 40px;
+  padding: 7px 9px;
+  width: 130px;
+}
+.limitField { display: grid; font-size: 0.9rem; font-weight: 700; gap: 5px; margin-top: 12px; color: var(--text-primary); }
+.limitField input {
+  background: rgba(18, 21, 26, 0.7);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  min-height: 40px;
+  padding: 7px 9px;
+  max-width: 220px;
+}
 .limitField small { font-weight: 400; }
-.tradePreview, .tradeSuccess { background: #f3f2e8; border: 1px solid #d8d6c5; border-radius: 8px; margin-top: 12px; padding: 14px; }
-.tradePreview h3, .tradeSuccess h2 { margin-bottom: 8px; }
-.tradePreview p { margin: 7px 0; }
-.tradeError, .inlineError, .loss { color: #9b2226; }
-.inlineError { background: #fff1f0; border: 1px solid #f3b6b3; border-radius: 8px; margin-top: 12px; padding: 12px; }
+.tradePreview,
+.tradeSuccess {
+  background: rgba(236, 228, 208, 0.05);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  margin-top: 12px;
+  padding: 14px;
+}
+.tradePreview h3,
+.tradeSuccess h2 { color: var(--accent-gold-bright); margin-bottom: 8px; }
+.tradePreview p { margin: 7px 0; color: var(--text-primary); }
+.tradeError,
+.inlineError,
+.loss { color: #e08678; }
+.inlineError {
+  background: rgba(192, 57, 43, 0.12);
+  border: 1px solid rgba(192, 57, 43, 0.55);
+  border-radius: var(--radius-sm);
+  margin-top: 12px;
+  padding: 12px;
+}
 .inlineError p { margin: 6px 0; }
-.tradeReady, .profit { color: #254d22; }
-.tradeSuccess { background: #e3f0d7; border-color: #8db36f; color: #254d22; margin-bottom: 20px; }
-.disabledEntry { background: #f4e4e4; border: 1px solid #9b2226; border-radius: 6px; color: #9b2226; cursor: not-allowed; font-weight: 700; padding: 5px 8px; }
+.tradeReady,
+.profit { color: #a8cf84; font-weight: 700; }
+.tradeSuccess {
+  background: rgba(127, 166, 90, 0.14);
+  border-color: rgba(127, 166, 90, 0.55);
+  color: #a8cf84;
+  margin-bottom: 20px;
+}
+.disabledEntry {
+  background: rgba(192, 57, 43, 0.14);
+  border: 1px solid rgba(192, 57, 43, 0.6);
+  border-radius: var(--radius-sm);
+  color: #e08678;
+  cursor: not-allowed;
+  font-weight: 700;
+  padding: 5px 8px;
+}
 .orderDialog { max-width: 560px; }
 @media (max-width: 700px) { .orderDialog { max-width: 100%; } }
 
-/* I19F：余额、订单簿、成交与待履约状态区块。 */
-.sectionCard { background: #fff; border: 1px solid #d8d6c5; border-radius: 12px; margin-top: 18px; padding: 16px; }
+/* 余额、订单簿、成交与待履约状态区块 */
+.sectionCard {
+  background: linear-gradient(150deg, rgba(236, 228, 208, 0.035) 0%, rgba(236, 228, 208, 0) 42%), var(--bg-panel);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  margin-top: 18px;
+  padding: 16px;
+}
 .sectionCard h2 { margin-bottom: 10px; }
 .balanceGrid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.balanceGrid article { background: #f3f2e8; border: 1px solid #d8d6c5; border-radius: 8px; padding: 12px; }
-.balanceGrid article span { color: #596153; display: block; font-size: .82rem; }
-.balanceGrid article strong { font-size: 1.1rem; }
+.balanceGrid article {
+  background: rgba(18, 21, 26, 0.5);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+.balanceGrid article span { color: var(--text-secondary); display: block; font-size: 0.82rem; }
+.balanceGrid article strong { color: var(--accent-gold-bright); font-size: 1.1rem; font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 .bookSelector { align-items: end; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
-.bookSelector label { display: grid; font-size: .9rem; font-weight: 700; gap: 5px; }
-.bookSelector select { border: 1px solid #9b9a8e; border-radius: 7px; min-height: 40px; padding: 7px 9px; min-width: 260px; }
+.bookSelector label { display: grid; font-size: 0.9rem; font-weight: 700; gap: 5px; color: var(--text-primary); }
+.bookSelector select {
+  background: rgba(18, 21, 26, 0.7);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  min-height: 40px;
+  min-width: 260px;
+  padding: 7px 9px;
+}
 .bookGrid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.bookSide { background: #f8f7ef; border: 1px solid #e3e1d2; border-radius: 8px; padding: 10px; }
-.bookSide h3 { font-size: .95rem; margin-bottom: 8px; }
+.bookSide {
+  background: rgba(18, 21, 26, 0.45);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+}
+.bookSide h3 { color: var(--accent-gold-bright); font-size: 0.95rem; margin-bottom: 8px; }
 .bookSide table { border-collapse: collapse; width: 100%; }
-.bookSide th, .bookSide td { border-bottom: 1px solid #eceadf; padding: 5px 6px; text-align: right; }
-.bookSide th:first-child, .bookSide td:first-child { text-align: left; }
-.bookMeta { color: #596153; font-size: .82rem; margin-top: 10px; }
-.pendingSummary { background: #f3f2e8; border: 1px solid #d8d6c5; border-radius: 8px; margin-top: 12px; padding: 12px; }
+.bookSide th,
+.bookSide td {
+  border-bottom: 1px solid rgba(236, 228, 208, 0.1);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  padding: 5px 6px;
+  text-align: right;
+}
+.bookSide th { color: var(--text-secondary); font-weight: 600; }
+.bookSide th:first-child,
+.bookSide td:first-child { text-align: left; }
+.bookMeta { color: var(--text-secondary); font-size: 0.82rem; margin-top: 10px; }
+.pendingSummary {
+  background: rgba(201, 162, 75, 0.08);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  margin-top: 12px;
+  padding: 12px;
+}
 .pendingSummary p { margin: 6px 0; }
-.staleHint { background: #fff7e6; border: 1px solid #ffd591; border-radius: 8px; color: #874d00; margin-top: 12px; padding: 10px 12px; }
+.pendingSummary strong { color: var(--accent-gold-bright); }
+.staleHint {
+  background: rgba(214, 161, 62, 0.12);
+  border: 1px solid rgba(214, 161, 62, 0.5);
+  border-radius: var(--radius-sm);
+  color: #e6c87c;
+  margin-top: 12px;
+  padding: 10px 12px;
+}
 @media (max-width: 700px) { .balanceGrid { grid-template-columns: 1fr; } .bookGrid { grid-template-columns: 1fr; } }
 
-/* I20F：待履约成交的操作按钮、二次确认弹窗与无实体物流声明。 */
+/* 待履约成交的操作按钮、二次确认弹窗与无实体物流声明 */
 .tradeActions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
-.tradeDetail { border: 1px solid #eceadf; border-radius: 8px; display: grid; gap: 6px 18px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 10px 0; }
+.tradeDetail {
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 6px 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 10px 0;
+  padding: 10px 12px;
+}
 .tradeDetail div { display: flex; gap: 8px; justify-content: space-between; }
-.tradeDetail dt { color: #596153; font-size: .82rem; font-weight: 700; }
-.tradeDetail dd { margin: 0; text-align: right; }
-.pendingDetail { background: #f3f2e8; border: 1px solid #d8d6c5; border-radius: 8px; margin: 10px 0; padding: 10px 12px; }
+.tradeDetail dt { color: var(--text-secondary); font-size: 0.82rem; font-weight: 700; }
+.tradeDetail dd { color: var(--text-primary); margin: 0; text-align: right; }
+.pendingDetail {
+  background: rgba(18, 21, 26, 0.5);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  margin: 10px 0;
+  padding: 10px 12px;
+}
 .pendingDetail p { margin: 0 0 6px; }
 .pendingDetail ul { margin: 0; padding-left: 20px; }
-.pendingDetail li { margin: 4px 0; }
-.noLogisticsHint { background: #fff; border: 1px dashed #c4c2b3; border-radius: 8px; color: #596153; font-size: .85rem; margin: 10px 0; padding: 8px 12px; }
-.noLogisticsHint strong { color: #254d22; }
+.pendingDetail li { margin: 4px 0; color: var(--text-primary); }
+.noLogisticsHint {
+  background: rgba(236, 228, 208, 0.04);
+  border: 1px dashed var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin: 10px 0;
+  padding: 8px 12px;
+}
+.noLogisticsHint strong { color: #a8cf84; }
 @media (max-width: 700px) { .tradeDetail { grid-template-columns: 1fr; } }
-

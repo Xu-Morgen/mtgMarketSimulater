@@ -1,3 +1,4 @@
+/* 开包：包体卡片 + 概率表 + 揭晓动画（可跳过） */
 .cards {
   display: grid;
   gap: 18px;
@@ -5,150 +6,99 @@
   margin-top: 30px;
 }
 .card {
-  background: #fff;
-  border: 1px solid #d8d6c5;
-  border-radius: 12px;
+  background: linear-gradient(160deg, rgba(201, 162, 75, 0.07) 0%, rgba(201, 162, 75, 0) 40%), var(--bg-panel);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
   display: grid;
   gap: 14px;
   padding: 20px;
+  position: relative;
 }
-.card h2 {
-  margin: 0;
-}
-.card p {
-  line-height: 1.6;
-  margin: 0;
-}
-.metadata {
-  color: #596153;
-  font-size: 0.9rem;
-}
+.card h2 { color: var(--accent-gold-bright); margin: 0; }
+.card p { line-height: 1.6; margin: 0; color: var(--text-primary); }
+.metadata { color: var(--text-secondary); font-size: 0.9rem; }
 .disabled {
-  background: #fff3cd;
-  border: 1px solid #d6b968;
-  border-radius: 8px;
-  color: #5e4809;
+  background: rgba(214, 161, 62, 0.12);
+  border: 1px solid rgba(214, 161, 62, 0.5);
+  border-radius: var(--radius-sm);
+  color: #e6c87c;
   padding: 10px 12px;
 }
 .enabled {
-  background: #e3f0d7;
-  border: 1px solid #8db36f;
-  border-radius: 8px;
-  color: #254d22;
+  background: rgba(127, 166, 90, 0.12);
+  border: 1px solid rgba(127, 166, 90, 0.5);
+  border-radius: var(--radius-sm);
+  color: #a8cf84;
   padding: 10px 12px;
 }
-.detail {
-  max-width: 800px;
-}
-.detailHeader {
-  align-items: start;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  justify-content: space-between;
-}
-.slotList {
-  display: grid;
-  gap: 12px;
-  margin-top: 20px;
-}
+.detail { max-width: 800px; }
+.detailHeader { align-items: start; display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; }
+.slotList { display: grid; gap: 12px; margin-top: 20px; }
 .preview {
-  background: #f3f2e8;
-  border: 1px solid #d8d6c5;
-  border-radius: 8px;
+  background: rgba(236, 228, 208, 0.05);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
   margin-top: 12px;
   padding: 16px;
 }
-.preview p {
-  margin: 8px 0;
-}
+.preview p { margin: 8px 0; color: var(--text-primary); }
 .purchaseError,
+.inlineError { color: #e08678; }
 .inlineError {
-  color: #9b2226;
-}
-.inlineError {
-  background: #fff1f0;
-  border: 1px solid #f3b6b3;
-  border-radius: 8px;
+  background: rgba(192, 57, 43, 0.12);
+  border: 1px solid rgba(192, 57, 43, 0.55);
+  border-radius: var(--radius-sm);
   margin-top: 12px;
   padding: 12px;
 }
 .result,
 .historyCard {
-  background: #fff;
-  border: 1px solid #8db36f;
-  border-radius: 12px;
+  background: linear-gradient(165deg, rgba(201, 162, 75, 0.1) 0%, rgba(201, 162, 75, 0) 45%), var(--bg-panel);
+  border: 1px solid var(--border-gold);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-raise);
   margin-top: 28px;
   padding: 22px;
+  position: relative;
 }
-.result:focus {
-  outline: 3px solid #ba8e38;
-  outline-offset: 3px;
-}
-.revealGrid {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 18px 0;
-}
+.result:focus { outline: 3px solid var(--accent-gold-bright); outline-offset: 3px; }
+.revealGrid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 18px 0; }
 .revealedCard,
 .hiddenCard {
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   display: grid;
   gap: 7px;
   min-height: 104px;
   padding: 14px;
 }
 .revealedCard {
-  background: #e3f0d7;
-  border: 1px solid #8db36f;
+  animation: reveal-in 0.45s ease both;
+  background: rgba(201, 162, 75, 0.1);
+  border: 1px solid var(--border-gold);
+  box-shadow: 0 0 18px rgba(201, 162, 75, 0.16);
 }
-.openingCardContent {
-  display: grid;
-  gap: 7px;
+@keyframes reveal-in {
+  from { opacity: 0; transform: translateY(8px) rotateX(8deg); filter: brightness(0.6); }
+  to { opacity: 1; transform: translateY(0) rotateX(0); filter: brightness(1); }
 }
-.openingCardHeader {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-}
+.openingCardContent { display: grid; gap: 7px; }
+.openingCardHeader { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
+.openingCardHeader strong { color: var(--accent-gold-bright); }
 .hiddenCard {
   align-items: center;
-  background: #e8e7db;
-  border: 1px dashed #9b9a8e;
-  color: #596153;
+  background: repeating-linear-gradient(45deg, rgba(201, 162, 75, 0.07) 0 8px, rgba(201, 162, 75, 0.03) 8px 16px);
+  border: 1px dashed var(--border-gold-dim);
+  color: var(--text-secondary);
 }
-.history {
-  max-width: 800px;
-}
-.historyList {
-  display: grid;
-  gap: 16px;
-  margin-top: 24px;
-}
-.historyCard {
-  border-color: #d8d6c5;
-  margin-top: 0;
-}
-.historyCard h2 {
-  font-size: 1rem;
-}
-.historyCard ul {
-  line-height: 1.7;
-  padding-left: 22px;
-}
-.historyOpeningCard {
-  display: grid;
-  gap: 4px;
-  padding: 6px 0;
-}
+.history { max-width: 800px; }
+.historyList { display: grid; gap: 16px; margin-top: 24px; }
+.historyCard { border-color: var(--border-gold-dim); box-shadow: var(--shadow-panel); margin-top: 0; }
+.historyCard h2 { color: var(--accent-gold-bright); font-size: 1rem; }
+.historyCard ul { line-height: 1.7; padding-left: 22px; }
+.historyOpeningCard { display: grid; gap: 4px; padding: 6px 0; }
 
 @media (max-width: 700px) {
-  .cards {
-    grid-template-columns: 1fr;
-  }
-  .revealGrid {
-    grid-template-columns: 1fr;
-  }
+  .cards { grid-template-columns: 1fr; }
+  .revealGrid { grid-template-columns: 1fr; }
 }

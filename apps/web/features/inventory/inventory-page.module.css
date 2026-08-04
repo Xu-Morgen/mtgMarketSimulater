@@ -1,17 +1,62 @@
-.tableWrap { background: #fff; border: 1px solid #d8d6c5; border-radius: 12px; overflow: hidden; }
+/* 库存：账本表格 + 盈亏金/血红区分 + 锁定状态 */
+.tableWrap {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  overflow-x: auto;
+}
 .pagination { margin-top: 18px; }
-.secondary { color: #596153; font-size: .82rem; }
+.secondary { color: var(--text-secondary); font-size: 0.82rem; }
 .quantityForm { align-items: end; display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
-.quantityForm label { display: grid; font-size: .9rem; font-weight: 700; gap: 5px; }
-.quantityForm input { border: 1px solid #9b9a8e; border-radius: 7px; min-height: 40px; padding: 7px 9px; width: 130px; }
-.tradePreview, .tradeSuccess { background: #f3f2e8; border: 1px solid #d8d6c5; border-radius: 8px; margin-top: 12px; padding: 14px; }
-.tradePreview h3, .tradeSuccess h2 { margin-bottom: 8px; }
-.tradePreview p { margin: 7px 0; }
-.tradeError, .inlineError, .loss { color: #9b2226; }
-.inlineError { background: #fff1f0; border: 1px solid #f3b6b3; border-radius: 8px; margin-top: 12px; padding: 12px; }
-.tradeReady, .profit { color: #254d22; }
-.tradeSuccess { background: #e3f0d7; border-color: #8db36f; color: #254d22; margin-bottom: 20px; }
-.disabledEntry { background: #f4e4e4; border: 1px solid #9b2226; border-radius: 6px; color: #9b2226; cursor: not-allowed; font-weight: 700; padding: 5px 8px; }
+.quantityForm label { display: grid; font-size: 0.9rem; font-weight: 700; gap: 5px; color: var(--text-primary); }
+.quantityForm input {
+  background: rgba(18, 21, 26, 0.7);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  min-height: 40px;
+  padding: 7px 9px;
+  width: 130px;
+}
+.tradePreview,
+.tradeSuccess {
+  background: rgba(236, 228, 208, 0.05);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  margin-top: 12px;
+  padding: 14px;
+}
+.tradePreview h3,
+.tradeSuccess h2 { color: var(--accent-gold-bright); margin-bottom: 8px; }
+.tradePreview p { margin: 7px 0; color: var(--text-primary); }
+.tradeError,
+.inlineError,
+.loss { color: #e08678; }
+.inlineError {
+  background: rgba(192, 57, 43, 0.12);
+  border: 1px solid rgba(192, 57, 43, 0.55);
+  border-radius: var(--radius-sm);
+  margin-top: 12px;
+  padding: 12px;
+}
+.tradeReady,
+.profit { color: #a8cf84; font-weight: 700; }
+.tradeSuccess {
+  background: rgba(127, 166, 90, 0.14);
+  border-color: rgba(127, 166, 90, 0.55);
+  color: #a8cf84;
+  margin-bottom: 20px;
+}
+.disabledEntry {
+  background: rgba(192, 57, 43, 0.14);
+  border: 1px solid rgba(192, 57, 43, 0.6);
+  border-radius: var(--radius-sm);
+  color: #e08678;
+  cursor: not-allowed;
+  font-weight: 700;
+  padding: 5px 8px;
+}
 .actionGroup { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .skuName { align-items: center; display: flex; gap: 6px; }
@@ -19,13 +64,12 @@
   align-items: center;
   background: transparent;
   border: none;
-  border-radius: 6px;
-  color: #596153;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
   cursor: help;
   display: inline-flex;
   line-height: 0;
   padding: 2px;
 }
-.previewTrigger:hover { background: #f3f2e8; color: #254d22; }
-.previewTrigger:focus-visible { outline: 2px solid #8db36f; outline-offset: 1px; }
-
+.previewTrigger:hover { background: rgba(201, 162, 75, 0.12); color: var(--accent-gold-bright); }
+.previewTrigger:focus-visible { outline: 2px solid var(--accent-gold-bright); outline-offset: 1px; }

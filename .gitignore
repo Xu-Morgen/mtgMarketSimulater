@@ -2,6 +2,8 @@ node_modules/
 .next/
 dist/
 coverage/
+# TypeScript 增量构建缓存（生成物，见 AGENTS.md §5）
+*.tsbuildinfo
 .env
 .env.local
 .env.docker

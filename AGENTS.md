@@ -82,6 +82,7 @@
 - 修改核心用户流程：补充或更新 Playwright 主流程测试，覆盖加载、空态、失败和重复点击。
 - 每一迭代完成时，代码、迁移、contracts、测试、错误语义、前端状态和必要日志必须齐备；执行 `pnpm check` 与本期相关测试。
 - 不得通过删除测试、放宽断言、吞掉错误或仅更新 mock 来掩盖失败。若无法验证，须在交接记录中写明原因、风险和后续检查。
+- **E2E 执行策略（2026-08-04，本机 WSL2 资源约束）**：本开发机自动运行 Playwright e2e（`pnpm test:e2e` / `playwright test`）会因超时或内存耗尽导致 WSL 环境崩溃。默认**不自动运行**任何 e2e 用例；代码变更的 e2e 验证由用户手动执行。需要 e2e 时：① 用户手动运行并将结果记录到本文件「手动测试记录」节，或按迭代写入 `apps/web/tests/manual/<迭代ID>.md`；② Agent 不得代跑 e2e；③ 不得为了跳过 e2e 而删除测试、放宽断言或仅更新 mock，无法验证的项在交接记录中写明原因、风险与后续检查。
 
 ## 8. 协作文档与信息幂等
 
@@ -113,3 +114,24 @@ pnpm build
 ```
 
 运行前复制各应用的 `.env.example` 到本地环境文件并填写必要的服务端配置。任何 `OPENAI_API_KEY` 仅允许置于 `apps/ai` 的服务端运行环境。
+
+## 10. 手动测试记录
+
+e2e 验证默认由用户手动执行（见第 7 节 E2E 执行策略）。每次手动测试后在此追加一条记录，保持可追溯：
+
+```markdown
+### <日期>：<变更/迭代标识，例如 I32F 或 FIX-visual-redesign>
+- 运行命令：<例如 pnpm --filter @mtg-market/web test:e2e --grep "packs" ...>
+- 环境：桌面 Chromium / 390px 窄屏 / 其他
+- 结果：<通过 N / 失败 M>，失败用例：<用例名 + 原因>
+- 资源状况：<内存/耗时，是否出现 WSL 卡死>
+- 截图/证据：<路径或留空>
+- 备注：<阻塞点、需要修复的问题>
+```
+
+### 2026-08-04：FIX-visual-redesign（暗色奇幻·卡牌交易所全站视觉重构）
+- 状态：**待用户手动 e2e 复跑**（本机自动运行会因超时/内存耗尽使 WSL 崩溃，已停止后台 sweep）。
+- 已由 Agent 完成并通过的自动化：`pnpm --filter @mtg-market/web check`、`pnpm lint`、web vitest（5 例）、`next build`。
+- 手动抽查结果（端口被开发服务占用时使用隔离端口 + `NEXT_DIST_DIR`）：packs / market / orders 桌面通过；`packs.spec.ts:260` 加载态断言曾因导航 `aria-current` hydration 不一致失败，已修复后单独通过。
+- 需用户验证：auth.spec / admin-catalog-sync.spec 含硬编码 `localhost:3001` 的直连 API 断言，在开发服务占用 3001 时不能在本机干净运行（会污染开发库），请在其后环境空闲时手动复跑；桌面与 390px 窄屏全量主流程抽样见 `docs/visual-redesign-checklist.md`。
+- **事故记录（2026-08-04）**：视觉重构样式文件曾因 `git stash push/pop` 恢复不完整而全部回落到浅色基线（`styles.css`、全部 `*.module.css`、`app-providers.tsx`），已逐文件重新写入恢复，`pnpm check` / `pnpm lint` / web vitest 全部通过。教训：涉及大面积改动时优先使用 `git diff > patch` 保存补丁再操作 stash，恢复后必须 `grep` 校验关键 Token（如 `--bg-page`、`--accent-gold`）确实存在；本机 `grep -l ... | grep -v` 组合在交互 shell 有 matcher 冲突，改用 `git status` 或分步命令核对。

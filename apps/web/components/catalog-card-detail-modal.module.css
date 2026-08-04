@@ -1,4 +1,7 @@
 .image {
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
   display: block;
   margin: 0 auto 16px;
   max-height: 520px;
@@ -6,14 +9,12 @@
 }
 
 .imagePlaceholder {
-  background: #f3f2e8;
-  border: 1px dashed #9b9a8e;
-  border-radius: 8px;
-  color: #596153;
+  background: linear-gradient(180deg, rgba(39, 46, 56, 0.6), rgba(18, 21, 26, 0.9));
+  border: 1px dashed var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
   margin-bottom: 16px;
   padding: 16px;
 }
 
-.details {
-  margin-top: 16px;
-}
+.details { margin-top: 16px; }

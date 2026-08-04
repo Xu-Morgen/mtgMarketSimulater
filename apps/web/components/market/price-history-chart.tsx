@@ -54,8 +54,8 @@ export function DualLineChart({ dates, series, ariaLabel, fallback }: {
     grid: { left: 56, right: 24, top: 16, bottom: 48, containLabel: true },
     tooltip: { trigger: "axis", formatter: (params) => tooltipFormatter(series, params as TooltipPoint | TooltipPoint[]) },
     legend: { show: false },
-    xAxis: { type: "category", data: dates, boundaryGap: false, axisLabel: { color: "#596153" } },
-    yAxis: { type: "value", axisLabel: { color: "#596153" }, splitLine: { lineStyle: { color: "#e8e7db" } } },
+    xAxis: { type: "category", data: dates, boundaryGap: false, axisLabel: { color: "#a9a08a" } },
+    yAxis: { type: "value", axisLabel: { color: "#a9a08a" }, splitLine: { lineStyle: { color: "rgba(236, 228, 208, 0.1)" } } },
     series: series.map((item) => ({
       name: item.name, type: "line", data: item.values, connectNulls: false,
       smooth: false, symbol: "circle", symbolSize: 6,
@@ -83,7 +83,7 @@ export function DualLineChart({ dates, series, ariaLabel, fallback }: {
     <div ref={containerRef} className={styles.chart} aria-hidden="true" />
     <div className={styles.legend} aria-hidden="true">
       <ul>
-        {series.map((item) => <li key={item.name}><span className={`${styles.swatch} ${item.color === "#ba8e38" ? styles.swatchReference : styles.swatchGame}`} /><span>{item.name}（{item.unitLabel}）</span></li>)}
+        {series.map((item) => <li key={item.name}><span className={`${styles.swatch} ${item.color === "#c9a24b" ? styles.swatchReference : styles.swatchGame}`} /><span>{item.name}（{item.unitLabel}）</span></li>)}
       </ul>
     </div>
   </div>;

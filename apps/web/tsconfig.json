@@ -1,7 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["dom", "dom.iterable", "es2022"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "es2022"
+    ],
     "allowJs": false,
     "noEmit": true,
     "jsx": "preserve",
@@ -16,6 +20,27 @@
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".next-build-check/types/**/*.ts",
+    ".next/types/**/*.ts",
+    "/tmp/pw-next-dist-baseline/types/**/*.ts",
+    "/tmp/pw-next-dist/types/**/*.ts",
+    "/tmp/pw-next-dist10/types/**/*.ts",
+    "/tmp/pw-next-dist11/types/**/*.ts",
+    "/tmp/pw-next-dist2/types/**/*.ts",
+    "/tmp/pw-next-dist3/types/**/*.ts",
+    "/tmp/pw-next-dist4/types/**/*.ts",
+    "/tmp/pw-next-dist5/types/**/*.ts",
+    "/tmp/pw-next-dist6/types/**/*.ts",
+    "/tmp/pw-next-dist7/types/**/*.ts",
+    "/tmp/pw-next-dist8/types/**/*.ts",
+    "/tmp/pw-next-dist9/types/**/*.ts",
+    "next-env.d.ts",
+    "/tmp/pw-next-dist12/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

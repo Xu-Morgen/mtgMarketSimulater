@@ -1,20 +1,20 @@
-.popoverContent {
-  padding: 4px;
-}
+.popoverContent { padding: 4px; }
 
 .image {
   display: block;
+  border: 1px solid var(--border-gold-dim);
   border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
   max-height: 360px;
   max-width: 240px;
 }
 
 .placeholder {
-  background: #f3f2e8;
-  border: 1px dashed #9b9a8e;
+  background: linear-gradient(180deg, rgba(39, 46, 56, 0.6), rgba(18, 21, 26, 0.9));
+  border: 1px dashed var(--border-gold-dim);
   border-radius: 8px;
-  color: #596153;
-  font-size: .82rem;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
   max-width: 220px;
   padding: 12px;
 }
