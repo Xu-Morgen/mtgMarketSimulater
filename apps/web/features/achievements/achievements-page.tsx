@@ -68,6 +68,14 @@ function state(
   };
 }
 
+/** 奖杯图标：原创 stroke 内联 SVG（aria-hidden 装饰，不影响语义）。 */
+function TrophyIcon({ className }: { className?: string }) {
+  return <svg className={className} width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M8 4h8v6a4 4 0 0 1-8 0V4Z" />
+    <path d="M8 5H4v1a4 4 0 0 0 4 4M16 5h4v1a4 4 0 0 1-4 4M12 14v4M9 21h6M10 18h4" />
+  </svg>;
+}
+
 function AchievementCard({ item }: { item: AchievementOverviewItem }) {
   const unlocked = item.progress?.status === "unlocked";
   return (
@@ -81,6 +89,7 @@ function AchievementCard({ item }: { item: AchievementOverviewItem }) {
           {unlocked ? "已解锁" : "未解锁"}
         </span>
       </div>
+      <span className={`${styles.trophy} ${unlocked ? styles.trophyUnlocked : styles.trophyPending}`} aria-hidden="true"><TrophyIcon /></span>
       <p>{item.definition.display.description}</p>
       <p className={styles.progress}>进度：{progressText(item.definition, item.progress)}</p>
       <p className={styles.meta}>奖励：{rewardText(item.definition.reward)}</p>

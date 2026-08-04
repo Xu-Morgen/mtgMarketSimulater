@@ -223,19 +223,26 @@ function OpeningResult({
 function PackCard({ pack, onPurchase }: { pack: PackDto; onPurchase: (pack: PackDto) => void }) {
   return (
     <article className={styles.card}>
-      <div>
-        <h2>{pack.name}</h2>
-        {pack.description ? (
-          <p>{pack.description}</p>
-        ) : (
-          <p className={styles.metadata}>未提供补充包说明。</p>
-        )}
+      <div className={styles.cardTop}>
+        <div className={`${styles.packGraphic} ${pack.enabled ? "" : styles.packGraphicDisabled}`} aria-hidden="true">
+          <span className={styles.packBanding} />
+          <span className={styles.packGem} />
+          <span className={styles.packName}>PACK</span>
+          <span className={styles.packBanding} />
+        </div>
+        <div className={styles.cardBody}>
+          <div className={styles.cardTitleRow}>
+            <h2>{pack.name}</h2>
+            <span className="seal">{formatMoney(pack.price)}</span>
+          </div>
+          {pack.description ? (
+            <p>{pack.description}</p>
+          ) : (
+            <p className={styles.metadata}>未提供补充包说明。</p>
+          )}
+          <p className={styles.metadata}>规则版本：{pack.ruleVersion}</p>
+        </div>
       </div>
-      <p>
-        <strong>价格：</strong>
-        {formatMoney(pack.price)}
-      </p>
-      <p className={styles.metadata}>规则版本：{pack.ruleVersion}</p>
       <PackStatus pack={pack} />
       <div className="actions">
         <Link className="button secondary" href={`/packs/${pack.id}`}>

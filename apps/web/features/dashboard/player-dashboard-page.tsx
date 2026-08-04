@@ -28,12 +28,12 @@ function DailyWorkFundingCard({ status }: { status: DailyWorkFundingStatusDto })
   const claim = useClaimDailyWorkFundingMutation();
   const canClaim = status.status === "available" && status.amount !== null;
   const statusLabel = status.status === "available" ? "今日可领取" : status.status === "claimed" ? "今日已领取" : status.status === "not_open" ? "等待服务器开放" : "需要先创建存档";
-  return <section className="dashboard-section daily-work-funding" aria-labelledby="daily-work-funding-title">
-    <h2 id="daily-work-funding-title">每日工作资金</h2>
+  return <section className="dashboard-section daily-work-funding panel" aria-labelledby="daily-work-funding-title">
+    <h2 className="panel-title" id="daily-work-funding-title">每日工作资金</h2>
     <article className="daily-work-funding-card">
       <p className="daily-work-funding-status" role="status">{statusLabel}</p>
       <p>服务端日期：<strong>{status.naturalDate}</strong>（{status.timezone}）</p>
-      {status.amount ? <p>本日金额：<strong>{formatMoney(status.amount)}</strong></p> : <p>本日金额将在服务器开放资格后显示。</p>}
+      {status.amount ? <p>本日金额：<strong className="num">{formatMoney(status.amount)}</strong></p> : <p>本日金额将在服务器开放资格后显示。</p>}
       {status.ruleVersion ? <p className="daily-work-funding-meta">规则版本：{status.ruleVersion}</p> : null}
       {status.openedAt ? <p className="daily-work-funding-meta">服务器开放时间：{serverTime(status.openedAt, status.timezone)}</p> : null}
       {status.claim ? <p>领取记录：{formatMoney(status.claim.amount)}，{serverTime(status.claim.claimedAt, status.timezone)} 已由服务器记入账本。</p> : null}
@@ -48,18 +48,18 @@ function DailyWorkFundingCard({ status }: { status: DailyWorkFundingStatusDto })
 function OverviewCards({ overview }: { overview: PlayerDashboardDto }) {
   const index = overview.marketIndex;
   return <>
-    <section className="balance-grid" aria-label="账户余额与服务端净资产">
-      <article><span>总额</span><strong>{formatMoney(overview.balance.total)}</strong></article>
-      <article><span>可用额</span><strong>{formatMoney(overview.balance.available)}</strong></article>
-      <article><span>冻结额</span><strong>{formatMoney(overview.balance.frozen)}</strong></article>
-      <article><span>净资产</span><strong>{overview.netWorth ? formatMoney(overview.netWorth) : "存在未报价持仓，暂不可用"}</strong><small>服务端仅在全部持仓有有效报价时返回</small></article>
+    <section className="balance-grid notice-board" aria-label="账户余额与服务端净资产">
+      <article><span>总额</span><strong className="num">{formatMoney(overview.balance.total)}</strong></article>
+      <article><span>可用额</span><strong className="num">{formatMoney(overview.balance.available)}</strong></article>
+      <article><span>冻结额</span><strong className="num">{formatMoney(overview.balance.frozen)}</strong></article>
+      <article><span>净资产</span><strong className="num">{overview.netWorth ? formatMoney(overview.netWorth) : "存在未报价持仓，暂不可用"}</strong><small>服务端仅在全部持仓有有效报价时返回</small></article>
     </section>
     <section className="dashboard-section" aria-labelledby="dashboard-today-title">
       <h2 id="dashboard-today-title">今日循环</h2>
-      <div className="balance-grid" aria-label="今日比赛、收藏与市场指数">
-        <article><span>今日比赛</span><strong>{overview.todayTournaments.registeredCount} 场已报名</strong><small>可报名 {overview.todayTournaments.availableCount} · 结算中 {overview.todayTournaments.settlingCount} · 已结算 {overview.todayTournaments.settledCount}</small></article>
-        <article><span>收藏册基础进度</span><strong>{overview.collection.distinctSkuCount} 种 / {overview.collection.totalCardCount} 张</strong><small>{overview.collection.unpricedSkuCount > 0 ? `${overview.collection.unpricedSkuCount} 种持仓暂无有效报价` : `服务端市值 ${formatMoney(overview.collection.marketValue!)}`}</small></article>
-        <article><span>市场指数</span><strong>{index.gameIndex === null ? "暂无游戏内指数" : index.gameIndex.toLocaleString("zh-CN")}</strong><small>{index.referenceIndex === null ? "暂无外部参考指数" : `外部参考 ${index.referenceIndex.toLocaleString("zh-CN")} EUR 分`} · 已报价 {index.quotedSkus} 个 SKU</small></article>
+      <div className="balance-grid notice-board" aria-label="今日比赛、收藏与市场指数">
+        <article><span>今日比赛</span><strong className="num">{overview.todayTournaments.registeredCount} 场已报名</strong><small>可报名 {overview.todayTournaments.availableCount} · 结算中 {overview.todayTournaments.settlingCount} · 已结算 {overview.todayTournaments.settledCount}</small></article>
+        <article><span>收藏册基础进度</span><strong className="num">{overview.collection.distinctSkuCount} 种 / {overview.collection.totalCardCount} 张</strong><small>{overview.collection.unpricedSkuCount > 0 ? `${overview.collection.unpricedSkuCount} 种持仓暂无有效报价` : `服务端市值 ${formatMoney(overview.collection.marketValue!)}`}</small></article>
+        <article><span>市场指数</span><strong className="num">{index.gameIndex === null ? "暂无游戏内指数" : index.gameIndex.toLocaleString("zh-CN")}</strong><small>{index.referenceIndex === null ? "暂无外部参考指数" : `外部参考 ${index.referenceIndex.toLocaleString("zh-CN")} EUR 分`} · 已报价 {index.quotedSkus} 个 SKU</small></article>
       </div>
       <div className="actions"><Link className="button secondary" href="/collection">查看收藏册</Link><Link className="button secondary" href="/tournaments">查看今日比赛</Link><Link className="button secondary" href="/market">查看市场</Link></div>
     </section>

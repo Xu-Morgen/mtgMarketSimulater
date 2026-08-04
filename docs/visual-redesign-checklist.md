@@ -1,8 +1,10 @@
 # 暗色奇幻·卡牌交易所 视觉重构 —— 页面/组件 × 改造点清单
 
-日期：2026-08-04
+日期：2026-08-04（v1 换肤）；2026-08-04（v2 布局大改）
 范围：`apps/web` 全站视觉，从「米白底 + 橄榄绿按钮」管理后台风格升级为「暗色奇幻·卡牌交易所」。
 约束：只换皮肤，不删逻辑、不吞错误、不改路由/导出名/React 数据流/contracts/DOM 语义；Playwright 断言不受影响（全部 E2E 均不依赖 CSS 类或颜色）。
+
+> v2（同日）：在 v1 换肤基础上做**布局结构**深化（沉浸式奇幻交易所方向），新增装饰原语与页面级结构重构，详见文末「v2 布局大改」小节。
 
 ## 全局基础（styles.css + ConfigProvider）
 
@@ -113,3 +115,66 @@
 - 本改动为纯前端皮肤层，未触碰 contracts/API/规则/迁移；未改任何 Playwright 断言（无 CSS/颜色断言）。
 - 全量 Playwright 复跑与本机桌面/390px 窄屏人工验收属 I32F 范围；本次已抽样验证 auth/player-loop/packs/inventory/market/orders。
 - `prefers-reduced-motion` 已全局收敛动画，但 Next.js dev 下 antd Popover/Modal 过渡由 antd 控制，未额外关闭（非数据动画，不影响语义）。
+
+---
+
+## v2 布局大改（2026-08-04，沉浸式奇幻交易所）
+
+### 设计系统（`apps/web/app/styles.css`）
+
+| 改造点 | 处理方式 |
+| --- | --- |
+| 装饰原语 | 新增 `.panel`（双线框 + 左上角饰）、`.panel-title`（◆ 菱形 + 两侧金线）、`.notice-board`（告示板：斜纹 + 金钉角）、`.stat-chip`、`.seal`（价格图章）、`.card-frame[data-rarity]`（稀有度色卡框 + 微发光）、`.foil`（包体闪箔）、`.rarity-dot`（行内稀有度色点）——全部原创 CSS，无素材 |
+| 面板统一 | `:root` 新增 `--panel-bg`/`--panel-bg-strong`/`--panel-inset-line`/`--seal-shadow`/稀有度描边变量，收敛各 module 重复的面板配方 |
+| 顶栏 | 「鎏金 HUD 条」：底部双线金边（`topbar::after`）、品牌徽记框、HUD 项间竖分隔线、服务端日期做成「日期章」 |
+| 侧栏 | 分组标题 ◆ + 金线；链接 hover 金色滑条；选中态金色渐变 + 宝石发光；右侧双线金边；窄屏横向滚动保留（分组标题隐藏） |
+| 内容区 | 柔和暗角 + 极淡斜纹；`.content` 宽度 1100px → 1280px；`.page` 顶部鎏金细线 |
+| 按钮 | hover 金色扫光微动效（`:disabled` 关闭）；disabled 褪色 + wait 保留 |
+| 弹窗/状态卡 | `.dialog` 加四角宝石 + 左上高光；`.status-card` 左侧鎏金边条 + h2 菱形 |
+| 表格 | antd 表头圆角、末行去底边；分页 hover 金色；滚动条暗金 |
+| 筛选区 | `.catalog-filters` 包进鎏金面板 + 顶部细线（全站筛选条统一升级） |
+
+### 共享组件
+
+| 组件 | 改造点 |
+| --- | --- |
+| `navigation-shell.tsx` | 侧栏每个链接加一枚原创 stroke 内联 SVG 图标（宝石/书册/天平/剑盾/奖杯/权杖等，全部 `aria-hidden`）；链接**文案/href/aria-label 未动** |
+| `providers/toast-provider.tsx` | Toast 加原创图标 + 金色左条（role/时长逻辑不动） |
+| `providers/app-providers.tsx` | antd token 补充 `colorLink`/`controlOutline`/Button/Tag/Select 组件覆盖，与 CSS Token 同源 |
+| `catalog-card-detail-modal.tsx` | 卡图包进稀有度卡框（`data-rarity` 驱动描边与发光） |
+| `ui.tsx` | 无 TSX 改动；ErrorState/EmptyState/ConfirmDialog 由全局 `.status-card`/`.dialog` 装饰换肤 |
+
+### 页面
+
+| 页面 | 改造点 |
+| --- | --- |
+| landing | 英雄区：品牌纹章（原创盾+宝石 SVG）+ 五枚稀有度陈列卡位（纯 CSS 卡框按稀有度发光，`aria-hidden`）+ 特性卡图标；文案/按钮原样 |
+| auth | 左右门扉装饰（`auth-door-left/right`，宽屏显示窄屏隐藏）+ 烛光暖晕背景；表单/按钮原样 |
+| 仪表盘 | 资产区改「大厅告示板」：净资产横跨整行放大金字（`:first-child`，语义/role 未动）+ 金晕；每日工作资金改 `panel` 双线框；账本册顶部金线 |
+| 收藏册 | 进度区告示板化；陈列条目加左侧金条 + hover 上浮 + 宝石角饰 |
+| 目录 | 行内名称前加稀有度色点；详情弹窗卡图稀有度卡框 |
+| 市场 | 指数区告示板化；报价原因展开区改 `panel` 双线框；表格原样（e2e 依赖 table 与按钮文案） |
+| 订单 | 订单簿买卖方双色布告栏（买绿金/卖血红，`table` 语义保留）；「双边订单簿」「我的成交与待履约资产」区块改 `panel` + `panel-title` |
+| 补充包 | `PackCard` 改「包体卡」：竖式包体图形（原创斜纹/闪箔/金印/宝石）+ 价格图章；`购买并开包`/`查看概率详情` 按钮文案与列表顺序不变；包体图形内文字为固定装饰 `PACK`（避免 strict-mode 文本断言重复命中） |
+| 库存 | 盈亏改金/血红圆形徽章 |
+| 卡组 | 编辑器面板标题统一 `panel-title` 装饰 |
+| 比赛 | 竞技场布告板：卡片/区块顶部金线 + 状态章内发光 |
+| 成就 | 奖杯陈列柜：解锁金色发光 / 未解锁灰暗奖杯图标（`aria-hidden`） |
+| 导出 | 任务卡片顶部金线 + 标题菱形；状态徽章换装（生成中金/可下载绿/失败血红/过期灰） |
+| 价格历史 | chartCard 顶部金线 + 标题菱形 |
+| 管理后台 | 克制化：`admin-shared.module.css` 的 `.card` 顶部金线 + 标题菱形；独立 module（catalog-sync/price-sync/order-risk）同步加顶线；stat 卡内高光 |
+
+### v2 未改动（约束确认）
+
+- 路由、页面/组件导出名、React 数据流、contracts、DOM 语义角色与 aria 结构：全部未动。
+- 全部新增装饰（图标、陈列卡位、门扉、伪元素金线/菱形/角饰）一律 `aria-hidden` 或 `pointer-events: none`，不贡献可访问名、不拦截点击。
+- 侧栏导航链接文案（`补充包商店`/`市场`/`我的委托`/`我的卡组`/`比赛`/`成就` 等）与 `aria-label`（`管理导航`/`备份摘要`/`价格历史时间范围` 等）原样保留。
+- 幂等键提交、二次确认流程、同步双击锁、提交中按钮禁用：原样保留。
+- 加载/空/错误/重试/禁用/过期提示：全部保留，仅换皮肤。
+- 面向用户中文文案与产品术语：未改。
+
+### v2 验证
+
+- `pnpm check`（全仓 lint + 各包 tsc）通过；`pnpm lint` 通过；web vitest 5 例通过；`next build` 通过。
+- Playwright 全量复跑待用户手动执行（AGENTS.md 第 7 节 E2E 执行策略：本机自动运行会致 WSL 崩溃）。
+- e2e 安全核对：packs.spec 断言 `getByText("测试补充包")` 为 strict-mode 单实例，包体图形内使用固定装饰文字 `PACK` 避免重复命中；`balance-grid` 首卡放大由 `:first-child` 实现，语义未动。

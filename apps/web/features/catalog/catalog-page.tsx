@@ -32,7 +32,7 @@ export function CatalogPage() {
   const pageSize = filters.limit ?? defaultPageSize;
   const currentPage = Math.floor(Number.parseInt(filters.cursor ?? "0", 10) / pageSize) + 1;
   const columns = useMemo<ColumnsType<CatalogSkuDto>>(() => [
-    { title: "名称", dataIndex: "name", key: "name", render: (name: string) => <strong>{name}</strong> },
+    { title: "名称", dataIndex: "name", key: "name", render: (name: string, sku) => <strong><span className="rarity-dot" data-rarity={sku.rarity?.toLowerCase()} aria-hidden="true" />{name}</strong> },
     { title: "系列 / 编号", key: "printing", render: (_, sku) => `${sku.setCode} · #${sku.collectorNumber}` },
     { title: "工艺", dataIndex: "finish", key: "finish", render: (finish: CardFinish) => finishLabel(finish) },
     { title: "稀有度", dataIndex: "rarity", key: "rarity" },

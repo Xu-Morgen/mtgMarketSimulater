@@ -9,9 +9,35 @@
   box-shadow: var(--shadow-panel);
   margin: 18px 0;
   padding: 18px;
+  position: relative;
+}
+/* 顶部鎏金细线 */
+.chartCard::before {
+  background: linear-gradient(90deg, transparent, var(--border-gold) 18%, var(--border-gold) 82%, transparent);
+  content: "";
+  height: 1px;
+  left: 16px;
+  position: absolute;
+  right: 16px;
+  top: 0;
 }
 .chartCard h2,
-.chartCard h3 { color: var(--accent-gold-bright); margin-bottom: 5px; }
+.chartCard h3 {
+  align-items: center;
+  color: var(--accent-gold-bright);
+  display: flex;
+  gap: 9px;
+  margin-bottom: 5px;
+}
+.chartCard h2::before,
+.chartCard h3::before {
+  background: var(--accent-gold-bright);
+  box-shadow: 0 0 5px rgba(201, 162, 75, 0.6);
+  content: "";
+  height: 8px;
+  transform: rotate(45deg);
+  width: 8px;
+}
 .chartHint { color: var(--text-secondary); font-size: 0.85rem; margin: 6px 0 10px; }
 .stale {
   background: rgba(214, 161, 62, 0.14);

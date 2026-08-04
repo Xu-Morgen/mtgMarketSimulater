@@ -25,6 +25,8 @@ const antdTheme = {
     colorSuccess: "#7FA65A",
     colorError: "#C0392B",
     colorWarning: "#D6A13E",
+    colorLink: "#E6C87C",
+    controlOutline: "rgba(201, 162, 75, 0.28)",
     borderRadius: 6,
     fontSize: 14,
     fontFamily: "\"Noto Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", system-ui, -apple-system, sans-serif"
@@ -57,6 +59,22 @@ const antdTheme = {
     },
     Spin: {
       colorPrimary: "#C9A24B"
+    },
+    Button: {
+      colorPrimary: "#C9A24B",
+      colorPrimaryHover: "#E6C87C",
+      colorPrimaryActive: "#B98F3F",
+      colorLink: "#E6C87C",
+      colorLinkHover: "#C9A24B",
+      borderColorDisabled: "rgba(201, 162, 75, 0.18)"
+    },
+    Tag: {
+      defaultBg: "rgba(236, 228, 208, 0.08)",
+      defaultColor: "#A9A08A"
+    },
+    Select: {
+      optionSelectedBg: "rgba(201, 162, 75, 0.2)",
+      optionActiveBg: "rgba(201, 162, 75, 0.12)"
     }
   }
 } satisfies Parameters<typeof ConfigProvider>[0]["theme"];

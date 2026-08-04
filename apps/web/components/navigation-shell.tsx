@@ -25,30 +25,81 @@ function CoinIcon({ size = 16 }: { size?: number }) {
   </svg>;
 }
 
+/** 侧栏导航图标：原创 stroke 风格内联 SVG（aria-hidden，不贡献可访问名）。 */
+function NavIcon({ kind, size = 15 }: { kind: string; size?: number }) {
+  const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
+  switch (kind) {
+    case "dashboard": // 菱形徽记（大厅）
+      return <svg {...common}><path d="M6 3h12l4 6-10 12L2 9l4-6Z" /><path d="M2 9h20M8.5 3 6 9l6 12M15.5 3 18 9l-6 12" /></svg>;
+    case "collection": // 书册（收藏册）
+      return <svg {...common}><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5Z" /><path d="M4 9h16M8 5v14" /></svg>;
+    case "catalog": // 展开的卡册（目录）
+      return <svg {...common}><rect x="4" y="3" width="6" height="9" rx="1" /><rect x="14" y="3" width="6" height="9" rx="1" /><rect x="6" y="16" width="6" height="5" rx="1" /><rect x="16" y="14" width="4" height="4" rx="1" /><path d="M4 15h6" /></svg>;
+    case "market": // 天平（市场）
+      return <svg {...common}><path d="M12 3v18M7 21h10M12 6l-5 7M12 6l5 7" /><path d="M7 13h10" /></svg>;
+    case "history": // 曲线（价格历史）
+      return <svg {...common}><path d="M3 17l6-6 4 4 8-9" /><path d="M17 6h4v4" /></svg>;
+    case "orders": // 羊皮卷（委托）
+      return <svg {...common}><path d="M5 3h14v18H5z" /><path d="M9 8h6M9 12h6M9 16h4" /></svg>;
+    case "packs": // 包体（补充包）
+      return <svg {...common}><rect x="4" y="6" width="16" height="12" rx="2" /><path d="M4 10h16M12 6v12" /><circle cx="12" cy="13" r="1.6" /></svg>;
+    case "inventory": // 货箱（库存）
+      return <svg {...common}><path d="M3 8l9-5 9 5v8l-9 5-9-5V8Z" /><path d="M3 8l9 5 9-5M12 13v8" /></svg>;
+    case "decks": // 剑盾（卡组）
+      return <svg {...common}><path d="M12 3c4 2 6 6 6 10H6c0-4 2-8 6-10Z" /><path d="M12 13v8M7 17h10" /></svg>;
+    case "tournaments": // 奖杯（比赛）
+      return <svg {...common}><path d="M8 4h8v6a4 4 0 0 1-8 0V4Z" /><path d="M8 5H4a0 0 0 0 0 0v1a4 4 0 0 0 4 4M16 5h4a0 0 0 0 1 0 0v1a4 4 0 0 1-4 4M12 14v4M9 21h6M10 18h4" /></svg>;
+    case "achievements": // 星辰（成就）
+      return <svg {...common}><path d="M12 3l2.2 5.6L20 9l-4.4 3.8L17 19l-5-3.2L7 19l1.4-6.2L4 9l5.8-.4L12 3Z" /></svg>;
+    case "exports": // 下载（导出）
+      return <svg {...common}><path d="M12 3v11M8 10l4 4 4-4M4 17v3h16v-3" /></svg>;
+    case "admin": // 权杖（后台）
+      return <svg {...common}><path d="M12 3l2 4 4 2-4 2-2 4-2-4-4-2 4-2 2-4Z" /><path d="M6 19h12" /></svg>;
+    case "sync": // 循环（同步）
+      return <svg {...common}><path d="M20 12a8 8 0 1 1-2.3-5.6" /><path d="M20 4v4h-4" /></svg>;
+    case "risk": // 警戒盾（异常订单）
+      return <svg {...common}><path d="M12 3l8 3v5c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6l8-3Z" /><path d="M12 9v4M12 16.5v.5" /></svg>;
+    case "content": // 齿轮（内容）
+      return <svg {...common}><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" /></svg>;
+    case "events": // 旗帜（活动）
+      return <svg {...common}><path d="M4 21V4M4 6h14l-3 4 3 4H4" /></svg>;
+    case "users": // 人像（玩家）
+      return <svg {...common}><circle cx="9" cy="8" r="3.5" /><path d="M3 20a6 6 0 0 1 12 0M16 4.5a3.5 3.5 0 0 1 0 7M15.5 15a6 6 0 0 1 5 5" /></svg>;
+    case "jobs": // 时钟（任务）
+      return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3.5 2" /></svg>;
+    case "backups": // 档案盒（备份）
+      return <svg {...common}><rect x="3" y="4" width="18" height="6" rx="1" /><path d="M5 10v10h14V10M8 14h8" /></svg>;
+    case "logs": // 日志页
+      return <svg {...common}><path d="M4 4h16v16H4z" /><path d="M4 9h16M8 13h8M8 16h5" /></svg>;
+    default: // 宝石兜底
+      return <svg {...common}><path d="M6 3h12l4 6-10 12L2 9l4-6Z" /><path d="M2 9h20M8.5 3 6 9l6 12M15.5 3 18 9l-6 12" /></svg>;
+  }
+}
+
 function SignOutButton() {
   const router = useRouter();
   const logout = useLogoutMutation();
   return <button className="text-button" disabled={logout.isPending} onClick={() => logout.mutate(undefined, { onSuccess: () => router.replace("/login") })}>{logout.isPending ? "正在退出…" : "退出登录"}</button>;
 }
 
-type NavLink = { href: string; label: string };
+type NavLink = { href: string; label: string; icon?: string };
 type NavGroup = { title: string; links: NavLink[] };
 
 const playerGroups: NavGroup[] = [
-  { title: "大厅", links: [{ href: "/dashboard", label: "玩家首页" }, { href: "/collection", label: "收藏册" }] },
-  { title: "市场", links: [{ href: "/catalog", label: "卡牌目录" }, { href: "/market", label: "市场" }, { href: "/market/history", label: "价格历史" }, { href: "/orders", label: "我的委托" }] },
-  { title: "卡牌经营", links: [{ href: "/packs", label: "补充包商店" }, { href: "/inventory", label: "我的库存" }, { href: "/decks", label: "我的卡组" }] },
-  { title: "赛事与成长", links: [{ href: "/tournaments", label: "比赛" }, { href: "/achievements", label: "成就" }] },
-  { title: "数据", links: [{ href: "/exports", label: "我的数据导出" }] }
+  { title: "大厅", links: [{ href: "/dashboard", label: "玩家首页", icon: "dashboard" }, { href: "/collection", label: "收藏册", icon: "collection" }] },
+  { title: "市场", links: [{ href: "/catalog", label: "卡牌目录", icon: "catalog" }, { href: "/market", label: "市场", icon: "market" }, { href: "/market/history", label: "价格历史", icon: "history" }, { href: "/orders", label: "我的委托", icon: "orders" }] },
+  { title: "卡牌经营", links: [{ href: "/packs", label: "补充包商店", icon: "packs" }, { href: "/inventory", label: "我的库存", icon: "inventory" }, { href: "/decks", label: "我的卡组", icon: "decks" }] },
+  { title: "赛事与成长", links: [{ href: "/tournaments", label: "比赛", icon: "tournaments" }, { href: "/achievements", label: "成就", icon: "achievements" }] },
+  { title: "数据", links: [{ href: "/exports", label: "我的数据导出", icon: "exports" }] }
 ];
 
 const adminGroups: NavGroup[] = [
-  { title: "总览", links: [{ href: "/admin", label: "后台首页" }] },
-  { title: "同步", links: [{ href: "/admin/catalog-sync", label: "目录同步" }, { href: "/admin/price-sync", label: "价格同步" }] },
-  { title: "交易", links: [{ href: "/admin/orders/risk", label: "异常订单" }] },
-  { title: "运营", links: [{ href: "/admin/content", label: "内容" }, { href: "/admin/events", label: "活动" }] },
-  { title: "账户", links: [{ href: "/admin/users", label: "玩家" }] },
-  { title: "系统", links: [{ href: "/admin/jobs", label: "任务" }, { href: "/admin/backups", label: "备份" }, { href: "/admin/logs", label: "日志" }] }
+  { title: "总览", links: [{ href: "/admin", label: "后台首页", icon: "admin" }] },
+  { title: "同步", links: [{ href: "/admin/catalog-sync", label: "目录同步", icon: "sync" }, { href: "/admin/price-sync", label: "价格同步", icon: "sync" }] },
+  { title: "交易", links: [{ href: "/admin/orders/risk", label: "异常订单", icon: "risk" }] },
+  { title: "运营", links: [{ href: "/admin/content", label: "内容", icon: "content" }, { href: "/admin/events", label: "活动", icon: "events" }] },
+  { title: "账户", links: [{ href: "/admin/users", label: "玩家", icon: "users" }] },
+  { title: "系统", links: [{ href: "/admin/jobs", label: "任务", icon: "jobs" }, { href: "/admin/backups", label: "备份", icon: "backups" }, { href: "/admin/logs", label: "日志", icon: "logs" }] }
 ];
 
 /** 玩家 HUD：只展示服务端返回的余额、工作资金与自然日，不结算任何经济数据。 */
@@ -106,7 +157,7 @@ function Shell({ children, admin }: Readonly<{ children: React.ReactNode; admin:
         {groups.map((group) => (
           <div className="side-nav-group" key={group.title}>
             <span className="side-nav-title" aria-hidden="true">{group.title}</span>
-            {group.links.map(({ href, label }) => <Link href={href} key={href} aria-current={active(href) ? "page" : undefined}>{label}</Link>)}
+            {group.links.map(({ href, label, icon }) => <Link href={href} key={href} aria-current={active(href) ? "page" : undefined}><NavIcon kind={icon ?? "dashboard"} />{label}</Link>)}
           </div>
         ))}
       </nav>

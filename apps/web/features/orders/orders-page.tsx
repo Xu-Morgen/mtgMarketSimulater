@@ -203,15 +203,15 @@ export function OrdersPage() {
     {balance ? <section className={styles.sectionCard} aria-label="账户余额状态">
       <h2>余额状态</h2>
       <div className={styles.balanceGrid}>
-        <article><span>总额</span><strong>{formatMoney(balance.total)}</strong></article>
-        <article><span>可用额</span><strong>{formatMoney(balance.available)}</strong></article>
-        <article><span>冻结额</span><strong>{formatMoney(balance.frozen)}</strong></article>
+        <article><span>总额</span><strong className="num">{formatMoney(balance.total)}</strong></article>
+        <article><span>可用额</span><strong className="num">{formatMoney(balance.available)}</strong></article>
+        <article><span>冻结额</span><strong className="num">{formatMoney(balance.frozen)}</strong></article>
       </div>
       <p className={styles.secondary}>撮合会把已成交部分的资金/保证金从「预占」转为「待履约持有」，冻结额随之变化；最终所有权转移在 I20B 履约时发生。</p>
     </section> : null}
 
-    <section className={styles.sectionCard} aria-label="双边订单簿">
-      <h2>双边订单簿</h2>
+    <section className={`${styles.sectionCard} panel`} aria-label="双边订单簿">
+      <h2 className="panel-title">双边订单簿</h2>
       <div className={styles.bookSelector}>
         <label>选择 SKU
           <select aria-label="订单簿 SKU" value={selectedBookSkuId ?? ""} onChange={(event) => selectBookSku(event.target.value)}>
@@ -224,14 +224,14 @@ export function OrdersPage() {
         : book.isPending ? <p aria-busy="true">正在加载订单簿…</p>
         : book.isError ? <section className={styles.staleHint} role="status"><p>订单簿数据可能过期，连接失败，正在重试。</p><button className="button secondary" type="button" onClick={() => void book.refetch()}>立即刷新</button></section>
         : <><div className={styles.bookGrid}>
-          <div className={styles.bookSide}><h3>买单（价格降序）</h3><BookLevels rows={bookData?.bids ?? []} emptyHint="无买单" /></div>
-          <div className={styles.bookSide}><h3>卖单（价格升序）</h3><BookLevels rows={bookData?.asks ?? []} emptyHint="无卖单" /></div>
+          <div className={`${styles.bookSide} ${styles.bookBids}`}><h3>买单（价格降序）</h3><BookLevels rows={bookData?.bids ?? []} emptyHint="无买单" /></div>
+          <div className={`${styles.bookSide} ${styles.bookAsks}`}><h3>卖单（价格升序）</h3><BookLevels rows={bookData?.asks ?? []} emptyHint="无卖单" /></div>
         </div>
         <p className={styles.bookMeta}>订单簿数据截至 {formatDate(bookData?.capturedAt ?? new Date().toISOString())}；价格—时间优先顺序由服务端返回，不含用户身份。页面每 10 秒自动刷新；切到后台不轮询。</p></>}
     </section>
 
-    <section className={styles.sectionCard} aria-label="我的成交与待履约资产">
-      <h2>我的成交与待履约资产</h2>
+    <section className={`${styles.sectionCard} panel`} aria-label="我的成交与待履约资产">
+      <h2 className="panel-title">我的成交与待履约资产</h2>
       {trades.isPending ? <p aria-busy="true">正在加载成交记录…</p>
       : trades.isError ? <section className={styles.staleHint} role="status"><p>成交数据可能过期，连接失败，正在重试。</p><button className="button secondary" type="button" onClick={() => void trades.refetch()}>立即刷新</button></section>
       : <>

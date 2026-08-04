@@ -12,6 +12,28 @@
 .cardHead { align-items: flex-start; display: flex; gap: 10px; justify-content: space-between; }
 .card h2,
 .detail h1 { color: var(--accent-gold-bright); margin: 0; }
+/* 奖杯陈列柜：解锁金色 / 未解锁灰暗 */
+.trophy {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  height: 44px;
+  justify-content: center;
+  margin: 12px 0 4px;
+  width: 44px;
+}
+.trophyUnlocked {
+  background: linear-gradient(180deg, rgba(201, 162, 75, 0.28), rgba(201, 162, 75, 0.08));
+  border: 1px solid var(--border-gold);
+  box-shadow: 0 0 16px rgba(201, 162, 75, 0.3);
+  color: var(--accent-gold-bright);
+}
+.trophyPending {
+  background: rgba(236, 228, 208, 0.06);
+  border: 1px dashed var(--border-gold-dim);
+  color: var(--text-disabled);
+  filter: grayscale(0.9);
+}
 .badge { border-radius: 999px; font-size: 0.82rem; font-weight: 700; padding: 4px 9px; white-space: nowrap; }
 .pending { background: rgba(236, 228, 208, 0.08); border: 1px solid var(--border-gold-dim); color: var(--text-secondary); }
 .unlocked { background: rgba(127, 166, 90, 0.16); border: 1px solid rgba(127, 166, 90, 0.55); color: #a8cf84; }

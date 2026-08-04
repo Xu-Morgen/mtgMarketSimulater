@@ -109,7 +109,13 @@
   border: 1px solid var(--border-gold-dim);
   border-radius: var(--radius-sm);
   padding: 10px;
+  position: relative;
 }
+/* 订单簿布告栏：买单绿金 / 卖单血红（仅装饰，不影响表格语义） */
+.bookBids { background: linear-gradient(180deg, rgba(127, 166, 90, 0.12) 0%, rgba(18, 21, 26, 0.45) 70%); border-color: rgba(127, 166, 90, 0.4); }
+.bookBids h3::before { background: #a8cf84; content: ""; display: inline-block; height: 8px; margin-right: 8px; transform: rotate(45deg); width: 8px; box-shadow: 0 0 5px rgba(127, 166, 90, 0.7); }
+.bookAsks { background: linear-gradient(180deg, rgba(192, 57, 43, 0.14) 0%, rgba(18, 21, 26, 0.45) 70%); border-color: rgba(192, 57, 43, 0.42); }
+.bookAsks h3::before { background: #e08678; content: ""; display: inline-block; height: 8px; margin-right: 8px; transform: rotate(45deg); width: 8px; box-shadow: 0 0 5px rgba(192, 57, 43, 0.7); }
 .bookSide h3 { color: var(--accent-gold-bright); font-size: 0.95rem; margin-bottom: 8px; }
 .bookSide table { border-collapse: collapse; width: 100%; }
 .bookSide th,

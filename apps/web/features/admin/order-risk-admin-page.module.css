@@ -14,6 +14,17 @@
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-panel);
   overflow-x: auto;
+  position: relative;
+}
+.tableWrap::before {
+  background: linear-gradient(90deg, transparent, var(--border-gold) 18%, var(--border-gold) 82%, transparent);
+  content: "";
+  height: 1px;
+  left: 14px;
+  pointer-events: none;
+  position: absolute;
+  right: 14px;
+  top: 0;
 }
 .tableWrap table { border-collapse: collapse; min-width: 880px; width: 100%; }
 .tableWrap th,

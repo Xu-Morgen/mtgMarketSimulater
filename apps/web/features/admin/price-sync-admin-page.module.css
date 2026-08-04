@@ -6,6 +6,17 @@
   box-shadow: var(--shadow-panel);
   margin-top: 22px;
   padding: 22px;
+  position: relative;
+}
+.card::before {
+  background: linear-gradient(90deg, transparent, var(--border-gold) 18%, var(--border-gold) 82%, transparent);
+  content: "";
+  height: 1px;
+  left: 16px;
+  pointer-events: none;
+  position: absolute;
+  right: 16px;
+  top: 0;
 }
 .details { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .details div { border-bottom: 1px solid rgba(236, 228, 208, 0.1); padding-bottom: 9px; }

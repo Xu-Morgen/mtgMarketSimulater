@@ -8,8 +8,33 @@
   box-shadow: var(--shadow-panel);
   padding: 20px;
   margin-top: 18px;
+  position: relative;
 }
-.card h2 { color: var(--accent-gold-bright); margin-top: 0; }
+.card::before {
+  background: linear-gradient(90deg, transparent, var(--border-gold) 18%, var(--border-gold) 82%, transparent);
+  content: "";
+  height: 1px;
+  left: 16px;
+  pointer-events: none;
+  position: absolute;
+  right: 16px;
+  top: 0;
+}
+.card h2 {
+  align-items: center;
+  color: var(--accent-gold-bright);
+  display: flex;
+  gap: 9px;
+  margin-top: 0;
+}
+.card h2::before {
+  background: var(--accent-gold-bright);
+  box-shadow: 0 0 5px rgba(201, 162, 75, 0.6);
+  content: "";
+  height: 8px;
+  transform: rotate(45deg);
+  width: 8px;
+}
 .formatPick { align-items: center; display: flex; flex-wrap: wrap; gap: 14px; margin: 14px 0; }
 .formatPick label { align-items: center; color: var(--text-primary); display: inline-flex; font-weight: 600; gap: 6px; }
 .actions { margin-top: 14px; }
@@ -28,7 +53,7 @@
 .tableWrap tbody tr:hover { background: rgba(201, 162, 75, 0.06); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; }
 .tag { border-radius: 999px; display: inline-block; font-size: 0.8rem; padding: 3px 9px; white-space: nowrap; }
-.running { background: rgba(236, 228, 208, 0.1); color: var(--text-secondary); }
+.running { background: rgba(214, 161, 62, 0.16); border: 1px solid rgba(214, 161, 62, 0.55); color: #e6c87c; }
 .succeeded { background: rgba(127, 166, 90, 0.16); border: 1px solid rgba(127, 166, 90, 0.55); color: #a8cf84; }
 .expired { background: rgba(236, 228, 208, 0.08); color: var(--text-secondary); }
 .failed { background: rgba(192, 57, 43, 0.18); border: 1px solid rgba(192, 57, 43, 0.6); color: #e08678; }

@@ -13,7 +13,7 @@ import styles from "./catalog-card-detail-modal.module.css";
 function sourceLabel(sku: CatalogSkuDto): string { return sku.isManualException ? "运营测试例外" : sku.source === "scryfall" ? "本地 Scryfall 目录" : "人工目录"; }
 
 /** 卡图只经带会话的本地 API 读取，绝不把外部图片 URL 交给浏览器。 */
-function LocalCatalogImage({ path, name }: { path: string | null; name: string }) {
+function LocalCatalogImage({ path, name, rarity }: { path: string | null; name: string; rarity?: string }) {
   const { accessToken } = useSession();
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -27,9 +27,11 @@ function LocalCatalogImage({ path, name }: { path: string | null; name: string }
       .catch(() => { if (!disposed) setFailed(true); });
     return () => { disposed = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [accessToken, path]);
+  // 稀有度卡框：data-rarity 驱动描边与微发光（纯 CSS，见 styles.css .card-frame）。
+  const frame = (child: React.ReactNode) => <div className="card-frame" data-rarity={rarity?.toLowerCase()}>{child}</div>;
   if (!path) return <div className={styles.imagePlaceholder}>暂无本地图片；管理员可按需缓存该印刷的卡图。</div>;
   if (failed) return <div className={styles.imagePlaceholder}>本地图片暂不可用。</div>;
-  return imageUrl ? <img className={styles.image} src={imageUrl} alt={`${name} 卡图`} /> : <Spin tip="正在读取本地图片" />;
+  return imageUrl ? frame(<img className={styles.image} src={imageUrl} alt={`${name} 卡图`} />) : frame(<Spin tip="正在读取本地图片" />);
 }
 
 /** 目录和开包结果复用同一只读详情，罕贵度与图片始终来自本地目录。 */
@@ -38,7 +40,7 @@ export function CatalogCardDetailModal({ skuId, onClose }: { skuId: string | nul
   return <Modal open={Boolean(skuId)} title="卡牌详情" onCancel={onClose} footer={null} width={760} destroyOnClose>
     {detail.isPending ? <Spin tip="正在加载卡牌详情" /> : detail.isError ? <ErrorState title="卡牌详情加载失败" onRetry={() => void detail.refetch()} /> : detail.data ? (() => {
       const sku = detail.data.data.sku;
-      return <><LocalCatalogImage path={sku.image.path} name={sku.name} /><Descriptions className={styles.details} bordered column={1} size="small" items={[
+      return <><LocalCatalogImage path={sku.image.path} name={sku.name} rarity={sku.rarity} /><Descriptions className={styles.details} bordered column={1} size="small" items={[
         { key: "name", label: "名称", children: sku.name },
         { key: "sku", label: "SKU ID", children: sku.id },
         { key: "printing", label: "印刷", children: `${sku.setName}（${sku.setCode} #${sku.collectorNumber}）` },

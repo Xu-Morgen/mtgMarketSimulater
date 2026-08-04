@@ -17,6 +17,57 @@
 }
 .card h2 { color: var(--accent-gold-bright); margin: 0; }
 .card p { line-height: 1.6; margin: 0; color: var(--text-primary); }
+.cardTop { display: grid; gap: 16px; grid-template-columns: 116px 1fr; }
+/* 包体图形：竖式包体（原创 CSS 斜纹/闪箔，无素材） */
+.packGraphic {
+  align-items: center;
+  border: 1px solid rgba(201, 162, 75, 0.5);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel), inset 0 0 16px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  justify-content: center;
+  min-height: 128px;
+  overflow: hidden;
+  padding: 10px 8px;
+  position: relative;
+  background:
+    linear-gradient(115deg, transparent 18%, rgba(255, 255, 255, 0.14) 38%, rgba(255, 255, 255, 0.02) 46%, transparent 64%),
+    repeating-linear-gradient(90deg, rgba(201, 162, 75, 0.12) 0 2px, rgba(201, 162, 75, 0.03) 2px 9px),
+    linear-gradient(165deg, #3a3222 0%, #1f2117 55%, #2c2720 100%);
+}
+.packGraphicDisabled { filter: grayscale(0.8) brightness(0.7); }
+.packGraphic::after {
+  border: 1px solid rgba(201, 162, 75, 0.28);
+  border-radius: calc(var(--radius-md) - 3px);
+  content: "";
+  inset: 4px;
+  pointer-events: none;
+  position: absolute;
+}
+.packBanding {
+  background: linear-gradient(90deg, transparent, rgba(201, 162, 75, 0.75), transparent);
+  height: 1px;
+  width: 74px;
+}
+.packGem {
+  background: linear-gradient(135deg, rgba(236, 228, 208, 0.95), rgba(201, 162, 75, 0.85));
+  box-shadow: 0 0 10px rgba(201, 162, 75, 0.6);
+  height: 14px;
+  transform: rotate(45deg);
+  width: 14px;
+}
+.packName {
+  color: var(--accent-gold-bright);
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  position: relative;
+}
+.cardBody { display: grid; gap: 6px; align-content: start; }
+.cardTitleRow { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; }
 .metadata { color: var(--text-secondary); font-size: 0.9rem; }
 .disabled {
   background: rgba(214, 161, 62, 0.12);
@@ -101,4 +152,6 @@
 @media (max-width: 700px) {
   .cards { grid-template-columns: 1fr; }
   .revealGrid { grid-template-columns: 1fr; }
+  .cardTop { grid-template-columns: 1fr; }
+  .packGraphic { min-height: 96px; }
 }

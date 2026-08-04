@@ -10,6 +10,20 @@
   box-shadow: var(--shadow-panel);
   margin-top: 18px;
   padding: 16px;
+  position: relative;
+}
+/* 竞技场布告板：顶部金线 + 角饰 */
+.card::before,
+.section::before,
+.round::before {
+  background: linear-gradient(90deg, transparent, var(--border-gold) 18%, var(--border-gold) 82%, transparent);
+  content: "";
+  height: 1px;
+  left: 14px;
+  pointer-events: none;
+  position: absolute;
+  right: 14px;
+  top: 0;
 }
 .cardHead { align-items: start; display: flex; gap: 12px; justify-content: space-between; }
 .card h2,
@@ -24,6 +38,7 @@
   font-weight: 700;
   padding: 4px 9px;
   white-space: nowrap;
+  box-shadow: inset 0 0 8px rgba(201, 162, 75, 0.15);
 }
 .muted { color: var(--text-secondary); font-size: 0.88rem; }
 .success { color: #a8cf84; font-weight: 700; }
