@@ -63,6 +63,9 @@ const opening = {
     gameProfitLoss: null,
     priceStatus: "unavailable_until_i17"
   },
+  // I33B：开包结果必须携带服务端汇总成本与估值（本示例无有效报价，故 totalGameValue 置 null，与 profitLoss 一致）。
+  totalCost: { amount: 500, currency: "GAME_CREDIT" },
+  totalGameValue: null,
   openedAt: "2026-07-26T09:30:00.000Z"
 };
 const firstReceivedSkuId = "30000000-0000-4000-8000-000000000011";

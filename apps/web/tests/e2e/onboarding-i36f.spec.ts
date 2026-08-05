@@ -150,9 +150,9 @@ test("引导页：六步目标链卡片、进度指示、目标入口跳转与�
   await expect(page.getByText("已完成 0 / 6 步")).toBeVisible();
   await expect(page.getByText("下一步：领取工作资金")).toBeVisible();
   for (const def of stepDefs) await expect(page.getByRole("heading", { name: def.title })).toBeVisible();
-  // 步骤状态徽标与可跳过标志。
+  // 步骤状态徽标与可跳过标志：当前步骤显示「下一步」，其余未完成步骤为「待完成」（6 步中 5 步）。
   await expect(page.getByText("下一步", { exact: true })).toBeVisible();
-  await expect(page.getByText("待完成", { exact: true })).toHaveCount(6);
+  await expect(page.getByText("待完成", { exact: true })).toHaveCount(5);
   await expect(page.getByText("可跳过", { exact: true })).toHaveCount(6);
   // 奖励不可领：完成全部步骤前只展示说明。
   await expect(page.getByText("完成全部引导步骤后，由服务器发放一次性奖励。")).toBeVisible();

@@ -86,12 +86,13 @@ export function InventoryPage() {
     { title: "锁定状态", key: "locked", render: (_, holding) => holding.orderLockedQuantity + holding.tournamentLockedQuantity > 0 ? <Tag color="gold">已锁定（仅可卖出可用量）</Tag> : <Tag color="green">全部可用</Tag> },
     { title: "操作", key: "action", render: (_, holding) => holding.availableQuantity > 0 && holding.sku.tradable ? <div className={styles.actionGroup}><button type="button" className="button" onClick={() => { setCompletedTrade(null); setSellHolding(holding); }}>向 NPC 卖出</button><button type="button" className="button secondary" onClick={() => { setCompletedOrder(null); setOrderHolding(holding); }}>挂卖单</button></div> : <button type="button" className={styles.disabledEntry} disabled title={holding.availableQuantity === 0 ? "全部库存已被订单或比赛锁定，不能出售" : "该 SKU 当前不可交易"}>{holding.availableQuantity === 0 ? "无可用库存" : "暂不可交易"}</button> }
   ], [priceStatus.data?.data, priceStatus.isError]);
+  // I34F：按筛选批量卖出的候选只取当前页有可用量的 SKU；其余（锁定/无价等）由服务端跳过并汇总。
+  // 必须在加载/错误提前返回之前调用，保证任何渲染路径的 Hook 顺序一致。
+  const batchSkuIds = useMemo(() => (inventory.data?.data.items ?? []).filter((item) => item.availableQuantity > 0).map((item) => item.skuId), [inventory.data]);
   if (inventory.isPending) return <PageSkeleton label="正在加载库存" />;
   if (inventory.isError) return <main className="page"><ErrorState title="库存加载失败" onRetry={() => void inventory.refetch()} /></main>;
   const page = inventory.data.data; const total = page.page.total ?? (currentPage - 1) * pageSize + page.items.length + (page.page.hasMore ? 1 : 0);
   const apply = () => router.push(toUrl({ query: draft.query.trim() || undefined, setCode: draft.setCode.trim().toUpperCase() || undefined, finish: draft.finish || undefined, locked: draft.locked, sort: filters.sort, direction: filters.direction, limit: pageSize }));
-  // I34F：按筛选批量卖出的候选只取当前页有可用量的 SKU；其余（锁定/无价等）由服务端跳过并汇总。
-  const batchSkuIds = useMemo(() => page.items.filter((item) => item.availableQuantity > 0).map((item) => item.skuId), [page.items]);
   return <main className="page inventory-page"><p className="eyebrow">服务端库存快照</p><h1>我的库存</h1><p className="intro">数量、成本、现价、市值、盈亏与锁定状态均来自服务端。此页面不提供修改库存或解锁资产的入口。</p>
     {completedTrade ? <section className={styles.tradeSuccess} role="status"><h2>卖出已完成</h2><p>服务端已成交 {completedTrade.quantity} 张，实际收入 {formatMoney(completedTrade.total)}（其中费用 {formatMoney(completedTrade.fee)}）。余额、库存、报价与账本正在按服务器响应刷新。</p></section> : null}
     {completedOrder ? <section className={styles.tradeSuccess} role="status"><h2>挂单已创建</h2><p>服务端已创建{completedOrder.side === "buy" ? "买单" : "卖单"}（限价 {formatMoney(completedOrder.limitPrice)}，数量 {completedOrder.originalQuantity} 张，状态 {completedOrder.status}）。余额、库存、报价、委托与账本正在按服务器响应刷新；撮合与履约在后续迭代上线。</p></section> : null}

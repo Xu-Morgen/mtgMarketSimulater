@@ -127,10 +127,10 @@ test("任务中心：等级卡片、今日/本周任务进度条与可领取状�
   await expect(page.getByText("每日开包")).toBeVisible();
   await expect(page.getByRole("img", { name: /任务进度/ }).first()).toBeVisible();
   await expect(page.getByText("2 / 3", { exact: true })).toBeVisible();
-  // 状态徽标：可领取/已领取/进行中只取服务端 status。
+  // 状态徽标：可领取/已领取/进行中只取服务端 status（今日与本周各有一个「进行中」，任一可见即可）。
   await expect(page.getByText("可领取", { exact: true })).toBeVisible();
   await expect(page.getByText("已领取", { exact: true })).toBeVisible();
-  await expect(page.getByText("进行中", { exact: true })).toBeVisible();
+  await expect(page.getByText("进行中", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "领取 80 游戏币" })).toBeVisible();
   await expect(page.getByRole("button", { name: "奖励已领取" })).toBeDisabled();
   // 服务端周期键只读展示（浏览器不用本地日期推导）。

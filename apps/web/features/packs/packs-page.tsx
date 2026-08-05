@@ -366,8 +366,8 @@ function CostValueComparison({ opening }: { opening: PackOpeningDto }) {
       </p>
     );
   }
-  const diff = opening.profitLoss.gameProfitLoss;
-  if (diff === null) {
+  const diff = opening.profitLoss.gameProfitLoss; // 服务端可能给出估值但暂无盈亏差额
+  if (diff === null || diff === undefined) {
     return (
       <p className={styles.metadata}>
         本包成本 {formatMoney(opening.totalCost)}；服务端当前估值 {formatMoney(opening.totalGameValue)}。

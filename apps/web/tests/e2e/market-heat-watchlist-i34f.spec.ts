@@ -118,7 +118,7 @@ test("市场页行情屏：涨跌榜 ▲/▼、迷你走势条、公告区与叙
   await session(page);
   await mockMarketPageCommon(page);
   await page.goto("/market");
-  await expect(page.getByRole("heading", { name: "市场" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "市场", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "价格提醒" })).toBeVisible();
   // 行情屏：涨跌榜方向与幅度只展示服务端聚合。
   await expect(page.getByRole("heading", { name: "行情屏" })).toBeVisible();
@@ -237,7 +237,7 @@ test("价格提醒页：列表/搜索添加二次确认、删除与启停只投�
   });
 
   await page.goto("/watchlist");
-  await expect(page.getByRole("heading", { name: "价格提醒" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "价格提醒", exact: true })).toBeVisible();
   // 已触达提醒：未读数与触发价均来自服务端。
   await expect(page.getByText("未读 1")).toBeVisible();
   await expect(page.getByText("行情测试卡A").first()).toBeVisible();
@@ -400,7 +400,9 @@ test("库存页按筛选批量卖出：二次确认只投递一次并展示服�
   await expect(page.getByText("1 个 SKU")).toBeVisible();
   const confirm = page.getByRole("button", { name: "确认批量卖出" });
   await confirm.click();
-  await confirm.click({ force: true });
+  // 二次确认的重复点击只投递一次：click({ clickCount: 2 }) 在一次可操作性检查后连点两次，
+  // 即使按钮随后禁用仍会派发两次点击，用于验证「重复点击不重复投递」。
+  await confirm.click({ clickCount: 2 });
   await expect(page.getByRole("heading", { name: "按筛选批量卖出已完成" })).toBeVisible();
   await expect(page.getByText(/服务端共卖出 3 张/)).toBeVisible();
   await expect(page.getByText(/实际收入 444 游戏币/)).toBeVisible();

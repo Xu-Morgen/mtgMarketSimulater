@@ -372,7 +372,9 @@ test("批量开包：二次确认重复点击只投递一次，汇总与逐包�
   await expect(page.getByText("本次扣款（每包）：500 游戏币")).toBeVisible();
   const confirm = page.getByRole("button", { name: "确认批量开包" });
   await confirm.click();
-  await confirm.click({ force: true });
+  // 二次确认的重复点击只投递一次：click({ clickCount: 2 }) 在一次可操作性检查后连点两次，
+  // 即使按钮随后禁用仍会派发两次点击，用于验证「重复点击不重复投递」。
+  await confirm.click({ clickCount: 2 });
   await expect(page.getByRole("heading", { name: "批量开包完成" })).toBeVisible();
   await expect(page.getByText("10 包", { exact: true })).toBeVisible();
   await expect(page.getByText("5,000 游戏币").first()).toBeVisible();
@@ -483,7 +485,9 @@ test("重复卡一键清仓：开包结果页二次确认只投递一次并展�
   await expect(page.getByRole("heading", { name: "批量卖出重复卡" })).toBeVisible();
   const confirm = page.getByRole("button", { name: "确认批量卖出重复卡" });
   await confirm.click();
-  await confirm.click({ force: true });
+  // 二次确认的重复点击只投递一次：click({ clickCount: 2 }) 在一次可操作性检查后连点两次，
+  // 即使按钮随后禁用仍会派发两次点击，用于验证「重复点击不重复投递」。
+  await confirm.click({ clickCount: 2 });
   await expect(page.getByRole("heading", { name: "重复卡批量卖出已完成" })).toBeVisible();
   await expect(page.getByText(/服务端共卖出/)).toBeVisible();
   await expect(page.getByText(/实际收入 468 游戏币/)).toBeVisible();

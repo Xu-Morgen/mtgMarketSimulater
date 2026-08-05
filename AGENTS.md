@@ -129,6 +129,16 @@ e2e 验证默认由用户手动执行（见第 7 节 E2E 执行策略）。每�
 - 备注：<阻塞点、需要修复的问题>
 ```
 
+### 2026-08-05：FIX-e2e-i33f-i34f-i35f-i36f-regression（30 例 e2e 失败回归修复）
+- 状态：**待用户手动 e2e 复跑**（本机自动运行会因超时/内存耗尽使 WSL 崩溃，未代跑）。
+- 已由 Agent 完成并通过的自动化：`pnpm check`（含全仓 lint + 各包 tsc）、web vitest 5 例。回归来自一次全量 e2e 运行产生的 30 例失败（桌面+窄屏各 15 个用例），按 trace/error-context 归类为四类根因并已修复：
+  1. `inventory-page.tsx` 条件 Hook 违规：`batchSkuIds` 的 `useMemo` 位于 `isPending/isError` 提前返回之后，加载完成时抛 "Rendered more hooks" 并触发整页错误边界，导致 inventory/orders/npc-sell/collection-album/market 库存类用例全部失败；已上移到提前返回之前（依赖改为 `inventory.data`）。这是本次回归影响面最大的单一根因。
+  2. `packs.spec.ts` 开包 fixture 缺 I33B 新增必填字段 `totalCost/totalGameValue`，`CostValueComparison` 对 `undefined` 调用 `formatMoney` 抛 TypeError 整页崩溃；已补 fixture，并给 `CostValueComparison` 增加 `gameProfitLoss === undefined` 的防御分支（服务端可能给出估值但暂无盈亏差额）。
+  3. 三条定位器非精确/数量断言：market 页 `heading 市场`、价格提醒页 `heading 价格提醒` 与子标题歧义触发 strict mode；tasks 页「进行中」今日/本周各一个触发 strict mode；onboarding 页当前步骤显示「下一步」故「待完成」实际为 5（断言 6 与页面语义不符）。分别改 `exact: true`、`.first()`、`toHaveCount(5)`。
+  4. collection-album/market 批量对话框二次确认「重复点击」用 `click({ force: true })`：按钮点击后随即禁用且文案改变（「正在由服务端…」），locator 因名称变化无法再次解析而超时；改为 `click({ clickCount: 2 })`（一次可操作性检查后连点两次，配合弹窗内 `confirmationLock` 仍验证只投递一次）。
+- 需用户手动验证：本次改动的 6 个 spec（`packs.spec.ts`、`inventory.spec.ts`、`orders.spec.ts`、`npc-sell.spec.ts`、`collection-album-i33f.spec.ts`、`market-heat-watchlist-i34f.spec.ts`、`tasks-growth-i35f.spec.ts`、`onboarding-i36f.spec.ts`）桌面 + 390px 窄屏。
+- 备注：`tasks.spec`/`market.spec` 的“确认”静态按钮 `force` 双击与 `ConfirmDialog` 未受影响；未改动 API、contracts、rules 与数据库。测试期间的 `tsconfig.tsbuildinfo` 为生成物，已还原不入库。
+
 ### 2026-08-05：I36F（新手引导与首次体验页面）
 - 状态：**待用户手动 e2e 复跑**（本机自动运行会因超时/内存耗尽使 WSL 崩溃，未代跑）。
 - 已由 Agent 完成并通过的自动化：`pnpm check`（含全仓 lint + 各包 tsc）、web tsc（`apps/web/tsconfig.json`）、web vitest 5 例、`pnpm --filter @mtg-market/web build`（`next build` 通过，`/onboarding` 路由生成）；全仓单元测试沿用 I36B 结果 contracts 17 / rules 101 / database 4 / api 257（1 跳过）。
