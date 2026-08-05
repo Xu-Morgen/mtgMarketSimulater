@@ -383,3 +383,44 @@ test("未创建存档的新玩家首页展示常驻引导入口，可启动 Tour
   await expect(tourPanel).toHaveCount(0);
   await expect(page.getByText("引导进行中 0/7", { exact: true })).toBeVisible();
 });
+
+test("侧栏「新手引导」先弹确认框，确认后跳到当前步骤路由并启动 Tour；关闭后不再自动重新弹出", async ({ page }) => {
+  test.setTimeout(90_000);
+  await session(page);
+  // 当前未完成步骤为「开出第一包」（创建存档/领取资金已完成）。
+  const state = { auto: ["create-archive", "claim-work-funds"] as string[] };
+  await page.route("**/v1/onboarding", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ onboarding: onboardingData({ auto: state.auto }) })) }));
+  // 跳到 /packs 所需的补充包商店只读 mock。
+  await page.route("**/v1/packs", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [activePack] })) }));
+  await page.route("**/v1/pack-openings?*", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+  await mockHistoryReads(page);
+  await page.route("**/v1/archive", (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ ok: false, error: { code: "RESOURCE_NOT_FOUND", message: "尚未创建游戏存档" }, meta: { requestId: "i36f-noarchive" } }) }));
+  await page.route("**/v1/ledger?*", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+  await page.route("**/v1/growth", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ level: 1, title: "见习收藏家", totalXp: 0, nextLevelXp: 200, progressBasisPoints: 0, capabilities: { npcDailyTradeMultiplier: 1, bulkPackMax: 10 }, peakNetWorth: { amount: 11_000, currency: "GAME_CREDIT" }, ruleVersion: "level/v1", updatedAt: now })) }));
+  await page.route("**/v1/dashboard", (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ ok: false, error: { code: "RESOURCE_NOT_FOUND", message: "尚未创建游戏存档" }, meta: { requestId: "i36f-noarchive" } }) }));
+
+  await page.goto("/dashboard");
+  const tourPanel = page.locator(".ant-tour-panel");
+  // 侧栏「新手引导」是按钮：点击先弹确认框（不直接跳转）。
+  await page.getByLabel("玩家导航").getByRole("button", { name: "新手引导" }).click();
+  await expect(page.getByRole("dialog", { name: "开启新手引导" })).toBeVisible();
+  await expect(page.getByText(/创建存档 → 领取工作资金 → 开出第一包/)).toBeVisible();
+  // 确认：跳到当前未完成步骤「开出第一包」所在路由 /packs，并启动 Tour 高亮「购买并开包」按钮。
+  await page.getByRole("dialog", { name: "开启新手引导" }).getByRole("button", { name: "确认" }).click();
+  await expect(page).toHaveURL(/\/packs$/);
+  await expect(tourPanel.getByText("下一步：开出第一包", { exact: true })).toBeVisible();
+  await expect(page.locator("#onboarding-pack-purchase")).toBeVisible();
+  await expect(page.locator("#onboarding-pack-purchase")).toBeInViewport();
+  // 关闭 Tour：气泡消失且不再自动重新弹出（关闭只允许从引导入口再次显式开启）。
+  await page.locator(".ant-tour-close").click();
+  await expect(tourPanel).toHaveCount(0);
+  // 导航到引导页：不会自动重启 Tour（此前已显式关闭）。
+  await page.goto("/onboarding");
+  await expect(page.getByRole("heading", { name: "新手引导" })).toBeVisible();
+  await expect(page.getByText("已完成 2 / 7 步")).toBeVisible();
+  await page.waitForTimeout(600);
+  await expect(tourPanel).toHaveCount(0);
+  // 在引导页显式「开始引导」可重新开启（清除已关闭标记）。
+  await page.getByRole("button", { name: "开始引导" }).click();
+  await expect(tourPanel.getByText("下一步：开出第一包", { exact: true })).toBeVisible();
+});

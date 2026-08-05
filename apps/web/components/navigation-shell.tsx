@@ -6,8 +6,11 @@ import { useEffect, useState } from "react";
 import { useLogoutMutation } from "../api/auth-mutations";
 import { useArchiveQuery } from "../api/archive-api";
 import { useDailyWorkFundingStatusQuery } from "../api/daily-work-funding-api";
+import { useOnboardingQuery } from "../api/onboarding-api";
 import { useSession } from "../providers/session-provider";
+import { useOnboardingGuide } from "../providers/onboarding-guide-context";
 import { formatMoney } from "../utils/money";
+import { ConfirmDialog } from "./ui";
 import { OnboardingGuideTour } from "./onboarding-guide-tour";
 
 /** 宝石徽章图标：原创内联 SVG（stroke 风格），不用 emoji。 */
@@ -129,11 +132,14 @@ function PlayerHud() {
 
 function Shell({ children, admin }: Readonly<{ children: React.ReactNode; admin: boolean }>) {
   const { user } = useSession();
+  const router = useRouter();
   const groups = admin ? adminGroups : playerGroups;
   // 选中态 pathname 只在客户端 effect 中写入：避免基于 pathname 的条件 aria-current 造成
   // 服务端/客户端 hydration 不一致（会导致 React 丢弃并重挂整棵导航树，延迟会话恢复）。
   const [pathname, setPathname] = useState<string | null>(null);
   useEffect(() => {
+    // 首个 tick 读取 location 并写入状态（React 18/19 在 effect 中调度 state 更新是安全路径；
+    // 不要在 useInsertionEffect 中 setState，会触发 "useInsertionEffect must not schedule updates"）。
     const update = () => setPathname(window.location.pathname);
     update();
     window.addEventListener("popstate", update);
@@ -152,6 +158,23 @@ function Shell({ children, admin }: Readonly<{ children: React.ReactNode; admin:
     const current = pathname ?? "";
     return href === "/" ? current === href : current === href || current.startsWith(`${href}/`);
   };
+  // I36F：左侧「新手引导」先弹确认框，确认后启动引导会话并跳到当前未完成步骤所在路由。
+  // 引导数据在确认框打开时才按需请求（避免在非引导相关页面上轮询 /v1/onboarding）。
+  const { retarget } = useOnboardingGuide();
+  const [confirmOnboarding, setConfirmOnboarding] = useState(false);
+  const onboarding = useOnboardingQuery({ enabled: !admin && confirmOnboarding });
+  const onboardingData = onboarding.data?.data.onboarding;
+  const startOnboarding = () => {
+    setConfirmOnboarding(false);
+    const data = onboardingData;
+    if (!data || data.allCompleted) {
+      router.push("/onboarding");
+      return;
+    }
+    const step = data.currentStepId ?? data.steps[0]?.id ?? null;
+    retarget(step);
+    if (step) router.push(data.steps.find((item) => item.id === step)?.href ?? "/onboarding");
+  };
   return <div className="app-shell">
     <header className="topbar">
       <Link href={admin ? "/admin" : "/dashboard"} className="brand"><GemIcon size={18} />MTG 市场模拟器</Link>
@@ -164,13 +187,26 @@ function Shell({ children, admin }: Readonly<{ children: React.ReactNode; admin:
         {groups.map((group) => (
           <div className="side-nav-group" key={group.title}>
             <span className="side-nav-title" aria-hidden="true">{group.title}</span>
-            {group.links.map(({ href, label, icon }) => <Link href={href} key={href} aria-current={active(href) ? "page" : undefined}><NavIcon kind={icon ?? "dashboard"} />{label}</Link>)}
+            {group.links.map(({ href, label, icon }) =>
+              !admin && href === "/onboarding"
+                ? <button type="button" key={href} aria-current={active(href) ? "page" : undefined} onClick={() => setConfirmOnboarding(true)}><NavIcon kind="onboarding" />{label}</button>
+                : <Link href={href} key={href} aria-current={active(href) ? "page" : undefined}><NavIcon kind={icon ?? "dashboard"} />{label}</Link>
+            )}
           </div>
         ))}
       </nav>
       <main className="content">{children}</main>
     </div>
     {!admin ? <OnboardingGuideTour /> : null}
+    {!admin ? (
+      <ConfirmDialog
+        open={confirmOnboarding}
+        title="开启新手引导"
+        description="将带你完成首次目标链（创建存档 → 领取工作资金 → 开出第一包 → 看懂价格 → 完成首笔交易 → 收藏见涨 → 首次报名），并高亮每个步骤的对应按钮。是否开启？"
+        onCancel={() => setConfirmOnboarding(false)}
+        onConfirm={startOnboarding}
+      />
+    ) : null}
   </div>;
 }
 

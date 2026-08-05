@@ -41,7 +41,7 @@ function tourStepTitle(step: OnboardingStepDto, data: OnboardingDto): string {
  * 「去完成 →」跳转；跳过为显式幂等命令（服务端判定，重放不重复计数）。
  */
 export function OnboardingGuideTour() {
-  const { targetStepId, retarget } = useOnboardingGuide();
+  const { targetStepId, retarget, dismiss, dismissedRef } = useOnboardingGuide();
   const router = useRouter();
   const pathname = usePathname();
   // 常驻 Tour：仅在引导会话激活或位于引导页时才请求引导投影（避免每个玩家页面都轮询）。
@@ -69,21 +69,22 @@ export function OnboardingGuideTour() {
     return () => window.clearInterval(timer);
   }, [targetStepId, pathname]);
 
-  // 进入引导页时自动开始本次引导会话（从当前未完成步骤开始）；已完成全部步骤时不启动。
+  // 进入引导页时自动开始本次引导会话（从当前未完成步骤开始）；已完成全部步骤或玩家显式
+  // 关闭过 Tour 时不自动启动（关闭后只能从引导页/首页/侧栏入口再次显式开启）。
   useEffect(() => {
-    if (!data || targetStepId !== null || data.allCompleted) return;
+    if (!data || targetStepId !== null || data.allCompleted || dismissedRef.current) return;
     if (pathname === "/onboarding") retarget(data.currentStepId ?? data.steps[0]?.id ?? null);
-  }, [data, pathname, targetStepId, retarget]);
+  }, [data, pathname, targetStepId, retarget, dismissedRef]);
 
   // 当前步骤完成后自动前进到下一个未完成步骤；全部完成则结束会话（奖励在引导页领取）。
   useEffect(() => {
     if (!data || targetStepId === null) return;
     const idx = data.steps.findIndex((step) => step.id === targetStepId);
     if (idx === -1 || data.steps[idx]?.completion !== null) {
-      if (data.allCompleted) retarget(null);
+      if (data.allCompleted) dismiss();
       else retarget(data.currentStepId);
     }
-  }, [data, targetStepId, retarget]);
+  }, [data, targetStepId, retarget, dismiss]);
 
   if (!data || targetStepId === null || data.allCompleted) return null;
 
@@ -96,7 +97,8 @@ export function OnboardingGuideTour() {
     const next = current + 1;
     if (next < data.steps.length && data.steps[next]) retarget(data.steps[next]!.id);
   };
-  const finish = () => retarget(null);
+  // 关闭/完成：显式结束本次引导会话（玩家关闭后不再被自动重启）。
+  const finish = () => dismiss();
   const goTo = (href: string) => {
     if (href === pathname) {
       // 已在目标页：锚点可能刚挂载（如创建存档后首页分支切换），强制重新定位并滚动；
