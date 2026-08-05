@@ -215,19 +215,24 @@ test("首次引导完整流程：开始 → 高亮按钮 → 真实完成创建�
   await expect(tourPanel.getByText("下一步：创建存档", { exact: true })).toBeVisible();
   await expect(tourPanel.getByText(/点击玩家首页「创建游戏存档」按钮/)).toBeVisible();
   await expect(page.locator("#onboarding-create-archive")).toBeVisible();
-  // 真实点击目标按钮完成第一步：服务端推进后 Tour 自动前进到「领取工作资金」并高亮领取卡片。
+  // 真实点击目标按钮完成第一步：步骤显示「已完成」，但不会自动前进（前进只由 Tour 按钮控制）。
   await page.locator("#onboarding-create-archive").click();
+  await expect(tourPanel.getByText("创建存档（已完成）", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  // 点击「下一步」跳到「领取工作资金」（同页 /dashboard，锚点轮询滚动到领取卡片）。
+  await tourPanel.getByRole("button", { name: "下一步" }).click();
   await expect(tourPanel.getByText("下一步：领取工作资金", { exact: true })).toBeVisible();
-  // 回归：创建存档后首页从「未存档」分支切换并重拉概览，每日工作资金卡片（锚点）晚于步骤切换
-  // 才挂载；Tour 锚点轮询应自动重新定位并滚动到该卡片，不允许停留在居中卡片导致卡死。
   await expect(page.locator("#onboarding-work-funds")).toBeVisible();
   await expect(page.locator("#onboarding-work-funds")).toBeInViewport();
   await expect(page.locator("#onboarding-work-funds").getByRole("button", { name: "领取 1,000 游戏币" })).toBeVisible();
   await page.locator("#onboarding-work-funds").getByRole("button", { name: "领取 1,000 游戏币" }).click();
-  // 领取资金完成：自动前进到「开出第一包」并自动跳转到补充包商店（无需再手动点击）。
+  // 领取资金完成：步骤显示「已完成」，仍停留在 /dashboard（不自动跳转）。
+  await expect(tourPanel.getByText("领取工作资金（已完成）", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  // 「下一步」跳到「开出第一包」（跨页 /packs）。
+  await tourPanel.getByRole("button", { name: "下一步" }).click();
   await expect(page).toHaveURL(/\/packs$/);
-  const tourPanelOnPacks = tourPanel;
-  await expect(tourPanelOnPacks.getByText("下一步：开出第一包", { exact: true })).toBeVisible();
+  await expect(tourPanel.getByText("下一步：开出第一包", { exact: true })).toBeVisible();
   await expect(page.locator("#onboarding-pack-purchase")).toBeVisible();
   await expect(page.locator("#onboarding-pack-purchase")).toBeInViewport();
   // 真实完成购买开包：购买弹窗必须渲染在引导蒙层之上（z-index 1200 > Tour 蒙层 1100），
@@ -280,38 +285,98 @@ test("首次引导完整流程：开始 → 高亮按钮 → 真实完成创建�
   await page.locator("#onboarding-pack-confirm").dblclick();
   expect(openCalls).toBe(1);
   expect(openKeys[0]).toMatch(/^[0-9a-f-]{36}$/i);
-  // 开包完成（open-first-pack 由已结算事实推进）：自动前进到「看懂价格」并跳转价格历史页。
+  // 开包完成（open-first-pack 由已结算事实推进）：步骤显示「已完成」，但**停留在 /packs 不自动跳转**，
+  // 玩家可看完开包动画；前进只由 Tour 按钮控制。
+  await expect(tourPanel.getByText("开出第一包（已完成）", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/packs$/);
+  // 「下一步」→ 看懂价格（跨页 /market/history）；浏览意图自动提交（view_event 仅记录访问，非跳转控制）。
+  await tourPanel.getByRole("button", { name: "下一步" }).click();
   await expect(page).toHaveURL(/\/market\/history/);
   await expect(tourPanel.getByText("下一步：看懂价格", { exact: true })).toBeVisible();
   await expect(page.locator("#onboarding-view-price-history")).toBeVisible();
   await expect(page.getByText("已向服务器记录本次价格历史浏览（新手引导「看懂价格」由服务端判定完成）。")).toBeVisible();
   expect(viewCalls).toBe(1);
   expect(viewKeys[0]).toMatch(/^[0-9a-f-]{36}$/i);
-  // 浏览意图完成：自动前进到「完成首笔交易」并跳转市场页（其按钮在市场页，此处无报价故居中展示）。
+  // 浏览意图完成：步骤显示「已完成」，停留在 /market/history。
+  await expect(tourPanel.getByText("看懂价格（已完成）", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/market\/history/);
+  // 「下一步」→ 完成首笔交易（跨页 /market）。
+  await tourPanel.getByRole("button", { name: "下一步" }).click();
   await expect(page).toHaveURL(/\/market$/);
   await expect(tourPanel.getByText("下一步：完成首笔交易", { exact: true })).toBeVisible();
-  // 在 Tour 内跳过本步：只投递一次，自动前进到「收藏见涨」。
-  let skipCalls = 0;
-  await page.route("**/v1/onboarding/steps/complete-first-npc-trade/skip", async (route) => {
-    skipCalls += 1;
-    state.auto = [...state.auto, "complete-first-npc-trade"];
-    return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(envelope({ onboarding: onboardingGetter() })) });
+  // 市场页需有可交易报价项才会渲染「向 NPC 买入」按钮（覆盖 mockHistoryReads 的空列表，后注册优先）。
+  const skuId = "30000000-0000-4000-8000-000000000363";
+  await page.route("**/v1/market/quotes?*", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(
+        envelope({
+          items: [{
+            sku: { id: skuId, name: "引导交易卡", setCode: "ONB", setName: "新手系列", collectorNumber: "3", finish: "nonfoil", rarity: "rare", imagePath: null },
+            quote: { skuId, quoteVersion: "market/v1", referencePrice: { amount: 110, currency: "EUR" }, marketPrice: { amount: 132, currency: "GAME_CREDIT" }, npcBuyPrice: { amount: 132, currency: "GAME_CREDIT" }, npcSellPrice: { amount: 164, currency: "GAME_CREDIT" }, validUntil: now, source: "mtgjson-cardmarket", capturedAt: now, reasons: [] },
+            tradable: true,
+            tradeDisabledReason: null
+          }],
+          page: { total: 1, hasMore: false, nextCursor: null }
+        })
+      )
+    })
+  );
+  await expect(page.locator("#onboarding-npc-buy")).toBeVisible();
+  await expect(page.locator("#onboarding-npc-buy")).toBeInViewport();
+  // 真实完成首笔 NPC 交易：买入弹窗打开后 Tour 高亮弹窗内「确认向 NPC 买入」按钮。
+  let buyCalls = 0;
+  const buyKeys: string[] = [];
+  await page.route(`**/v1/npc-trades/buy/${skuId}/preview?quantity=1`, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(
+        envelope({ preview: { skuId, quantity: 1, quoteId: "quote-i36f", quoteVersion: "market/v1", unitPrice: { amount: 132, currency: "GAME_CREDIT" }, unitFee: { amount: 2, currency: "GAME_CREDIT" }, total: { amount: 134, currency: "GAME_CREDIT" }, fee: { amount: 2, currency: "GAME_CREDIT" }, validUntil: now, limit: { maxQuantityPerTrade: 1000, maxQuantityPerUserSkuDay: 1000, remainingQuantityToday: 1000 }, canPurchase: true, unavailableReason: null } })
+      )
+    })
+  );
+  await page.route(`**/v1/npc-trades/buy/${skuId}`, async (route) => {
+    buyCalls += 1;
+    buyKeys.push(route.request().headers()["idempotency-key"] ?? "");
+    expect(route.request().postDataJSON()).toMatchObject({ quoteId: "quote-i36f", quoteVersion: "market/v1", quantity: 1, maxUnitPrice: 132 });
+    state.auto = [...state.auto, "complete-first-npc-trade", "unlock-collection-album"];
+    return route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify(
+        envelope({
+          trade: { id: "trade-i36f", userId, skuId, side: "buy", quantity: 1, quoteId: "quote-i36f", quoteVersion: "market/v1", unitPrice: { amount: 132, currency: "GAME_CREDIT" }, unitFee: { amount: 2, currency: "GAME_CREDIT" }, total: { amount: 134, currency: "GAME_CREDIT" }, fee: { amount: 2, currency: "GAME_CREDIT" }, settledAt: now },
+          balance: { total: { amount: 10_866, currency: "GAME_CREDIT" }, available: { amount: 10_866, currency: "GAME_CREDIT" }, frozen: { amount: 0, currency: "GAME_CREDIT" }, updatedAt: now },
+          holding: { skuId, quantity: 1, availableQuantity: 1, orderLockedQuantity: 0, tournamentLockedQuantity: 0, averageCost: { amount: 132, currency: "GAME_CREDIT" }, marketUnitPrice: null, marketValue: null, unrealizedProfitLoss: null, updatedAt: now }
+        })
+      )
+    });
   });
-  await tourPanel.getByRole("button", { name: "跳过此步" }).click();
-  // 跳过完成：自动前进到「收藏见涨」并跳转收藏图鉴页。
+  await page.locator("#onboarding-npc-buy").click();
+  await expect(page.getByRole("dialog", { name: "向 NPC 买入" })).toBeVisible();
+  await expect(tourPanel.getByText(/买入确认弹窗已打开：点击下方「确认向 NPC 买入」完成本步/)).toBeVisible();
+  await expect(page.locator("#onboarding-npc-confirm")).toBeVisible();
+  await expect(page.locator("#onboarding-npc-confirm")).toBeInViewport();
+  await page.locator("#onboarding-npc-confirm").dblclick();
+  expect(buyCalls).toBe(1);
+  expect(buyKeys[0]).toMatch(/^[0-9a-f-]{36}$/i);
+  // 交易完成：步骤显示「已完成」，停留在 /market（不自动跳走）。
+  await expect(tourPanel.getByText("完成首笔交易（已完成）", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/market$/);
+  // 跳过本步不应再出现（已由真实交易完成）；「下一步」→ 收藏见涨（跨页 /collection/album）。
+  await tourPanel.getByRole("button", { name: "下一步" }).click();
   await expect(page).toHaveURL(/\/collection\/album/);
   await expect(tourPanel.getByText("下一步：收藏见涨", { exact: true })).toBeVisible();
-  expect(skipCalls).toBe(1);
+  await expect(page.locator("#onboarding-collection-album")).toBeVisible();
   // 关闭 Tour：结束引导会话，气泡消失。
   await page.locator(".ant-tour-close").click();
   await expect(tourPanel).toHaveCount(0);
-  // 返回引导页：进度只来自服务端投影（创建存档/领取资金/看价/交易共 4 步完成，其中交易为跳过）。
-  // 进入 /onboarding 会由 Tour 自动开始会话，气泡标题与页面摘要可能同时展示「下一步」，取第一个即可。
+  // 返回引导页：进度只来自服务端投影（创建存档/领取资金/开包/看价/交易/收藏共 6 步完成，报名待办）。
   await page.goto("/onboarding");
   await expect(page.getByRole("heading", { name: "新手引导" })).toBeVisible();
-  await expect(page.getByText("已完成 4 / 7 步")).toBeVisible();
-  await expect(page.getByRole("img", { name: "引导进度 57%" })).toBeVisible();
-  await expect(page.getByText("下一步：收藏见涨").first()).toBeVisible();
+  await expect(page.getByText("已完成 6 / 7 步")).toBeVisible();
+  await expect(page.getByRole("img", { name: "引导进度 86%" })).toBeVisible();
+  await expect(page.getByText("下一步：首次报名").first()).toBeVisible();
 });
 
 test("跳过与重进：Tour 内跳过只投递一次，已跳过步骤不可再跳，刷新后不伪造进度", async ({ page }) => {
@@ -339,9 +404,13 @@ test("跳过与重进：Tour 内跳过只投递一次，已跳过步骤不可再
   const tourPanel = page.locator(".ant-tour-panel");
   await expect(tourPanel.getByText("下一步：创建存档", { exact: true })).toBeVisible();
   await tourPanel.getByRole("button", { name: "跳过此步" }).dblclick();
-  // 只投递一次；跳过视为已完成，自动前进到下一步。
+  // 只投递一次；跳过视为已完成：步骤显示「创建存档（已完成）」，但**不自动前进**（前进只由按钮控制）。
   expect(skipCalls).toBe(1);
   expect(skipKeys[0]).toMatch(/^[0-9a-f-]{36}$/i);
+  await expect(tourPanel.getByText("创建存档（已完成）", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  // 点击「下一步」→ 领取工作资金（同页 /dashboard）。
+  await tourPanel.getByRole("button", { name: "下一步" }).click();
   await expect(tourPanel.getByText("下一步：领取工作资金", { exact: true })).toBeVisible();
   // 上一步回到已跳过步骤：显示「已完成」，不再提供跳过入口。
   await tourPanel.getByRole("button", { name: "上一步" }).click();

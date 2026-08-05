@@ -10,8 +10,8 @@ import styles from "./onboarding-guide-tour.module.css";
 
 /**
  * 每个引导步骤的目标锚点 id 列表（按序解析，取第一个实际存在于 DOM 的）：
- * - 「开出第一包」在购买补充包弹窗打开后，把目标从页面「购买并开包」按钮切换到弹窗内的
- *   「确认购买并开包」按钮——rc-tour 蒙层会在目标位置留出可点击孔洞，点击穿透到弹窗按钮；
+ * - 「开出第一包」「完成首笔交易」「首次报名」步骤的弹窗打开后，把目标从页面入口按钮切换到
+ *   弹窗内的确认按钮——rc-tour 蒙层会在目标位置留出可点击孔洞，点击穿透到弹窗按钮；
  * - 其余步骤目标直接指向对应功能页按钮/区块；目标页面不存在时以居中卡片展示。
  */
 const ANCHOR_IDS_BY_STEP: Record<string, string[]> = {
@@ -19,12 +19,29 @@ const ANCHOR_IDS_BY_STEP: Record<string, string[]> = {
   "claim-work-funds": ["onboarding-work-funds"],
   "open-first-pack": ["onboarding-pack-confirm", "onboarding-pack-purchase"],
   "view-price-history": ["onboarding-view-price-history"],
-  "complete-first-npc-trade": ["onboarding-npc-buy"],
+  "complete-first-npc-trade": ["onboarding-npc-confirm", "onboarding-npc-buy"],
   "unlock-collection-album": ["onboarding-collection-album"],
-  "first-tournament-registration": ["onboarding-tournaments"]
+  "first-tournament-registration": ["onboarding-tournament-confirm", "onboarding-tournaments"]
 };
 
-/** 按序解析当前实际存在的目标锚点 id（弹窗打开时确认按钮在 DOM 中，优先于页面按钮）。 */
+/** 弹窗确认按钮锚点 → 气泡补充提示（告诉玩家弹窗已打开、在弹窗内点哪个按钮）。 */
+const DIALOG_HINTS: Record<string, string> = {
+  "onboarding-pack-confirm": "购买弹窗已打开：点击下方「确认购买并开包」完成本步。",
+  "onboarding-npc-confirm": "买入确认弹窗已打开：点击下方「确认向 NPC 买入」完成本步。",
+  "onboarding-tournament-confirm": "报名确认弹窗已打开：选择已保存卡组后点击「确认报名」完成本步。"
+};
+
+/** 步骤 href → 页面名称（气泡内说明当前步骤在哪个页面完成）。 */
+const PAGE_LABELS: Record<string, string> = {
+  "/dashboard": "玩家首页",
+  "/packs": "补充包商店",
+  "/market/history": "价格历史页",
+  "/market": "市场页",
+  "/collection/album": "收藏图鉴页",
+  "/tournaments": "今日比赛页"
+};
+
+/** 按序解析当前实际存在的目标锚点 id（弹窗打开时确认按钮在 DOM 中，优先于页面入口按钮）。 */
 function resolveAnchorIdFor(stepId: string): string | null {
   for (const id of ANCHOR_IDS_BY_STEP[stepId] ?? []) {
     if (typeof document !== "undefined" && document.getElementById(id)) return id;
@@ -38,11 +55,21 @@ function tourStepTitle(step: OnboardingStepDto, data: OnboardingDto): string {
   return step.title;
 }
 
+/** 组装步骤说明：服务端文案 + 目标页面说明 +（弹窗打开时）弹窗确认按钮提示。 */
+function composeDescription(step: OnboardingStepDto, anchorId: string | null): string {
+  const pageLabel = PAGE_LABELS[step.href];
+  const pageHint = pageLabel ? `本步骤在「${pageLabel}」（${step.href}）完成。` : "";
+  const dialogHint = anchorId ? DIALOG_HINTS[anchorId] : "";
+  return `${step.description}${pageHint}${dialogHint}`;
+}
+
 /**
  * I36F 新手引导 Tour：跨页面常驻（挂在 (player) 布局）。引导会话目标步骤由引导页/玩家首页
- * 入口写入，切换页面不丢失当前步骤；步骤完成（服务端推进）后自动前进到下一个未完成步骤。
- * 目标按钮锚点存在时高亮该按钮并允许直接点击（蒙层不拦截），否则以居中卡片展示并提供
- * 「去完成 →」跳转；跳过为显式幂等命令（服务端判定，重放不重复计数）。
+ * 入口写入，切换页面不丢失当前步骤。步骤完成（服务端推进）只更新展示（标题变为「已完成」），
+ * **不会自动前进或跳页**——所有跨步/跨页移动都由 Tour 自己的按钮（下一步/上一步/去完成 →）控制，
+ * 玩家可停留在当前页看完开包动画、等待结算等，不会被强制跳走。
+ * 目标按钮锚点存在时高亮该按钮并允许直接点击（蒙层留孔洞，点击穿透），否则以居中卡片展示；
+ * 跳过为显式幂等命令（服务端判定，重放不重复计数）。
  */
 export function OnboardingGuideTour() {
   const { targetStepId, retarget, dismiss, dismissedRef } = useOnboardingGuide();
@@ -55,18 +82,10 @@ export function OnboardingGuideTour() {
   const data = onboarding.data?.data.onboarding;
   const [anchorTick, setAnchorTick] = useState(0);
 
-  // 前进到某一步时若其目标页面不在当前页，自动跳转（单次动作完成「完成当前步 → 进入下一步」；
-  // 否则领取资金后 Tour 只切步骤不跳页，下一步按钮在 /dashboard 上是 no-op，表现为引导卡死）。
-  const navigateToStep = (stepId: string | null) => {
-    if (!data || stepId === null) return;
-    const step = data.steps.find((item) => item.id === stepId);
-    if (step && step.href !== pathname) router.push(step.href);
-  };
-
   // 锚点可能晚于步骤切换才挂载：例如创建存档后首页从「未存档」分支切换并重新拉取概览，
   // 每日工作资金卡片（#onboarding-work-funds）比 Tour 推进到该步晚一拍才出现；购买补充包
-  // 弹窗打开后目标也会从页面按钮切换到弹窗确认按钮。轮询当前步骤锚点（解析结果 id）变化，
-  // 出现/消失/切换时强制重渲染，驱动 rc-tour 重新定位并 scrollIntoView。
+  // /买入/报名弹窗打开后目标也会从页面按钮切换到弹窗确认按钮。轮询当前步骤锚点（解析结果 id）
+  // 变化，出现/消失/切换时强制重渲染，驱动 rc-tour 重新定位并 scrollIntoView。
   useEffect(() => {
     if (targetStepId === null) return;
     let last = resolveAnchorIdFor(targetStepId);
@@ -87,19 +106,13 @@ export function OnboardingGuideTour() {
     if (pathname === "/onboarding") retarget(data.currentStepId ?? data.steps[0]?.id ?? null);
   }, [data, pathname, targetStepId, retarget, dismissedRef]);
 
-  // 当前步骤完成后自动前进到下一个未完成步骤并跳转到其页面；全部完成则结束会话（奖励在引导页领取）。
+  // 仅处理异常兜底：目标步骤在服务端投影中已不存在（规则版本切换等）时安全结束会话。
+  // 步骤完成绝不自动前进/跳页——前进只由 Tour 按钮控制（见 goNext/goPrev/去完成 →）。
   useEffect(() => {
     if (!data || targetStepId === null) return;
     const idx = data.steps.findIndex((step) => step.id === targetStepId);
-    if (idx === -1 || data.steps[idx]?.completion !== null) {
-      if (data.allCompleted) dismiss();
-      else {
-        const nextStepId = data.currentStepId;
-        retarget(nextStepId);
-        navigateToStep(nextStepId);
-      }
-    }
-  }, [data, targetStepId, retarget, dismiss, pathname, router]);
+    if (idx === -1) dismiss();
+  }, [data, targetStepId, dismiss]);
 
   if (!data || targetStepId === null || data.allCompleted) return null;
 
@@ -142,17 +155,14 @@ export function OnboardingGuideTour() {
   const steps: NonNullable<TourProps["steps"]> = data.steps.map((step) => {
     const done = step.completion !== null;
     const isLastStep = step.order === data.steps.length;
-    const anchorId = resolveAnchorIdFor(step.id);
+    const anchorId = step.id === targetStepId ? resolveAnchorIdFor(step.id) : null;
     const targetHere = step.id === targetStepId && anchorTick >= 0 && anchorId !== null;
-    const primaryLabel = done ? "继续" : targetHere ? (isLastStep ? "完成引导" : "下一步") : "去完成 →";
-    // 目标锚点解析为弹窗内确认按钮时（如购买补充包弹窗已打开），提示玩家在弹窗内完成确认。
-    const isDialogStep = step.id === targetStepId && anchorId === "onboarding-pack-confirm";
-    const description = isDialogStep
-      ? "购买弹窗已打开：点击下方「确认购买并开包」完成本步（弹窗内确认按钮已高亮）。"
-      : step.description;
+    // 已完成的步骤由玩家点「下一步/完成引导」推进；未完成且锚点在当前页同样「下一步」；
+    // 锚点不在当前页（跨页步骤）显示「去完成 →」先跳到目标页面。
+    const primaryLabel = done ? (isLastStep ? "完成引导" : "下一步") : targetHere ? (isLastStep ? "完成引导" : "下一步") : "去完成 →";
     return {
       title: tourStepTitle(step, data),
-      description,
+      description: composeDescription(step, anchorId),
       placement: targetHere ? "right" : "center",
       target: anchorId ? (() => document.getElementById(anchorId) ?? null) as () => HTMLElement : null,
       actionsRender: (_, info) => (
@@ -171,7 +181,7 @@ export function OnboardingGuideTour() {
                 if (isLastStep) finish();
                 else goNext();
               } else {
-                // 跨页步骤：先跳到目标功能页，当前步骤保留以高亮该页按钮。
+                // 跨页步骤：先跳到目标功能页，当前步骤保留以高亮该页按钮/弹窗确认按钮。
                 goTo(step.href);
               }
             }}>{primaryLabel}</button>

@@ -86,7 +86,7 @@ export function NpcBuyDialog({ item, onClose, onSettled }: { item: MarketQuoteLi
       {mutationError ? <p className={styles.tradeError} role="alert">{mutationError}</p> : null}
       <div className="actions">
         <button className="button secondary" type="button" disabled={buy.isPending} onClick={onClose}>取消</button>
-        <button className="button" type="button" disabled={!previewValue?.canPurchase || preview.isFetching || buy.isPending} onClick={confirm}>{buy.isPending ? "正在由服务端成交…" : "确认向 NPC 买入"}</button>
+        <button id="onboarding-npc-confirm" className="button" type="button" disabled={!previewValue?.canPurchase || preview.isFetching || buy.isPending} onClick={confirm}>{buy.isPending ? "正在由服务端成交…" : "确认向 NPC 买入"}</button>
       </div>
     </section>
   </div>;
