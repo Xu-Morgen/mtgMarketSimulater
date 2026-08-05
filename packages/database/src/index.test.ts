@@ -20,7 +20,7 @@ describe("database foundation", () => {
     const database = openSqliteDatabase(join(directory, "test.db"));
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
     expect(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get()).toEqual({
-      count: 37
+      count: 38
     });
     expect(
       database
@@ -139,6 +139,13 @@ describe("database foundation", () => {
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'player_growth'").get()).toEqual({ name: "player_growth" });
     expect(database.prepare("SELECT version FROM rule_versions WHERE rule_set = 'daily-task'").get()).toEqual({ version: "daily-task/v1" });
     expect(database.prepare("SELECT version FROM rule_versions WHERE rule_set = 'level'").get()).toEqual({ version: "level/v1" });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'onboarding_steps'").get()).toEqual({ name: "onboarding_steps" });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'onboarding_progress'").get()).toEqual({ name: "onboarding_progress" });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'onboarding_reward_grants'").get()).toEqual({ name: "onboarding_reward_grants" });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'onboarding_events'").get()).toEqual({ name: "onboarding_events" });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM onboarding_steps").get()).toEqual({ count: 6 });
+    expect(database.prepare("SELECT step_order, href, skippable FROM onboarding_steps WHERE id = 'open-first-pack'").get()).toEqual({ step_order: 2, href: "/packs", skippable: 1 });
+    expect(database.prepare("SELECT version FROM rule_versions WHERE rule_set = 'onboarding'").get()).toEqual({ version: "onboarding/v1" });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'backup_records'").get()).toEqual({ name: "backup_records" });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'export_records'").get()).toEqual({ name: "export_records" });
     expect(

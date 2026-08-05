@@ -627,3 +627,4 @@ export * from "./achievement-rules.js";
 export * from "./export-rules.js";
 export * from "./daily-task-rules.js";
 export * from "./level-rules.js";
+export * from "./onboarding-rules.js";

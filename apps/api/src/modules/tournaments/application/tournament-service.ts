@@ -30,6 +30,7 @@ import { LeylineEvaluationError, type LeylineClient } from "../../decks/infrastr
 import { InventoryService } from "../../inventory/application/inventory-service.js";
 import { enqueueAchievementProcessJob, enqueueTournamentSettleJob } from "../../jobs/application/task-service.js";
 import { GrowthService } from "../../growth/application/growth-service.js";
+import { OnboardingService } from "../../onboarding/application/onboarding-service.js";
 import { PackService } from "../../packs/application/pack-service.js";
 import { UserService } from "../../users/application/user-service.js";
 import { naturalDateAt } from "../../users/domain/natural-day.js";
@@ -177,6 +178,7 @@ export class TournamentService {
   private readonly decks: DeckService;
   private readonly packs: PackService;
   private readonly growth: GrowthService;
+  private readonly onboarding: OnboardingService;
 
   constructor(
     private readonly database: Database.Database,
@@ -187,6 +189,7 @@ export class TournamentService {
     this.decks = new DeckService(database);
     this.packs = new PackService(database);
     this.growth = new GrowthService(database, config.timezone);
+    this.onboarding = new OnboardingService(database);
   }
 
   /** 同一 actor+key 只持久化一次命令结果，供无外部 I/O 的玩家赛事写命令使用。 */
@@ -1026,6 +1029,8 @@ export class TournamentService {
     enqueueAchievementProcessJob(this.database, factEventId, input.now);
     // I35B：在事实写入的同一事务内同步推进任务实例进度与等级快照（外层事务保证至多一次）。
     this.growth.advanceFromFact(factEventId);
+    // I36B：同一已结算事实同步推进新手引导步骤（fact 步骤完成 + profile 步骤刷新）。
+    this.onboarding.advanceFromFact(factEventId);
   }
 
   private tournamentDto(tournament: Tournament, userId: string): TournamentDto {

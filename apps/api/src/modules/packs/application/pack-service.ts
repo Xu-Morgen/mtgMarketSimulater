@@ -23,6 +23,7 @@ import { InventoryService } from "../../inventory/application/inventory-service.
 import { UserService } from "../../users/application/user-service.js";
 import { MarketService } from "../../market/application/market-service.js";
 import { GrowthService } from "../../growth/application/growth-service.js";
+import { OnboardingService } from "../../onboarding/application/onboarding-service.js";
 import { enqueueMarketRepriceJob, enqueuePackAchievementProcessJob } from "../../jobs/application/task-service.js";
 import { failure, success } from "../../../shared/http/api-response.js";
 
@@ -104,6 +105,7 @@ export class PackService {
   private readonly users: UserService;
   private readonly market: MarketService;
   private readonly growth: GrowthService;
+  private readonly onboarding: OnboardingService;
   constructor(
     private readonly database: Database.Database,
     private readonly createSeed: () => string = () => randomBytes(32).toString("hex"),
@@ -114,6 +116,7 @@ export class PackService {
     this.users = new UserService(database);
     this.market = new MarketService(database);
     this.growth = new GrowthService(database, timezone);
+    this.onboarding = new OnboardingService(database);
   }
 
   list(now = new Date().toISOString()): PackDto[] {
@@ -602,6 +605,8 @@ export class PackService {
     enqueuePackAchievementProcessJob(this.database, eventId, input.now);
     // I35B：在事实写入的同一事务内同步推进任务实例进度与等级快照（外层事务保证至多一次）。
     this.growth.advanceFromFact(eventId);
+    // I36B：同一已结算事实同步推进新手引导步骤（fact 步骤完成 + profile 步骤刷新）。
+    this.onboarding.advanceFromFact(eventId);
     this.users.writeEconomicAudit(
       input.userId,
       input.grantSource === "tournament_reward" ? "tournament_reward.pack_opened" : "pack.opened",

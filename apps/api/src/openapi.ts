@@ -131,7 +131,11 @@ export const publicApiPaths = [
   "/v1/exports/{id}/download",
   "/v1/tasks",
   "/v1/tasks/{instanceId}/claim",
-  "/v1/growth"
+  "/v1/growth",
+  "/v1/onboarding",
+  "/v1/onboarding/steps/{stepId}/skip",
+  "/v1/onboarding/steps/{stepId}/view",
+  "/v1/onboarding/reward/claim"
 ] as const;
 
 export const openApiDocument = {
@@ -569,6 +573,30 @@ export const openApiDocument = {
       get: {
         summary: "读取等级/声望档案（等级、经验、称号与已解锁能力只由服务端计算）",
         responses: { "200": { description: "等级档案" }, "401": { description: "认证无效或过期" }, "409": { description: "请先创建游戏存档" } }
+      }
+    },
+    "/v1/onboarding": {
+      get: {
+        summary: "读取新手引导步骤、完成进度与一次性完成奖励状态（完成判定只由服务端推进）",
+        responses: { "200": { description: "引导投影" }, "401": { description: "认证无效或过期" } }
+      }
+    },
+    "/v1/onboarding/steps/{stepId}/skip": {
+      post: {
+        summary: "以幂等键跳过一条引导步骤（永久视为已完成，老玩家补完路径）",
+        responses: { "201": { description: "已跳过" }, "200": { description: "幂等重放" }, "400": { description: "缺少幂等键或请求无效" }, "404": { description: "步骤不存在" }, "409": { description: "不可跳过、已完成或幂等冲突" } }
+      }
+    },
+    "/v1/onboarding/steps/{stepId}/view": {
+      post: {
+        summary: "提交价格历史页浏览意图（view_event 步骤；服务端校验路径并记录访问事件）",
+        responses: { "201": { description: "已记录" }, "200": { description: "幂等重放" }, "400": { description: "缺少幂等键或请求无效" }, "404": { description: "步骤不存在" }, "409": { description: "路径不匹配或幂等冲突" } }
+      }
+    },
+    "/v1/onboarding/reward/claim": {
+      post: {
+        summary: "以幂等键领取一次性引导完成奖励（全部步骤完成后；PRIMARY KEY(user_id) 防重发）",
+        responses: { "201": { description: "奖励已入账" }, "200": { description: "幂等重放" }, "400": { description: "缺少幂等键或请求无效" }, "409": { description: "请先创建游戏存档、步骤未完成、已领取或幂等冲突" } }
       }
     },
     "/v1/admin/catalog/sync": {

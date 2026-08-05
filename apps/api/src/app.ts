@@ -28,6 +28,7 @@ import { registerBackupRoutes } from "./modules/backup/api/backup-routes.js";
 import { registerExportRoutes } from "./modules/export/api/export-routes.js";
 import { registerWatchlistRoutes } from "./modules/watchlist/api/watchlist-routes.js";
 import { registerGrowthRoutes } from "./modules/growth/api/growth-routes.js";
+import { registerOnboardingRoutes } from "./modules/onboarding/api/onboarding-routes.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -126,6 +127,7 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
   await registerExportRoutes(app, config, database);
   await registerWatchlistRoutes(app, database);
   await registerGrowthRoutes(app, database, config.APP_TIMEZONE);
+  await registerOnboardingRoutes(app, database);
 
   app.get("/health", async (request) => success(request.requestId, { status: "ok", database: databaseHealth(database) }));
 

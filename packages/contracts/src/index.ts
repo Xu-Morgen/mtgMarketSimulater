@@ -552,7 +552,7 @@ export interface PlayerDashboardDto {
   };
   marketIndex: MarketIndexDto;
   todos: Array<{
-    id: "claim_daily_work_funding" | "acquire_cards" | "build_deck" | "register_tournament" | "claim_task_rewards";
+    id: "claim_daily_work_funding" | "acquire_cards" | "build_deck" | "register_tournament" | "claim_task_rewards" | "continue_onboarding";
     label: string;
     href: string;
   }>;
@@ -1160,6 +1160,47 @@ export interface GrowthProfileDto {
   peakNetWorth: Money;
   ruleVersion: string;
   updatedAt: string;
+}
+
+/** I36B 新手引导：步骤与完成奖励只承载服务端已结算结果；浏览器不判定完成、不发放奖励。 */
+export type OnboardingStepCompletionKindDto = "auto" | "skip";
+export interface OnboardingStepDto {
+  /** 稳定步骤 ID（引导目标链：领取资金/开包/看价/首笔交易/收藏/报名）。 */
+  id: string;
+  order: number;
+  title: string;
+  description: string;
+  /** 前端目标功能入口；跳转只做导航，不改变完成状态。 */
+  href: string;
+  skippable: boolean;
+  /** 完成方式：服务端按已结算事实/状态自动完成，或玩家显式跳过。 */
+  completion: OnboardingStepCompletionKindDto | null;
+  completedAt: string | null;
+  skippedAt: string | null;
+}
+export type OnboardingRewardStatusDto = "unavailable" | "available" | "claimed";
+export interface OnboardingDto {
+  ruleVersion: string;
+  steps: OnboardingStepDto[];
+  completedCount: number;
+  totalCount: number;
+  allCompleted: boolean;
+  /** 第一个未完成步骤（供前端高亮下一步）；全部完成时为 null。 */
+  currentStepId: string | null;
+  reward: {
+    status: OnboardingRewardStatusDto;
+    /** 固定的一次性奖励金额（规则版本确定）；浏览器只展示不推导。 */
+    amount: Money;
+    claimedAt: string | null;
+  };
+  updatedAt: string;
+}
+export interface OnboardingRewardClaimDto {
+  status: OnboardingRewardStatusDto;
+  reward: Money;
+  /** 入账后可用余额；浏览器只展示，不推导。 */
+  balance: Money;
+  claimedAt: string;
 }
 
 export interface FactEvent<TType extends string, TPayload> {

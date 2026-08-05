@@ -19,6 +19,7 @@ import { enqueueMarketRepriceJob } from "../../jobs/application/task-service.js"
 import { MarketService, type NpcSettlementQuote } from "../../market/application/market-service.js";
 import { UserService } from "../../users/application/user-service.js";
 import { GrowthService } from "../../growth/application/growth-service.js";
+import { OnboardingService } from "../../onboarding/application/onboarding-service.js";
 import { failure, success } from "../../../shared/http/api-response.js";
 
 type LimitsRow = { max_quantity_per_trade: number; max_quantity_per_user_sku_day: number };
@@ -58,12 +59,14 @@ export class NpcTradeService {
   private readonly users: UserService;
   private readonly market: MarketService;
   private readonly growth: GrowthService;
+  private readonly onboarding: OnboardingService;
 
   constructor(private readonly database: Database.Database, timezone = "Asia/Shanghai") {
     this.inventory = new InventoryService(database);
     this.users = new UserService(database);
     this.market = new MarketService(database);
     this.growth = new GrowthService(database, timezone);
+    this.onboarding = new OnboardingService(database);
   }
 
   buyPreview(userId: string, skuId: string, quantity: number, now = new Date()): NpcBuyPreviewResult {
@@ -546,6 +549,8 @@ export class NpcTradeService {
     ).run(randomUUID(), eventId, JSON.stringify(event), now);
     // I35B：在事实写入的同一事务内同步推进任务实例进度与等级快照（外层事务保证至多一次）。
     this.growth.advanceFromFact(eventId);
+    // I36B：同一已结算事实同步推进新手引导步骤（fact 步骤完成 + profile 步骤刷新）。
+    this.onboarding.advanceFromFact(eventId);
     return eventId;
   }
 

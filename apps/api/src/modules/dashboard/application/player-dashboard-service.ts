@@ -4,6 +4,7 @@ import { DeckService } from "../../decks/application/deck-service.js";
 import { TaskService } from "../../growth/application/task-service.js";
 import { InventoryService } from "../../inventory/application/inventory-service.js";
 import { MarketService } from "../../market/application/market-service.js";
+import { OnboardingService } from "../../onboarding/application/onboarding-service.js";
 import type { TournamentService } from "../../tournaments/application/tournament-service.js";
 import { UserService, type DailyWorkFundingConfig } from "../../users/application/user-service.js";
 
@@ -35,9 +36,11 @@ export class PlayerDashboardService {
     this.decks = new DeckService(database);
     this.market = new MarketService(database);
     this.tasks = new TaskService(database, timezone);
+    this.onboarding = new OnboardingService(database);
   }
 
   private readonly tasks: TaskService;
+  private readonly onboarding: OnboardingService;
 
   overview(userId: string, now = new Date()): PlayerDashboardDto | null {
     const archive = this.users.archive(userId);
@@ -65,6 +68,10 @@ export class PlayerDashboardService {
     }
     if (this.tasks.overview(userId, now).pendingRewardCount > 0) {
       todos.push({ id: "claim_task_rewards", label: "领取任务中心奖励", href: "/tasks" });
+    }
+    // I36B：新手引导未完成或完成奖励未领取时展示常驻引导入口（纯读判定，不写快照）。
+    if (this.onboarding.hasIncompleteOnboarding(userId)) {
+      todos.push({ id: "continue_onboarding", label: "继续新手引导", href: "/onboarding" });
     }
 
     return {

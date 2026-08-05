@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /** SQLite 持久化事实模型。金额字段均为整数最小货币单位，时间均为 UTC ISO 8601。 */
 export const users = sqliteTable(
@@ -810,3 +810,57 @@ export const playerGrowth = sqliteTable("player_growth", {
   ruleVersion: text("rule_version").notNull(),
   updatedAt: text("updated_at").notNull()
 });
+
+/** I36B 新手引导：步骤定义、玩家进度（PRIMARY KEY(user_id, step_id) 收敛并发/重放）、
+ * 一次性完成奖励（PRIMARY KEY(user_id) 防重发）与 view_event 访问事件（唯一约束防重复计数）。
+ * 完成判定只由服务端基于已结算事实/状态推进；浏览器只展示与提交意图。 */
+export const onboardingSteps = sqliteTable(
+  "onboarding_steps",
+  {
+    id: text("id").primaryKey(),
+    stepOrder: integer("step_order").notNull(),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    href: text("href").notNull(),
+    targetPath: text("target_path"),
+    skippable: integer("skippable").notNull(),
+    ruleVersion: text("rule_version").notNull()
+  }
+);
+
+export const onboardingProgress = sqliteTable(
+  "onboarding_progress",
+  {
+    userId: text("user_id").notNull().references(() => users.id),
+    stepId: text("step_id").notNull().references(() => onboardingSteps.id),
+    stepVersion: text("step_version").notNull(),
+    completedAt: text("completed_at"),
+    skippedAt: text("skipped_at"),
+    updatedAt: text("updated_at").notNull()
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.stepId] }),
+    index("onboarding_progress_user_index").on(table.userId)
+  ]
+);
+
+export const onboardingRewardGrants = sqliteTable("onboarding_reward_grants", {
+  userId: text("user_id").primaryKey().references(() => users.id),
+  amount: integer("amount").notNull(),
+  ruleVersion: text("rule_version").notNull(),
+  claimedAt: text("claimed_at").notNull()
+});
+
+export const onboardingEvents = sqliteTable(
+  "onboarding_events",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    eventKind: text("event_kind").notNull(),
+    stepId: text("step_id").notNull().references(() => onboardingSteps.id),
+    occurredAt: text("occurred_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("onboarding_events_user_kind_step_unique").on(table.userId, table.eventKind, table.stepId)
+  ]
+);

@@ -43,6 +43,7 @@ import { enqueueMarketRepriceJob, enqueueOrderExpireJob } from "../../jobs/appli
 import { MarketService } from "../../market/application/market-service.js";
 import { UserService } from "../../users/application/user-service.js";
 import { GrowthService } from "../../growth/application/growth-service.js";
+import { OnboardingService } from "../../onboarding/application/onboarding-service.js";
 import { success, failure } from "../../../shared/http/api-response.js";
 import {
   assertPositiveQuantity,
@@ -175,12 +176,14 @@ export class OrderService {
   private readonly users: UserService;
   private readonly market: MarketService;
   private readonly growth: GrowthService;
+  private readonly onboarding: OnboardingService;
 
   constructor(private readonly database: Database.Database, timezone = "Asia/Shanghai") {
     this.inventory = new InventoryService(database);
     this.users = new UserService(database);
     this.market = new MarketService(database);
     this.growth = new GrowthService(database, timezone);
+    this.onboarding = new OnboardingService(database);
   }
 
   preview(userId: string, skuId: string, side: OrderSide, quantity: number, now = new Date()): OrderPreviewResult {
@@ -973,6 +976,8 @@ export class OrderService {
     enqueueMarketRepriceJob(this.database, `fact-event:${eventId}`, now);
     // I35B：在事实写入的同一事务内同步推进任务实例进度与等级快照（外层事务保证至多一次）。
     this.growth.advanceFromFact(eventId);
+    // I36B：同一已结算事实同步推进新手引导步骤（fact 步骤完成 + profile 步骤刷新）。
+    this.onboarding.advanceFromFact(eventId);
     return eventId;
   }
 
