@@ -489,7 +489,8 @@ test("重复卡一键清仓：开包结果页二次确认只投递一次并展�
   await expect(page.getByRole("heading", { name: "重复卡批量卖出已完成" })).toBeVisible();
   await expect(page.getByText(/服务端共卖出/)).toBeVisible();
   await expect(page.getByText(/实际收入 468 游戏币/)).toBeVisible();
-  await expect(page.getByText(/quote_unavailable/)).toBeVisible();
+  // 跳过明细：服务端 reason=quote_unavailable 渲染为中文原因文案（浏览器不自行翻译）。
+  await expect(page.getByText(/暂无有效报价，未卖出/)).toBeVisible();
   expect(sellCalls).toBe(1);
   expect(receivedKey).toMatch(/^[0-9a-f-]{36}$/i);
 });

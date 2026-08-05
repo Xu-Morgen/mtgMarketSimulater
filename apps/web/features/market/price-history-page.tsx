@@ -128,10 +128,17 @@ export function PriceHistoryPage() {
   // 会在同一次挂载上连续执行 setup→cleanup→setup，state 守卫在第二次 setup 时仍是旧值
   // 会导致重复投递；ref 在两次 setup 之间同步保留，可保证同一实例只提交一次。
   const viewSubmitted = useRef(false);
+  // 反馈文案用本地状态驱动而不是依赖 mutation.isSuccess：effect 触发的 mutation 在
+  // StrictMode 双次挂载期间其观察者可能被清理，成功态不回流导致成功横幅不出现；
+  // 本地状态在提交意图后立即展示反馈，请求失败时改为错误提示（浏览器仍只提交意图）。
+  const [viewFeedback, setViewFeedback] = useState<"submitted" | "error" | null>(null);
   useEffect(() => {
     if (viewSubmitted.current) return;
     viewSubmitted.current = true;
-    recordView.mutate({ stepId: "view-price-history", path: "/market/history" });
+    setViewFeedback("submitted");
+    recordView.mutate({ stepId: "view-price-history", path: "/market/history" }, {
+      onError: () => setViewFeedback("error")
+    });
     // 仅首次进入页面提交一次意图；后续查询/路由变化不重复投递（recordView 引用稳定，无需入依赖）。
   }, [recordView]);
 
@@ -154,7 +161,8 @@ export function PriceHistoryPage() {
     <p className="eyebrow">服务端价格历史投影</p>
     <h1>价格历史与市场曲线</h1>
     <p className="intro">所有历史点均由服务端按 UTC 自然日采样后返回。金色曲线为 Cardmarket EUR 参考价/指数，蓝色曲线为游戏内报价/指数；某日缺失参考价或游戏内报价时该段断线，浏览器不插值、不重算。</p>
-    {recordView.isSuccess ? <p className={styles.muted} role="status">已向服务器记录本次价格历史浏览（新手引导「看懂价格」由服务端判定完成）。</p> : null}
+    {viewFeedback === "submitted" ? <p className={styles.muted} role="status">已向服务器记录本次价格历史浏览（新手引导「看懂价格」由服务端判定完成）。</p> : null}
+    {viewFeedback === "error" ? <p className={styles.stale} role="alert">记录价格历史浏览意图未完成，可重新进入本页重试。</p> : null}
 
     <section className={styles.chartCard} aria-label="市场指数历史">
       <div className={styles.summaryHeader}><span>市场指数历史</span><Link href="/market" className="text-button">返回市场报价列表</Link></div>

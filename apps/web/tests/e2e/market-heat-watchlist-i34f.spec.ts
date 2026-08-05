@@ -126,7 +126,8 @@ test("市场页行情屏：涨跌榜 ▲/▼、迷你走势条、公告区与叙
   await expect(page.getByRole("heading", { name: "日内涨幅榜" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "日内跌幅榜" })).toBeVisible();
   await expect(page.getByText("▲ 20%").first()).toBeVisible();
-  await expect(page.getByText("▼ 10%").first()).toBeVisible();
+  // 跌幅榜方向徽标：changeBasisPoints 为负，服务端渲染「▼ -10%」（负号来自百分比格式化）。
+  await expect(page.getByText("▼ -10%").first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "当日最活跃交易" })).toBeVisible();
   await expect(page.getByText("成交 5 张")).toBeVisible();
   // 迷你走势条：SVG 只读服务端指数历史点。
@@ -406,7 +407,8 @@ test("库存页按筛选批量卖出：二次确认只投递一次并展示服�
   await expect(page.getByRole("heading", { name: "按筛选批量卖出已完成" })).toBeVisible();
   await expect(page.getByText(/服务端共卖出 3 张/)).toBeVisible();
   await expect(page.getByText(/实际收入 444 游戏币/)).toBeVisible();
-  await expect(page.getByText(/no_available_quantity/)).toBeVisible();
+  // 跳过明细：服务端 reason=no_available_quantity 渲染为中文原因文案（浏览器不自行翻译）。
+  await expect(page.getByText(/可用库存为 0（全部被订单\/比赛锁定）/)).toBeVisible();
   expect(batchCalls).toBe(1);
   expect(batchKey).toMatch(/^[0-9a-f-]{36}$/i);
 });

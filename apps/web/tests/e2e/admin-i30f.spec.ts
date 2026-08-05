@@ -128,9 +128,10 @@ test("普通玩家没有活动/玩家/日志入口，深层链接 403，管理 A
   await page.getByRole("textbox", { name: "密码" }).fill("playwright-password-123");
   await page.getByRole("button", { name: "创建账号" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByRole("link", { name: "活动" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "玩家" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "日志" })).toHaveCount(0);
+  // getByRole 的 name 默认子串匹配，「玩家首页」会误命中「玩家」；用 exact 只匹配管理侧栏的同名链接。
+  await expect(page.getByRole("link", { name: "活动", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "玩家", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "日志", exact: true })).toHaveCount(0);
   await page.goto("/admin/events");
   await expect(page.getByRole("heading", { name: "无权访问此页面" })).toBeVisible();
   const apiBaseUrl = process.env.PLAYWRIGHT_API_BASE_URL ?? "http://localhost:3001";

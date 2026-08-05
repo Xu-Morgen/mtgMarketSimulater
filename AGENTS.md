@@ -141,6 +141,11 @@ e2e 验证默认由用户手动执行（见第 7 节 E2E 执行策略）。每�
   6. `price-history-page.tsx` 浏览意图（view_event）重复投递：dev StrictMode 对同一次挂载执行 setup→cleanup→setup，`useState` 守卫第二次仍是旧值导致 POST 两次（onboarding 用例 `viewCalls` 断言 2≠1）；守卫改为同步 `useRef`（两次 setup 间保留），同实例只提交一次。
   7. market 页 `link 价格提醒` strict mode（侧栏导航 + intro 内 text-button 同名链接）：改为 `getByLabel("玩家导航")` 内限定；价格提醒页列表方向徽标实际渲染为「≤ 跌到或低于」（页面 `directionLabel` 输出 `≤ 跌到或低于`，原断言「跌到或低于（≤）」为选项文案）→ 改断言文案。
   8. packs:144 卡牌详情弹窗断言 strict mode（开包卡片与弹窗内各一个占位文案）：限定 `getByLabel("卡牌详情")` 弹窗内；packs:291 加载态 `[aria-busy]` 断言在窄屏选到被隐藏的路由级 loading 占位（`app/loading.tsx`「正在加载页面」与补充包页自身骨架「正在加载补充包」同时存在）→ 用 `main[aria-busy="true"]` 过滤 `hasText: "正在加载补充包"` 锁定页面自身骨架。
+- **第三轮（用户复跑后剩 9 例失败，桌面+窄屏）**，按新 error-context 修复：
+  9. 市场页跌幅榜徽标实际渲染「▼ -10%」（`changeBasisPoints` 为负，`formatBasisPoints` 输出负号），原断言「▼ 10%」找不到 → 改断言文案。
+  10. 批量卖出跳过明细渲染的是中文原因文案（`skipLabel(reason)`：quote_unavailable→「暂无有效报价，未卖出」、no_available_quantity→「可用库存为 0（全部被订单/比赛锁定）」），原断言匹配英文 reason 键（`/quote_unavailable/`、`/no_available_quantity/`）找不到 → 改为断言中文文案。
+  11. onboarding 引导页浏览意图（view_event）只投递一次后（ref 守卫生效、trace 确认仅 1 次 POST），成功横幅仍不出现：effect 触发的 mutation 在 StrictMode 双次挂载下观察者可能被清理、`isSuccess` 不回流 → 反馈文案改用本地状态驱动（提交意图即显示，失败切错误提示），仍只提交一次意图。
+  12. admin-i30f（仅窄屏）：`getByRole("link", { name: "玩家" })` 为子串匹配，「玩家首页」误命中；桌面因断言早于导航渲染通过属时序侥幸 → 三条入口断言全部加 `exact: true`。
 - 需用户手动验证：本次改动的 6 个 spec（`packs.spec.ts`、`inventory.spec.ts`、`orders.spec.ts`、`npc-sell.spec.ts`、`collection-album-i33f.spec.ts`、`market-heat-watchlist-i34f.spec.ts`、`tasks-growth-i35f.spec.ts`、`onboarding-i36f.spec.ts`）桌面 + 390px 窄屏。
 - 备注：`tasks.spec`/`market.spec` 的“确认”静态按钮 `force` 双击与 `ConfirmDialog` 未受影响；未改动 API、contracts、rules 与数据库。测试期间的 `tsconfig.tsbuildinfo` 为生成物，已还原不入库。
 
