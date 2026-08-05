@@ -3,7 +3,7 @@
 import { Tour, type TourProps } from "antd";
 import type { OnboardingDto, OnboardingStepDto } from "@mtg-market/contracts";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useOnboardingQuery, useSkipStepMutation } from "../api/onboarding-api";
 import { useOnboardingGuide } from "../providers/onboarding-guide-context";
 import styles from "./onboarding-guide-tour.module.css";
@@ -49,6 +49,25 @@ export function OnboardingGuideTour() {
   const skip = useSkipStepMutation();
   const skipLock = useRef(false);
   const data = onboarding.data?.data.onboarding;
+  const [anchorTick, setAnchorTick] = useState(0);
+
+  // 锚点可能晚于步骤切换才挂载：例如创建存档后首页从「未存档」分支切换并重新拉取概览，
+  // 每日工作资金卡片（#onboarding-work-funds）比 Tour 推进到该步晚一拍才出现。轮询当前步骤
+  // 锚点存在性，出现/消失时强制重渲染，驱动 rc-tour 重新定位并 scrollIntoView（否则气泡一直
+  // 以居中卡片展示，同页「去完成 →」为 no-op，表现为引导卡死）。
+  useEffect(() => {
+    if (targetStepId === null) return;
+    const id = anchorIdFor(targetStepId);
+    let last = Boolean(id && document.getElementById(id));
+    const timer = window.setInterval(() => {
+      const present = Boolean(id && document.getElementById(id));
+      if (present !== last) {
+        last = present;
+        setAnchorTick((tick) => tick + 1);
+      }
+    }, 200);
+    return () => window.clearInterval(timer);
+  }, [targetStepId, pathname]);
 
   // 进入引导页时自动开始本次引导会话（从当前未完成步骤开始）；已完成全部步骤时不启动。
   useEffect(() => {
@@ -78,18 +97,28 @@ export function OnboardingGuideTour() {
     if (next < data.steps.length && data.steps[next]) retarget(data.steps[next]!.id);
   };
   const finish = () => retarget(null);
-  const goTo = (href: string) => router.push(href);
+  const goTo = (href: string) => {
+    if (href === pathname) {
+      // 已在目标页：锚点可能刚挂载（如创建存档后首页分支切换），强制重新定位并滚动；
+      // 否则同页「去完成 →」跳转为 no-op，气泡会一直停留在居中卡片，表现为引导卡死。
+      setAnchorTick((tick) => tick + 1);
+      return;
+    }
+    router.push(href);
+  };
   const skipStep = (step: OnboardingStepDto) => {
     if (skip.isPending || skipLock.current) return;
     skipLock.current = true;
     skip.mutate({ stepId: step.id }, { onSettled: () => { skipLock.current = false; } });
   };
 
+  // anchorTick 变化会触发本组件重渲染：锚点轮询/同页强制重新定位后，步骤的目标解析与
+  // placement/按钮文案都会基于最新 DOM 重算，驱动 rc-tour 重新定位并滚动到目标。
   const steps: NonNullable<TourProps["steps"]> = data.steps.map((step) => {
     const done = step.completion !== null;
     const isLastStep = step.order === data.steps.length;
     const anchorId = anchorIdFor(step.id);
-    const targetHere = anchorOnPage(step.id);
+    const targetHere = step.id === targetStepId && anchorTick >= 0 && anchorOnPage(step.id);
     const primaryLabel = done ? "继续" : targetHere ? (isLastStep ? "完成引导" : "下一步") : "去完成 →";
     return {
       title: tourStepTitle(step, data),

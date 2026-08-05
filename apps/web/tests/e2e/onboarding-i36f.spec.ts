@@ -209,11 +209,15 @@ test("首次引导完整流程：开始 → 高亮按钮 → 真实完成创建�
   await expect(tourPanel.getByText("下一步：创建存档", { exact: true })).toBeVisible();
   await expect(tourPanel.getByText(/点击玩家首页「创建游戏存档」按钮/)).toBeVisible();
   await expect(page.locator("#onboarding-create-archive")).toBeVisible();
-  // 真实点击目标按钮完成第一步：服务端推进后 Tour 自动前进到「领取工作资金」并高亮领取按钮。
+  // 真实点击目标按钮完成第一步：服务端推进后 Tour 自动前进到「领取工作资金」并高亮领取卡片。
   await page.locator("#onboarding-create-archive").click();
   await expect(tourPanel.getByText("下一步：领取工作资金", { exact: true })).toBeVisible();
+  // 回归：创建存档后首页从「未存档」分支切换并重拉概览，每日工作资金卡片（锚点）晚于步骤切换
+  // 才挂载；Tour 锚点轮询应自动重新定位并滚动到该卡片，不允许停留在居中卡片导致卡死。
   await expect(page.locator("#onboarding-work-funds")).toBeVisible();
-  await page.locator("#onboarding-work-funds").click();
+  await expect(page.locator("#onboarding-work-funds")).toBeInViewport();
+  await expect(page.locator("#onboarding-work-funds").getByRole("button", { name: "领取 1,000 游戏币" })).toBeVisible();
+  await page.locator("#onboarding-work-funds").getByRole("button", { name: "领取 1,000 游戏币" }).click();
   // 领取资金完成：自动前进到「开出第一包」（跨页步骤）。
   await expect(tourPanel.getByText("下一步：开出第一包", { exact: true })).toBeVisible();
   await tourPanel.getByRole("button", { name: "去完成 →" }).click();
@@ -373,6 +377,7 @@ test("未创建存档的新玩家首页展示常驻引导入口，可启动 Tour
   const tourPanel = page.locator(".ant-tour-panel");
   await expect(tourPanel.getByText("下一步：创建存档", { exact: true })).toBeVisible();
   await expect(page.locator("#onboarding-create-archive")).toBeVisible();
+  await expect(page.locator("#onboarding-create-archive")).toBeInViewport();
   // 关闭 Tour 后进度刷新仍为服务端投影。
   await page.locator(".ant-tour-close").click();
   await expect(tourPanel).toHaveCount(0);
