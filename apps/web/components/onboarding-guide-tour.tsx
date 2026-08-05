@@ -51,6 +51,14 @@ export function OnboardingGuideTour() {
   const data = onboarding.data?.data.onboarding;
   const [anchorTick, setAnchorTick] = useState(0);
 
+  // 前进到某一步时若其目标页面不在当前页，自动跳转（单次动作完成「完成当前步 → 进入下一步」；
+  // 否则领取资金后 Tour 只切步骤不跳页，下一步按钮在 /dashboard 上是 no-op，表现为引导卡死）。
+  const navigateToStep = (stepId: string | null) => {
+    if (!data || stepId === null) return;
+    const step = data.steps.find((item) => item.id === stepId);
+    if (step && step.href !== pathname) router.push(step.href);
+  };
+
   // 锚点可能晚于步骤切换才挂载：例如创建存档后首页从「未存档」分支切换并重新拉取概览，
   // 每日工作资金卡片（#onboarding-work-funds）比 Tour 推进到该步晚一拍才出现。轮询当前步骤
   // 锚点存在性，出现/消失时强制重渲染，驱动 rc-tour 重新定位并 scrollIntoView（否则气泡一直
@@ -76,26 +84,38 @@ export function OnboardingGuideTour() {
     if (pathname === "/onboarding") retarget(data.currentStepId ?? data.steps[0]?.id ?? null);
   }, [data, pathname, targetStepId, retarget, dismissedRef]);
 
-  // 当前步骤完成后自动前进到下一个未完成步骤；全部完成则结束会话（奖励在引导页领取）。
+  // 当前步骤完成后自动前进到下一个未完成步骤并跳转到其页面；全部完成则结束会话（奖励在引导页领取）。
   useEffect(() => {
     if (!data || targetStepId === null) return;
     const idx = data.steps.findIndex((step) => step.id === targetStepId);
     if (idx === -1 || data.steps[idx]?.completion !== null) {
       if (data.allCompleted) dismiss();
-      else retarget(data.currentStepId);
+      else {
+        const nextStepId = data.currentStepId;
+        retarget(nextStepId);
+        navigateToStep(nextStepId);
+      }
     }
-  }, [data, targetStepId, retarget, dismiss]);
+  }, [data, targetStepId, retarget, dismiss, pathname, router]);
 
   if (!data || targetStepId === null || data.allCompleted) return null;
 
   const current = Math.max(0, data.steps.findIndex((step) => step.id === targetStepId));
   const goPrev = () => {
     const prev = current - 1;
-    if (prev >= 0 && data.steps[prev]) retarget(data.steps[prev]!.id);
+    if (prev >= 0 && data.steps[prev]) {
+      const step = data.steps[prev]!;
+      retarget(step.id);
+      if (step.href !== pathname) router.push(step.href);
+    }
   };
   const goNext = () => {
     const next = current + 1;
-    if (next < data.steps.length && data.steps[next]) retarget(data.steps[next]!.id);
+    if (next < data.steps.length && data.steps[next]) {
+      const step = data.steps[next]!;
+      retarget(step.id);
+      if (step.href !== pathname) router.push(step.href);
+    }
   };
   // 关闭/完成：显式结束本次引导会话（玩家关闭后不再被自动重启）。
   const finish = () => dismiss();

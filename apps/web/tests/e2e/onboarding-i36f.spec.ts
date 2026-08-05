@@ -188,6 +188,12 @@ test("首次引导完整流程：开始 → 高亮按钮 → 真实完成创建�
   await page.route("**/v1/packs", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [activePack] })) }));
   await page.route("**/v1/pack-openings?*", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
   await mockHistoryReads(page);
+  // 步骤自动跳转会进入市场页与收藏图鉴页：补只读 mock 使页面干净渲染（Tour 气泡不受影响）。
+  await page.route("**/v1/market/index", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ referenceIndex: 100, gameIndex: 100, quotedSkus: 0, capturedAt: now })) }));
+  await page.route("**/v1/market/heat", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ intradayGainers: [], intradayLosers: [], mostActive: [], capturedAt: now })) }));
+  await page.route("**/v1/market/announcements", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], capturedAt: now })) }));
+  await page.route("**/v1/collection/album?*", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ sets: { items: [], page: { total: 0, hasMore: false, nextCursor: null } } })) }));
+  await page.route("**/v1/achievements", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [] })) }));
   // view_event：价格历史页提交浏览意图，服务端据此完成「看懂价格」。
   let viewCalls = 0;
   const viewKeys: string[] = [];
@@ -218,21 +224,22 @@ test("首次引导完整流程：开始 → 高亮按钮 → 真实完成创建�
   await expect(page.locator("#onboarding-work-funds")).toBeInViewport();
   await expect(page.locator("#onboarding-work-funds").getByRole("button", { name: "领取 1,000 游戏币" })).toBeVisible();
   await page.locator("#onboarding-work-funds").getByRole("button", { name: "领取 1,000 游戏币" }).click();
-  // 领取资金完成：自动前进到「开出第一包」（跨页步骤）。
-  await expect(tourPanel.getByText("下一步：开出第一包", { exact: true })).toBeVisible();
-  await tourPanel.getByRole("button", { name: "去完成 →" }).click();
+  // 领取资金完成：自动前进到「开出第一包」并自动跳转到补充包商店（无需再手动点击）。
   await expect(page).toHaveURL(/\/packs$/);
+  const tourPanelOnPacks = tourPanel;
+  await expect(tourPanelOnPacks.getByText("下一步：开出第一包", { exact: true })).toBeVisible();
   await expect(page.locator("#onboarding-pack-purchase")).toBeVisible();
-  await expect(tourPanel.getByText("下一步：开出第一包", { exact: true })).toBeVisible();
-  // 继续 → 看懂价格（跨页）→ 价格历史页提交浏览意图且只投递一次。
+  await expect(page.locator("#onboarding-pack-purchase")).toBeInViewport();
+  // 继续 → 看懂价格：点击「下一步」自动跳转到价格历史页并提交浏览意图（只投递一次）。
   await tourPanel.getByRole("button", { name: "下一步" }).click();
-  await expect(tourPanel.getByText("下一步：看懂价格", { exact: true })).toBeVisible();
-  await tourPanel.getByRole("button", { name: "去完成 →" }).click();
   await expect(page).toHaveURL(/\/market\/history/);
+  await expect(tourPanel.getByText("下一步：看懂价格", { exact: true })).toBeVisible();
+  await expect(page.locator("#onboarding-view-price-history")).toBeVisible();
   await expect(page.getByText("已向服务器记录本次价格历史浏览（新手引导「看懂价格」由服务端判定完成）。")).toBeVisible();
   expect(viewCalls).toBe(1);
   expect(viewKeys[0]).toMatch(/^[0-9a-f-]{36}$/i);
-  // 浏览意图完成：Tour 自动前进到「完成首笔交易」（其按钮在市场页，此处居中展示）。
+  // 浏览意图完成：自动前进到「完成首笔交易」并跳转市场页（其按钮在市场页，此处无报价故居中展示）。
+  await expect(page).toHaveURL(/\/market$/);
   await expect(tourPanel.getByText("下一步：完成首笔交易", { exact: true })).toBeVisible();
   // 在 Tour 内跳过本步：只投递一次，自动前进到「收藏见涨」。
   let skipCalls = 0;
@@ -242,6 +249,8 @@ test("首次引导完整流程：开始 → 高亮按钮 → 真实完成创建�
     return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(envelope({ onboarding: onboardingGetter() })) });
   });
   await tourPanel.getByRole("button", { name: "跳过此步" }).click();
+  // 跳过完成：自动前进到「收藏见涨」并跳转收藏图鉴页。
+  await expect(page).toHaveURL(/\/collection\/album/);
   await expect(tourPanel.getByText("下一步：收藏见涨", { exact: true })).toBeVisible();
   expect(skipCalls).toBe(1);
   // 关闭 Tour：结束引导会话，气泡消失。
