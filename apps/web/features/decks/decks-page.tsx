@@ -34,7 +34,7 @@ export function DecksPage() {
   const decks = useDecksQuery();
   if (decks.isPending) return <PageSkeleton label="正在加载 Commander 卡组" />;
   if (decks.isError) return <main className="page"><ErrorState title="卡组加载失败" onRetry={() => void decks.refetch()} /></main>;
-  return <main className="page"><p className="eyebrow">Commander · 服务端草稿</p><div className={styles.deckCardHeader}><div><h1>我的卡组</h1><p className="intro">保存不会锁定库存或生成强度评分；报名时才由服务器重新检查资产并生成评分快照。</p></div><Link className="button" href="/decks/new">新建卡组</Link></div>{decks.data.data.items.length === 0 ? <EmptyState title="还没有卡组">从可用库存开始构筑；五种虚拟基本地无限且不占库存。</EmptyState> : <div className={styles.grid}>{decks.data.data.items.map((deck) => <DeckSummary key={deck.id} deck={deck} />)}</div>}</main>;
+  return <main className="page"><p className="eyebrow">Commander · 服务端草稿</p><div className={styles.deckCardHeader}><div><h1>我的卡组</h1><p className="intro">保存不会锁定库存或生成强度评分；报名时才由服务器重新检查资产并生成评分快照。</p></div><Link id="onboarding-decks" className="button" href="/decks/new">新建卡组</Link></div>{decks.data.data.items.length === 0 ? <EmptyState title="还没有卡组">从可用库存开始构筑；五种虚拟基本地无限且不占库存。</EmptyState> : <div className={styles.grid}>{decks.data.data.items.map((deck) => <DeckSummary key={deck.id} deck={deck} />)}</div>}</main>;
 }
 
 type ManaColor = "W" | "U" | "B" | "R" | "G";

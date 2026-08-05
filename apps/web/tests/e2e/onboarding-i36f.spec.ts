@@ -215,17 +215,22 @@ test("首次引导完整流程：开始 → 高亮按钮 → 真实完成创建�
   await expect(tourPanel.getByText("下一步：创建存档", { exact: true })).toBeVisible();
   await expect(tourPanel.getByText(/点击玩家首页「创建游戏存档」按钮/)).toBeVisible();
   await expect(page.locator("#onboarding-create-archive")).toBeVisible();
-  // 真实点击目标按钮完成第一步：点击高亮按钮后，步骤完成（服务端推进）自动前进到「领取工作资金」
-  // 并滚动到领取卡片（同一 /dashboard 页）。
+  // 真实点击目标按钮完成第一步：步骤显示「已完成」并停留 /dashboard（前进只由 Tour 按钮控制）。
   await page.locator("#onboarding-create-archive").click();
+  await expect(tourPanel.getByText("创建存档（已完成）", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  // 「下一步」→ 领取工作资金（同页 /dashboard，锚点轮询滚动到领取卡片）。
+  await tourPanel.getByRole("button", { name: "下一步" }).click();
   await expect(tourPanel.getByText("下一步：领取工作资金", { exact: true })).toBeVisible();
-  // 回归：创建存档后首页从「未存档」分支切换并重拉概览，每日工作资金卡片（锚点）晚于步骤切换
-  // 才挂载；Tour 锚点轮询应自动重新定位并滚动到该卡片，不允许停留在居中卡片导致卡死。
   await expect(page.locator("#onboarding-work-funds")).toBeVisible();
   await expect(page.locator("#onboarding-work-funds")).toBeInViewport();
   await expect(page.locator("#onboarding-work-funds").getByRole("button", { name: "领取 1,000 游戏币" })).toBeVisible();
   await page.locator("#onboarding-work-funds").getByRole("button", { name: "领取 1,000 游戏币" }).click();
-  // 领取资金完成（点击高亮按钮）：自动前进到「开出第一包」并跳转补充包商店。
+  // 领取资金完成：显示「已完成」，停留 /dashboard。
+  await expect(tourPanel.getByText("领取工作资金（已完成）", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  // 「下一步」→ 开出第一包（跨页 /packs）。
+  await tourPanel.getByRole("button", { name: "下一步" }).click();
   await expect(page).toHaveURL(/\/packs$/);
   await expect(tourPanel.getByText("下一步：开出第一包", { exact: true })).toBeVisible();
   await expect(page.locator("#onboarding-pack-purchase")).toBeVisible();
@@ -280,17 +285,21 @@ test("首次引导完整流程：开始 → 高亮按钮 → 真实完成创建�
   await page.locator("#onboarding-pack-confirm").dblclick();
   expect(openCalls).toBe(1);
   expect(openKeys[0]).toMatch(/^[0-9a-f-]{36}$/i);
-  // 开包完成（点击高亮确认按钮）：自动前进到「看懂价格」并跳转价格历史页。
+  // 开包完成：步骤显示「已完成」并**停留 /packs**（可看完开包动画），不自动跳转。
+  await expect(tourPanel.getByText("开出第一包（已完成）", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/packs$/);
+  // 「下一步」→ 看懂价格（跨页 /market/history）；浏览意图自动提交（view 意图仅记录访问，非跳转控制）。
+  await tourPanel.getByRole("button", { name: "下一步" }).click();
   await expect(page).toHaveURL(/\/market\/history/);
   await expect(tourPanel.getByText("下一步：看懂价格", { exact: true })).toBeVisible();
   await expect(page.locator("#onboarding-view-price-history")).toBeVisible();
   await expect(page.getByText("已向服务器记录本次价格历史浏览（新手引导「看懂价格」由服务端判定完成）。")).toBeVisible();
   expect(viewCalls).toBe(1);
   expect(viewKeys[0]).toMatch(/^[0-9a-f-]{36}$/i);
-  // 浏览意图完成属于纯后台完成（无高亮按钮点击）：**不自动前进**，停留在 /market/history，
-  // 由玩家点击「下一步」进入「完成首笔交易」（跨页 /market）。
+  // 浏览意图完成（纯后台）：步骤显示「已完成」，停留 /market/history。
   await expect(tourPanel.getByText("看懂价格（已完成）", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/market\/history/);
+  // 「下一步」→ 完成首笔交易（跨页 /market）。
   await tourPanel.getByRole("button", { name: "下一步" }).click();
   await expect(page).toHaveURL(/\/market$/);
   await expect(tourPanel.getByText("下一步：完成首笔交易", { exact: true })).toBeVisible();
@@ -329,7 +338,7 @@ test("首次引导完整流程：开始 → 高亮按钮 → 真实完成创建�
     buyCalls += 1;
     buyKeys.push(route.request().headers()["idempotency-key"] ?? "");
     expect(route.request().postDataJSON()).toMatchObject({ quoteId: "quote-i36f", quoteVersion: "market/v1", quantity: 1, maxUnitPrice: 132 });
-    state.auto = [...state.auto, "complete-first-npc-trade", "unlock-collection-album"];
+    state.auto = [...state.auto, "complete-first-npc-trade"];
     return route.fulfill({
       status: 201,
       contentType: "application/json",
@@ -350,19 +359,23 @@ test("首次引导完整流程：开始 → 高亮按钮 → 真实完成创建�
   await page.locator("#onboarding-npc-confirm").dblclick();
   expect(buyCalls).toBe(1);
   expect(buyKeys[0]).toMatch(/^[0-9a-f-]{36}$/i);
-  // 交易完成（点击高亮确认按钮）：自动前进到「收藏见涨」并跳转收藏图鉴页。
+  // 交易完成：步骤显示「已完成」，停留 /market（不自动跳转）。
+  await expect(tourPanel.getByText("完成首笔交易（已完成）", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/market$/);
+  // 「下一步」→ 收藏见涨（跨页 /collection/album）。
+  await tourPanel.getByRole("button", { name: "下一步" }).click();
   await expect(page).toHaveURL(/\/collection\/album/);
   await expect(tourPanel.getByText("下一步：收藏见涨", { exact: true })).toBeVisible();
   await expect(page.locator("#onboarding-collection-album")).toBeVisible();
   // 关闭 Tour：结束引导会话，气泡消失。
   await page.locator(".ant-tour-close").click();
   await expect(tourPanel).toHaveCount(0);
-  // 返回引导页：进度只来自服务端投影（创建存档/领取资金/开包/看价/交易/收藏共 6 步完成，报名待办）。
+  // 返回引导页：进度只来自服务端投影（创建存档/领取资金/开包/看价/交易共 5 步完成，收藏/报名待办）。
   await page.goto("/onboarding");
   await expect(page.getByRole("heading", { name: "新手引导" })).toBeVisible();
-  await expect(page.getByText("已完成 6 / 7 步")).toBeVisible();
-  await expect(page.getByRole("img", { name: "引导进度 86%" })).toBeVisible();
-  await expect(page.getByText("下一步：首次报名").first()).toBeVisible();
+  await expect(page.getByText("已完成 5 / 7 步")).toBeVisible();
+  await expect(page.getByRole("img", { name: "引导进度 71%" })).toBeVisible();
+  await expect(page.getByText("下一步：收藏见涨").first()).toBeVisible();
 });
 
 test("跳过与重进：Tour 内跳过只投递一次，已跳过步骤不可再跳，刷新后不伪造进度", async ({ page }) => {
@@ -536,4 +549,45 @@ test("侧栏「新手引导」先弹确认框，确认后跳到当前步骤路�
   // 在引导页显式「开始引导」可重新开启（清除已关闭标记）。
   await page.getByRole("button", { name: "开始引导" }).click();
   await expect(tourPanel.getByText("下一步：开出第一包", { exact: true })).toBeVisible();
+});
+
+test("首次报名先引导到卡组页构筑（无卡组时），有卡组后直达赛事页；路由切换期间主按钮禁用", async ({ page }) => {
+  test.setTimeout(90_000);
+  await session(page);
+  // 前六步已完成，当前步骤为「首次报名」；玩家暂无已保存卡组。
+  const state = { auto: stepDefs.slice(0, 6).map((def) => def.id) as string[], hasDeck: false };
+  await page.route("**/v1/onboarding", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ onboarding: onboardingData({ auto: state.auto }) })) }));
+  await page.route("**/v1/decks", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: state.hasDeck ? [{ id: "deck-i36f", name: "新手卡组", format: "commander-100/v1", ruleVersion: "commander-100/v1", banlistVersion: "commander-banlist/2026-08-05", cards: [], legality: { valid: true, totalCards: 100, colorIdentity: ["R"], issues: [], ruleVersion: "commander-100/v1", banlistVersion: "commander-banlist/2026-08-05", checkedAt: now }, strengthSnapshot: null, createdAt: now, updatedAt: now }] : [] })) }));
+  // /decks 页所需的库存只读 mock（新建卡组页会读取可用库存）。
+  await page.route("**/v1/inventory?*", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+  // 赛事页只读 mock（今日比赛列表空）。
+  await page.route("**/v1/tournaments", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [] })) }));
+  await page.route("**/v1/tournaments/history", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [] })) }));
+  await page.route("**/v1/tournament-pack-grants", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [] })) }));
+  await page.route("**/v1/player-tournament-pack-grants", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [] })) }));
+  await page.route("**/v1/player-tournaments", (route) => route.request().method() === "GET" ? route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [] })) }) : route.fallback());
+  await page.route("**/v1/archive", (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ ok: false, error: { code: "RESOURCE_NOT_FOUND", message: "尚未创建游戏存档" }, meta: { requestId: "i36f-noarchive" } }) }));
+  await page.route("**/v1/ledger?*", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ items: [], page: { total: 0, hasMore: false, nextCursor: null } })) }));
+  await page.route("**/v1/growth", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ level: 1, title: "见习收藏家", totalXp: 0, nextLevelXp: 200, progressBasisPoints: 0, capabilities: { npcDailyTradeMultiplier: 1, bulkPackMax: 10 }, peakNetWorth: { amount: 11_000, currency: "GAME_CREDIT" }, ruleVersion: "level/v1", updatedAt: now })) }));
+  await page.route("**/v1/dashboard", (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ ok: false, error: { code: "RESOURCE_NOT_FOUND", message: "尚未创建游戏存档" }, meta: { requestId: "i36f-noarchive" } }) }));
+
+  await page.goto("/onboarding");
+  const tourPanel = page.locator(".ant-tour-panel");
+  await expect(tourPanel.getByText("下一步：首次报名", { exact: true })).toBeVisible();
+  // 无卡组：点击「去完成 →」先跳到卡组页（/decks），不直接进赛事页。
+  await tourPanel.getByRole("button", { name: "去完成 →" }).click();
+  // 路由切换门禁：点击后主按钮暂时禁用（「正在切换页面…」），切换完成恢复。
+  await expect(page).toHaveURL(/\/decks$/);
+  await expect(page.locator("#onboarding-decks")).toBeVisible();
+  await expect(page.locator("#onboarding-decks")).toBeInViewport();
+  await expect(tourPanel.getByText(/报名比赛需要先有一个已保存的合法 Commander 卡组/)).toBeVisible();
+  // 卡组前置中间阶段：主按钮为「前往赛事页」（且切换完成后可点）。
+  const goTournament = tourPanel.getByRole("button", { name: "前往赛事页" });
+  await expect(goTournament).toBeEnabled();
+  // 现在补一张已保存卡组：重新走「前往赛事页」直达赛事页并高亮「报名预览与确认」。
+  state.hasDeck = true;
+  await goTournament.click();
+  await expect(page).toHaveURL(/\/tournaments$/);
+  await expect(page.locator("#onboarding-tournament-register")).toBeVisible();
+  await expect(page.locator("#onboarding-tournament-register")).toBeInViewport();
 });
