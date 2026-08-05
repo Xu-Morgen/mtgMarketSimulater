@@ -85,7 +85,10 @@ export function PlayerDashboardPage() {
 
   if (archive.isPending) return <PageSkeleton label="正在加载玩家存档" />;
   if (archive.isError && !(archive.error instanceof ApiClientError && archive.error.code === "RESOURCE_NOT_FOUND")) return <main className="page"><ErrorState title="存档加载失败" onRetry={() => void archive.refetch()} /></main>;
-  if (!hasArchive) return <main className="page"><p className="eyebrow">玩家首页</p><h1>开始你的市场之旅</h1><EmptyState title="尚未创建游戏存档">创建后，服务器会初始化你的账户和初始资金。</EmptyState><div className="actions"><button className="button" type="button" onClick={() => createArchive.mutate()} disabled={createArchive.isPending}>{createArchive.isPending ? "正在创建存档…" : "创建游戏存档"}</button></div>{createArchive.isError ? <p className="form-error" role="alert">{createArchive.error instanceof Error ? createArchive.error.message : "创建存档失败，请重试。"}</p> : null}</main>;
+  if (!hasArchive) return <main className="page"><p className="eyebrow">玩家首页</p><h1>开始你的市场之旅</h1><EmptyState title="尚未创建游戏存档">创建后，服务器会初始化你的账户和初始资金。</EmptyState><div className="actions"><button className="button" type="button" onClick={() => createArchive.mutate()} disabled={createArchive.isPending}>{createArchive.isPending ? "正在创建存档…" : "创建游戏存档"}</button></div>{createArchive.isError ? <p className="form-error" role="alert">{createArchive.error instanceof Error ? createArchive.error.message : "创建存档失败，请重试。"}</p> : null}
+    {/* I36F：未创建存档的新玩家也展示常驻新手引导入口（引导只读查询对未存档玩家开放，可直接进入 /onboarding 了解首次目标链）。 */}
+    <section className="dashboard-section" aria-labelledby="dashboard-onboarding-title"><OnboardingEntryCard /></section>
+  </main>;
 
   const ledgerData = ledger.data?.data;
   const growthProfile = growth.data?.data;

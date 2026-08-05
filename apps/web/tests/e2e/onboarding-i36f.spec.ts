@@ -308,3 +308,28 @@ test("首页常驻入口与徽标：未完成玩家显示引导徽标并跳转�
   await expect(page.getByText("每日开包")).toBeVisible();
   await expect(page.getByText("1 / 3", { exact: true })).toBeVisible();
 });
+
+test("未创建存档的新玩家首页展示常驻新手引导入口，可直接进入引导页", async ({ page }) => {
+  await session(page);
+  // 尚未创建存档：/v1/archive 返回 RESOURCE_NOT_FOUND，首页进入「尚未创建游戏存档」分支；
+  // /v1/onboarding 对未存档玩家开放只读查询（引导入口卡片独立请求）。
+  await page.route("**/v1/archive", (route) =>
+    route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ ok: false, error: { code: "RESOURCE_NOT_FOUND", message: "尚未创建游戏存档" }, meta: { requestId: "i36f-noarchive" } }) })
+  );
+  await page.route("**/v1/onboarding", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ onboarding: onboardingData() })) }));
+  // 首页概览与等级档案 hook 会随会话发起（未存档分支不使用结果），stub 避免访问真实 API。
+  await page.route("**/v1/dashboard", (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ ok: false, error: { code: "RESOURCE_NOT_FOUND", message: "尚未创建游戏存档" }, meta: { requestId: "i36f-noarchive" } }) }));
+  await page.route("**/v1/growth", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ level: 1, title: "见习收藏家", totalXp: 0, nextLevelXp: 200, progressBasisPoints: 0, capabilities: { npcDailyTradeMultiplier: 1, bulkPackMax: 10 }, peakNetWorth: { amount: 0, currency: "GAME_CREDIT" }, ruleVersion: "level/v1", updatedAt: now })) }));
+  await page.goto("/dashboard");
+  // 未创建存档分支：创建存档 CTA 与常驻新手引导入口并存，徽标显示全部待办 0/6。
+  await expect(page.getByText("尚未创建游戏存档")).toBeVisible();
+  await expect(page.getByRole("button", { name: "创建游戏存档" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "新手引导" })).toBeVisible();
+  await expect(page.getByText("引导进行中 0/6", { exact: true })).toBeVisible();
+  await expect(page.getByText("下一步：领取工作资金")).toBeVisible();
+  await expect(page.getByRole("link", { name: "继续引导" })).toHaveAttribute("href", "/onboarding");
+  await page.getByRole("link", { name: "继续引导" }).click();
+  await expect(page).toHaveURL(/\/onboarding$/);
+  await expect(page.getByRole("heading", { name: "新手引导" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "引导进度 0%" })).toBeVisible();
+});
