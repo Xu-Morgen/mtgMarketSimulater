@@ -5,7 +5,7 @@ import type { ColumnsType } from "antd/es/table";
 import type { CardFinish, MarketIndexHistoryPointDto, MarketQuoteListItemDto, PriceHistoryPointDto } from "@mtg-market/contracts";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type MarketFilters, useMarketQuotesQuery, useMarketIndexHistoryQuery, usePriceHistoryQuery } from "../../api/market-api";
 import { usePublicPriceStatusQuery } from "../../api/pricing-api";
 import { useRecordViewStepMutation } from "../../api/onboarding-api";
@@ -124,13 +124,16 @@ export function PriceHistoryPage() {
   // I36F 新手引导「看懂价格」为 view_event 步骤：实际浏览本页时向服务端提交访问意图，
   // 由服务端记录访问事件并判定完成；重放/重复访问不重复计数，浏览器不得自行判定。
   const recordView = useRecordViewStepMutation();
-  const [viewSubmitted, setViewSubmitted] = useState(false);
+  // I36F：浏览意图只投递一次。用 ref 而非 state 作为守卫，是因为 dev 模式 StrictMode
+  // 会在同一次挂载上连续执行 setup→cleanup→setup，state 守卫在第二次 setup 时仍是旧值
+  // 会导致重复投递；ref 在两次 setup 之间同步保留，可保证同一实例只提交一次。
+  const viewSubmitted = useRef(false);
   useEffect(() => {
-    if (viewSubmitted) return;
-    setViewSubmitted(true);
+    if (viewSubmitted.current) return;
+    viewSubmitted.current = true;
     recordView.mutate({ stepId: "view-price-history", path: "/market/history" });
     // 仅首次进入页面提交一次意图；后续查询/路由变化不重复投递（recordView 引用稳定，无需入依赖）。
-  }, [viewSubmitted, recordView]);
+  }, [recordView]);
 
   if (priceStatus.isPending) return <PageSkeleton label="正在加载价格历史与数据状态" />;
 

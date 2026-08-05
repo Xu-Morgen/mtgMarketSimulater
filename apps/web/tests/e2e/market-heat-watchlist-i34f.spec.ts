@@ -119,7 +119,8 @@ test("市场页行情屏：涨跌榜 ▲/▼、迷你走势条、公告区与叙
   await mockMarketPageCommon(page);
   await page.goto("/market");
   await expect(page.getByRole("heading", { name: "市场", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "价格提醒" })).toBeVisible();
+  // 价格提醒入口：侧栏导航链接（页内 intro 也有同名 text-button 链接，取导航内那个）。
+  await expect(page.getByLabel("玩家导航").getByRole("link", { name: "价格提醒" })).toBeVisible();
   // 行情屏：涨跌榜方向与幅度只展示服务端聚合。
   await expect(page.getByRole("heading", { name: "行情屏" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "日内涨幅榜" })).toBeVisible();
@@ -242,8 +243,8 @@ test("价格提醒页：列表/搜索添加二次确认、删除与启停只投�
   await expect(page.getByText("未读 1")).toBeVisible();
   await expect(page.getByText("行情测试卡A").first()).toBeVisible();
   await expect(page.getByText(/触发价 95 游戏币/)).toBeVisible();
-  // 列表：目标价/方向/启停只展示服务端保存值。
-  await expect(page.getByText("跌到或低于（≤）").first()).toBeVisible();
+  // 列表：目标价/方向/启停只展示服务端保存值（列表方向徽标渲染为「≤ 跌到或低于」）。
+  await expect(page.getByText("≤ 跌到或低于").first()).toBeVisible();
   await expect(page.getByText("100 游戏币").first()).toBeVisible();
   await expect(page.getByText("启用中").first()).toBeVisible();
   await expect(page.getByText("1 / 50").first()).toBeVisible();
@@ -399,10 +400,9 @@ test("库存页按筛选批量卖出：二次确认只投递一次并展示服�
   await expect(page.getByRole("heading", { name: "批量卖出当前筛选" })).toBeVisible();
   await expect(page.getByText("1 个 SKU")).toBeVisible();
   const confirm = page.getByRole("button", { name: "确认批量卖出" });
-  await confirm.click();
-  // 二次确认的重复点击只投递一次：click({ clickCount: 2 }) 在一次可操作性检查后连点两次，
-  // 即使按钮随后禁用仍会派发两次点击，用于验证「重复点击不重复投递」。
-  await confirm.click({ clickCount: 2 });
+  // 二次确认的重复点击只投递一次：单次 dblclick 在一次可操作性检查后派发两次点击，
+  // 按钮随后禁用改文案也不会再次解析 locator；配合弹窗内同步 confirmationLock 验证不重复投递。
+  await confirm.dblclick();
   await expect(page.getByRole("heading", { name: "按筛选批量卖出已完成" })).toBeVisible();
   await expect(page.getByText(/服务端共卖出 3 张/)).toBeVisible();
   await expect(page.getByText(/实际收入 444 游戏币/)).toBeVisible();

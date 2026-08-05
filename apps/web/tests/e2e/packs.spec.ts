@@ -203,7 +203,8 @@ test("购买预览、重复点击、跳过动画和刷新历史只展示一次�
   await expect(page.getByRole("dialog", { name: "卡牌详情" })).toBeVisible();
   await expect(page.getByText("罕贵度")).toBeVisible();
   await expect(page.getByText("rare")).toBeVisible();
-  await expect(page.getByText("暂无本地图片；管理员可按需缓存该印刷的卡图。")).toBeVisible();
+  // 卡牌详情弹窗内也含占位文案（开包卡片与弹窗各一），取详情弹窗内的那一个即可。
+  await expect(page.getByLabel("卡牌详情").getByText("暂无本地图片；管理员可按需缓存该印刷的卡图。")).toBeVisible();
   expect(openCalls).toBe(1);
   expect(receivedKey).toMatch(/^[0-9a-f-]{36}$/i);
   expect(previewCalls).toBeGreaterThanOrEqual(1);
@@ -287,7 +288,10 @@ test("补充包页覆盖加载、空列表、失败重试和规则版本刷新",
     });
   });
   await page.goto("/packs");
-  await expect(page.locator('[aria-busy="true"]').first()).toBeVisible();
+  // 加载态断言：路由级 loading 占位（「正在加载页面」）与补充包页自身骨架（「正在加载补充包」）
+  // 可能同时带 aria-busy，且路由占位会被隐藏/替换；必须按 sr-only 标签锁定页面自身骨架，避免 .first() 选到隐藏占位。
+  const packsSkeleton = page.locator('main[aria-busy="true"]').filter({ hasText: "正在加载补充包" });
+  await expect(packsSkeleton).toBeVisible();
   await expect(page.getByText("测试补充包")).toBeVisible();
   state = "empty";
   await page.reload();

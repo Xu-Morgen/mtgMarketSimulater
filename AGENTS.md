@@ -136,6 +136,11 @@ e2e 验证默认由用户手动执行（见第 7 节 E2E 执行策略）。每�
   2. `packs.spec.ts` 开包 fixture 缺 I33B 新增必填字段 `totalCost/totalGameValue`，`CostValueComparison` 对 `undefined` 调用 `formatMoney` 抛 TypeError 整页崩溃；已补 fixture，并给 `CostValueComparison` 增加 `gameProfitLoss === undefined` 的防御分支（服务端可能给出估值但暂无盈亏差额）。
   3. 三条定位器非精确/数量断言：market 页 `heading 市场`、价格提醒页 `heading 价格提醒` 与子标题歧义触发 strict mode；tasks 页「进行中」今日/本周各一个触发 strict mode；onboarding 页当前步骤显示「下一步」故「待完成」实际为 5（断言 6 与页面语义不符）。分别改 `exact: true`、`.first()`、`toHaveCount(5)`。
   4. collection-album/market 批量对话框二次确认「重复点击」用 `click({ force: true })`：按钮点击后随即禁用且文案改变（「正在由服务端…」），locator 因名称变化无法再次解析而超时；改为 `click({ clickCount: 2 })`（一次可操作性检查后连点两次，配合弹窗内 `confirmationLock` 仍验证只投递一次）。
+- **第二轮（用户复跑后剩 15 例失败，桌面+窄屏）**，按新 error-context 修复：
+  5. 批量二次确认仍需一次可操作性检查即派发两次点击：`click(); click({ clickCount: 2 })` 会在两次动作间重新解析 locator（按钮已改名/禁用）导致超时；统一改为单次 `confirm.dblclick()`（与 orders/npc-sell/onboarding/tasks 既有通过用例同款），弹窗内 `confirmationLock` 同步守卫仍验证只投递一次。
+  6. `price-history-page.tsx` 浏览意图（view_event）重复投递：dev StrictMode 对同一次挂载执行 setup→cleanup→setup，`useState` 守卫第二次仍是旧值导致 POST 两次（onboarding 用例 `viewCalls` 断言 2≠1）；守卫改为同步 `useRef`（两次 setup 间保留），同实例只提交一次。
+  7. market 页 `link 价格提醒` strict mode（侧栏导航 + intro 内 text-button 同名链接）：改为 `getByLabel("玩家导航")` 内限定；价格提醒页列表方向徽标实际渲染为「≤ 跌到或低于」（页面 `directionLabel` 输出 `≤ 跌到或低于`，原断言「跌到或低于（≤）」为选项文案）→ 改断言文案。
+  8. packs:144 卡牌详情弹窗断言 strict mode（开包卡片与弹窗内各一个占位文案）：限定 `getByLabel("卡牌详情")` 弹窗内；packs:291 加载态 `[aria-busy]` 断言在窄屏选到被隐藏的路由级 loading 占位（`app/loading.tsx`「正在加载页面」与补充包页自身骨架「正在加载补充包」同时存在）→ 用 `main[aria-busy="true"]` 过滤 `hasText: "正在加载补充包"` 锁定页面自身骨架。
 - 需用户手动验证：本次改动的 6 个 spec（`packs.spec.ts`、`inventory.spec.ts`、`orders.spec.ts`、`npc-sell.spec.ts`、`collection-album-i33f.spec.ts`、`market-heat-watchlist-i34f.spec.ts`、`tasks-growth-i35f.spec.ts`、`onboarding-i36f.spec.ts`）桌面 + 390px 窄屏。
 - 备注：`tasks.spec`/`market.spec` 的“确认”静态按钮 `force` 双击与 `ConfirmDialog` 未受影响；未改动 API、contracts、rules 与数据库。测试期间的 `tsconfig.tsbuildinfo` 为生成物，已还原不入库。
 
