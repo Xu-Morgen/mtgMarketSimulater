@@ -74,9 +74,10 @@ function composeDescription(step: OnboardingStepDto, anchorId: string | null): s
 /**
  * I36F 新手引导 Tour：跨页面常驻（挂在 (player) 布局）。引导会话目标步骤由引导页/玩家首页
  * 入口写入，切换页面不丢失当前步骤。
- * **所有步骤前进/跳转都只由 Tour 按钮触发**（下一步/上一步/去完成 →）：点击高亮目标按钮只执行
- * 该步骤的业务动作（创建存档/领取/购买确认等），步骤完成（服务端推进）只把气泡标题更新为
- * 「x（已完成）」并停留在当前页，绝不自动跳转——玩家可看完开包动画、等待结算，不会被强制跳走。
+ * 自动前进/跳转发生在：① 点击 Tour 按钮（下一步/上一步/去完成 →）；② 点击当前被高亮的目标
+ * 按钮（页面按钮或弹窗确认按钮），该步随后完成（服务端推进）时自动前进到下一步并跳转其路由/
+ * 滚动。**唯一例外是「开出第一包」**：开包确认后停留在 /packs 让玩家看完动画，前进只由 Tour
+ * 按钮控制。纯后台完成（浏览意图自动提交、profile 自动满足）不自动前进。
  * 路由切换期间（router.push 尚未完成）主按钮暂时禁用，避免页面未加载完就允许点到下一步导致卡死。
  * 「首次报名」步骤在玩家没有已保存卡组时先引导到卡组页（/decks）构筑，再前往赛事页报名。
  * 目标按钮锚点存在时高亮该按钮并允许直接点击（蒙层留孔洞，点击穿透），否则以居中卡片展示；
@@ -95,6 +96,9 @@ export function OnboardingGuideTour() {
   const [anchorTick, setAnchorTick] = useState(0);
   // 路由切换进行中（router.push 已发出、目标路径尚未渲染）：切换完成前主按钮禁用。
   const [navigating, setNavigating] = useState<string | null>(null);
+  // 记录「本步由玩家点击高亮目标完成」：只有这类完成（或点击 Tour 按钮）才触发自动前进；
+  // 纯后台完成（view 意图自动提交、profile 自动满足）绝不自动跳转。
+  const advanceAfterCompletionRef = useRef<string | null>(null);
 
   // 「首次报名」步骤需要已保存卡组：仅当该步为当前目标时才按需查询卡组列表。
   const decks = useQuery({
@@ -104,6 +108,34 @@ export function OnboardingGuideTour() {
     retry: false
   });
   const hasDeck = (decks.data?.data.items.length ?? 0) > 0;
+
+  // 统一的 Tour 导航入口：路由切换期间记录 navigating，pathname 到达后解除；同页则强制重新定位滚动。
+  const navigateTo = (href: string) => {
+    if (href === pathname) {
+      // 已在目标页：锚点可能刚挂载（如创建存档后首页分支切换），强制重新定位并滚动；
+      // 否则同页「去完成 →」跳转为 no-op，气泡会一直停留在居中卡片，表现为引导卡死。
+      setAnchorTick((tick) => tick + 1);
+      return;
+    }
+    setNavigating(href);
+    router.push(href);
+  };
+
+  // 监听点击：点击当前高亮目标（页面按钮或弹窗确认按钮）时记录本步为用户操作完成。
+  // 捕获阶段监听（capture），即使点击发生在弹窗内（蒙层孔洞穿透）也能记录。
+  useEffect(() => {
+    if (targetStepId === null) return;
+    const handler = (event: MouseEvent) => {
+      const anchorId = resolveAnchorIdFor(targetStepId);
+      if (!anchorId) return;
+      const el = document.getElementById(anchorId);
+      if (el && event.target instanceof Node && el.contains(event.target)) {
+        advanceAfterCompletionRef.current = targetStepId;
+      }
+    };
+    document.addEventListener("click", handler, true);
+    return () => document.removeEventListener("click", handler, true);
+  }, [targetStepId, anchorTick]);
 
   // 锚点可能晚于步骤切换才挂载：例如创建存档后首页从「未存档」分支切换并重新拉取概览，
   // 每日工作资金卡片（#onboarding-work-funds）比 Tour 推进到该步晚一拍才出现；购买补充包
@@ -134,28 +166,32 @@ export function OnboardingGuideTour() {
     if (navigating !== null && pathname === navigating) setNavigating(null);
   }, [pathname, navigating]);
 
-  // 仅处理异常兜底：目标步骤在服务端投影中已不存在（规则版本切换等）时安全结束会话。
-  // 步骤完成绝不自动前进/跳页——前进只由 Tour 按钮控制。
+  // 步骤完成自动前进：仅当该步由玩家点击高亮目标完成（advanceAfterCompletionRef 命中）时，自动
+  // 前进到下一步并跳转其页面/滚动。**例外：open-first-pack 不自动前进**（留在 /packs 看完动画）。
+  // 纯后台完成（view 意图自动提交、profile 自动满足）不自动前进，由 Tour 按钮控制。
+  // 目标步骤在服务端投影中已不存在（规则版本切换等）时安全结束会话。
   useEffect(() => {
     if (!data || targetStepId === null) return;
-    const idx = data.steps.findIndex((step) => step.id === targetStepId);
-    if (idx === -1) dismiss();
-  }, [data, targetStepId, dismiss]);
+    const step = data.steps.find((item) => item.id === targetStepId);
+    if (!step) { dismiss(); return; }
+    if (step.completion !== null && advanceAfterCompletionRef.current === targetStepId) {
+      advanceAfterCompletionRef.current = null;
+      if (targetStepId === "open-first-pack") return; // 开包步骤：停留看动画，前进只由按钮控制
+      if (data.allCompleted) { dismiss(); return; }
+      const nextStepId = data.currentStepId;
+      if (nextStepId) {
+        retarget(nextStepId);
+        const nextStep = data.steps.find((item) => item.id === nextStepId);
+        if (nextStep) navigateTo(nextStep.href);
+      }
+    }
+  }, [data, targetStepId, retarget, dismiss, pathname, router, navigateTo]);
 
   if (!data || targetStepId === null || data.allCompleted) return null;
 
   const current = Math.max(0, data.steps.findIndex((step) => step.id === targetStepId));
-  const navigateTo = (href: string) => {
-    if (href === pathname) {
-      // 已在目标页：锚点可能刚挂载（如创建存档后首页分支切换），强制重新定位并滚动；
-      // 否则同页「去完成 →」跳转为 no-op，气泡会一直停留在居中卡片，表现为引导卡死。
-      setAnchorTick((tick) => tick + 1);
-      return;
-    }
-    setNavigating(href);
-    router.push(href);
-  };
   const goPrev = () => {
+    advanceAfterCompletionRef.current = null; // Tour 按钮导航：清除「用户点击高亮目标」标记，避免陈旧触发
     const prev = current - 1;
     if (prev >= 0 && data.steps[prev]) {
       const step = data.steps[prev]!;
@@ -164,6 +200,7 @@ export function OnboardingGuideTour() {
     }
   };
   const goNext = () => {
+    advanceAfterCompletionRef.current = null;
     const next = current + 1;
     if (next < data.steps.length && data.steps[next]) {
       const step = data.steps[next]!;
@@ -172,7 +209,7 @@ export function OnboardingGuideTour() {
     }
   };
   // 关闭/完成：显式结束本次引导会话（玩家关闭后不再被自动重启）。
-  const finish = () => dismiss();
+  const finish = () => { advanceAfterCompletionRef.current = null; dismiss(); };
   const skipStep = (step: OnboardingStepDto) => {
     if (skip.isPending || skipLock.current) return;
     skipLock.current = true;

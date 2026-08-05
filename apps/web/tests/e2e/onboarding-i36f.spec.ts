@@ -215,22 +215,18 @@ test("首次引导完整流程：开始 → 高亮按钮 → 真实完成创建�
   await expect(tourPanel.getByText("下一步：创建存档", { exact: true })).toBeVisible();
   await expect(tourPanel.getByText(/点击玩家首页「创建游戏存档」按钮/)).toBeVisible();
   await expect(page.locator("#onboarding-create-archive")).toBeVisible();
-  // 真实点击目标按钮完成第一步：步骤显示「已完成」并停留 /dashboard（前进只由 Tour 按钮控制）。
+  // 真实点击目标按钮完成第一步：点击高亮按钮后，步骤完成（服务端推进）自动前进到「领取工作资金」
+  // 并滚动到领取卡片（同一 /dashboard 页）。
   await page.locator("#onboarding-create-archive").click();
-  await expect(tourPanel.getByText("创建存档（已完成）", { exact: true })).toBeVisible();
-  await expect(page).toHaveURL(/\/dashboard$/);
-  // 「下一步」→ 领取工作资金（同页 /dashboard，锚点轮询滚动到领取卡片）。
-  await tourPanel.getByRole("button", { name: "下一步" }).click();
   await expect(tourPanel.getByText("下一步：领取工作资金", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  // 回归：创建存档后首页从「未存档」分支切换并重拉概览，每日工作资金卡片（锚点）晚于步骤切换
+  // 才挂载；Tour 锚点轮询应自动重新定位并滚动到该卡片，不允许停留在居中卡片导致卡死。
   await expect(page.locator("#onboarding-work-funds")).toBeVisible();
   await expect(page.locator("#onboarding-work-funds")).toBeInViewport();
   await expect(page.locator("#onboarding-work-funds").getByRole("button", { name: "领取 1,000 游戏币" })).toBeVisible();
   await page.locator("#onboarding-work-funds").getByRole("button", { name: "领取 1,000 游戏币" }).click();
-  // 领取资金完成：显示「已完成」，停留 /dashboard。
-  await expect(tourPanel.getByText("领取工作资金（已完成）", { exact: true })).toBeVisible();
-  await expect(page).toHaveURL(/\/dashboard$/);
-  // 「下一步」→ 开出第一包（跨页 /packs）。
-  await tourPanel.getByRole("button", { name: "下一步" }).click();
+  // 领取资金完成（点击高亮按钮）：自动前进到「开出第一包」并跳转补充包商店。
   await expect(page).toHaveURL(/\/packs$/);
   await expect(tourPanel.getByText("下一步：开出第一包", { exact: true })).toBeVisible();
   await expect(page.locator("#onboarding-pack-purchase")).toBeVisible();
@@ -359,11 +355,7 @@ test("首次引导完整流程：开始 → 高亮按钮 → 真实完成创建�
   await page.locator("#onboarding-npc-confirm").dblclick();
   expect(buyCalls).toBe(1);
   expect(buyKeys[0]).toMatch(/^[0-9a-f-]{36}$/i);
-  // 交易完成：步骤显示「已完成」，停留 /market（不自动跳转）。
-  await expect(tourPanel.getByText("完成首笔交易（已完成）", { exact: true })).toBeVisible();
-  await expect(page).toHaveURL(/\/market$/);
-  // 「下一步」→ 收藏见涨（跨页 /collection/album）。
-  await tourPanel.getByRole("button", { name: "下一步" }).click();
+  // 交易完成（点击高亮确认按钮）：自动前进到「收藏见涨」并跳转收藏图鉴页。
   await expect(page).toHaveURL(/\/collection\/album/);
   await expect(tourPanel.getByText("下一步：收藏见涨", { exact: true })).toBeVisible();
   await expect(page.locator("#onboarding-collection-album")).toBeVisible();
