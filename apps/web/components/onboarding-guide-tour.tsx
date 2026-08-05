@@ -65,11 +65,13 @@ function composeDescription(step: OnboardingStepDto, anchorId: string | null): s
 
 /**
  * I36F 新手引导 Tour：跨页面常驻（挂在 (player) 布局）。引导会话目标步骤由引导页/玩家首页
- * 入口写入，切换页面不丢失当前步骤。步骤完成（服务端推进）只更新展示（标题变为「已完成」），
- * **不会自动前进或跳页**——所有跨步/跨页移动都由 Tour 自己的按钮（下一步/上一步/去完成 →）控制，
- * 玩家可停留在当前页看完开包动画、等待结算等，不会被强制跳走。
+ * 入口写入，切换页面不丢失当前步骤。
+ * 自动前进/跳转只在两种用户操作后发生：① 点击 Tour 按钮（下一步/上一步/去完成 →）；
+ * ② 点击当前被高亮的目标按钮（页面按钮或弹窗确认按钮）——该步随后完成（服务端推进）时自动
+ * 前进到下一步并跳转到其路由/滚动。纯后台完成（view 意图自动提交、profile 自动满足）绝不自动
+ * 跳转，玩家可停留在当前页看完开包动画、等待结算等。
  * 目标按钮锚点存在时高亮该按钮并允许直接点击（蒙层留孔洞，点击穿透），否则以居中卡片展示；
- * 跳过为显式幂等命令（服务端判定，重放不重复计数）。
+ * 跳过为显式幂等命令（服务端判定，重放不重复计数，跳过不自动前进）。
  */
 export function OnboardingGuideTour() {
   const { targetStepId, retarget, dismiss, dismissedRef } = useOnboardingGuide();
@@ -81,6 +83,25 @@ export function OnboardingGuideTour() {
   const skipLock = useRef(false);
   const data = onboarding.data?.data.onboarding;
   const [anchorTick, setAnchorTick] = useState(0);
+  // 记录「本步由玩家点击高亮目标完成」：只有这类完成（或点击 Tour 按钮）才触发自动前进，
+  // 纯后台完成（view 意图自动提交、profile 自动满足）绝不自动跳转。
+  const advanceAfterCompletionRef = useRef<string | null>(null);
+
+  // 监听点击：点击当前高亮目标（页面按钮或弹窗确认按钮）时记录本步为用户操作完成。
+  // 捕获阶段监听（capture），即使点击发生在弹窗内（蒙层孔洞穿透）也能记录。
+  useEffect(() => {
+    if (targetStepId === null) return;
+    const handler = (event: MouseEvent) => {
+      const anchorId = resolveAnchorIdFor(targetStepId);
+      if (!anchorId) return;
+      const el = document.getElementById(anchorId);
+      if (el && event.target instanceof Node && el.contains(event.target)) {
+        advanceAfterCompletionRef.current = targetStepId;
+      }
+    };
+    document.addEventListener("click", handler, true);
+    return () => document.removeEventListener("click", handler, true);
+  }, [targetStepId, anchorTick]);
 
   // 锚点可能晚于步骤切换才挂载：例如创建存档后首页从「未存档」分支切换并重新拉取概览，
   // 每日工作资金卡片（#onboarding-work-funds）比 Tour 推进到该步晚一拍才出现；购买补充包
@@ -106,18 +127,30 @@ export function OnboardingGuideTour() {
     if (pathname === "/onboarding") retarget(data.currentStepId ?? data.steps[0]?.id ?? null);
   }, [data, pathname, targetStepId, retarget, dismissedRef]);
 
-  // 仅处理异常兜底：目标步骤在服务端投影中已不存在（规则版本切换等）时安全结束会话。
-  // 步骤完成绝不自动前进/跳页——前进只由 Tour 按钮控制（见 goNext/goPrev/去完成 →）。
+  // 步骤完成：仅当该步由玩家点击高亮目标完成（advanceAfterCompletionRef 命中）时才自动前进到
+  // 下一步并跳转其页面/滚动；纯后台完成（浏览意图自动提交、profile 自动满足）不自动前进，
+  // 由 Tour 按钮（下一步/上一步/去完成 →）控制。目标步骤不存在（规则版本切换）时安全结束会话。
   useEffect(() => {
     if (!data || targetStepId === null) return;
-    const idx = data.steps.findIndex((step) => step.id === targetStepId);
-    if (idx === -1) dismiss();
-  }, [data, targetStepId, dismiss]);
+    const step = data.steps.find((item) => item.id === targetStepId);
+    if (!step) { dismiss(); return; }
+    if (step.completion !== null && advanceAfterCompletionRef.current === targetStepId) {
+      advanceAfterCompletionRef.current = null;
+      if (data.allCompleted) { dismiss(); return; }
+      const nextStepId = data.currentStepId;
+      if (nextStepId) {
+        retarget(nextStepId);
+        const nextStep = data.steps.find((item) => item.id === nextStepId);
+        if (nextStep && nextStep.href !== pathname) router.push(nextStep.href);
+      }
+    }
+  }, [data, targetStepId, retarget, dismiss, pathname, router]);
 
   if (!data || targetStepId === null || data.allCompleted) return null;
 
   const current = Math.max(0, data.steps.findIndex((step) => step.id === targetStepId));
   const goPrev = () => {
+    advanceAfterCompletionRef.current = null; // Tour 按钮导航：清除「用户点击高亮目标」标记，避免陈旧触发
     const prev = current - 1;
     if (prev >= 0 && data.steps[prev]) {
       const step = data.steps[prev]!;
@@ -126,6 +159,7 @@ export function OnboardingGuideTour() {
     }
   };
   const goNext = () => {
+    advanceAfterCompletionRef.current = null;
     const next = current + 1;
     if (next < data.steps.length && data.steps[next]) {
       const step = data.steps[next]!;
@@ -134,7 +168,7 @@ export function OnboardingGuideTour() {
     }
   };
   // 关闭/完成：显式结束本次引导会话（玩家关闭后不再被自动重启）。
-  const finish = () => dismiss();
+  const finish = () => { advanceAfterCompletionRef.current = null; dismiss(); };
   const goTo = (href: string) => {
     if (href === pathname) {
       // 已在目标页：锚点可能刚挂载（如创建存档后首页分支切换），强制重新定位并滚动；
