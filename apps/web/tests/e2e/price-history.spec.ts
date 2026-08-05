@@ -22,6 +22,13 @@ async function recoverPlayerSession(page: Page): Promise<void> {
       user: { id: "10000000-0000-4000-8000-000000000171", email: "history-e2e@example.test", displayName: "历史测试玩家", role: "player", createdAt: now }
     }))
   }));
+  // I36F：价格历史页挂载时向服务端提交新手引导「看懂价格」浏览意图（view_event），
+  // 这里 stub 返回成功，避免测试访问真实 API；不参与本 spec 的断言。
+  await page.route("**/v1/onboarding/steps/view-price-history/view", async (route) => route.fulfill({
+    status: 201,
+    contentType: "application/json",
+    body: JSON.stringify(envelope({ onboarding: { ruleVersion: "onboarding/v1", steps: [], completedCount: 0, totalCount: 0, allCompleted: false, currentStepId: "view-price-history", reward: { status: "unavailable", amount: { amount: 500, currency: "GAME_CREDIT" }, claimedAt: null }, updatedAt: now } }))
+  }));
 }
 
 async function stubPriceStatus(page: Page, freshness: "fresh" | "stale" | "unavailable" = "fresh", source: "mtgjson-cardmarket" | null = "mtgjson-cardmarket"): Promise<void> {

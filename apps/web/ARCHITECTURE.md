@@ -37,6 +37,16 @@
 - 每个用户可见迭代在 `tests/manual/<迭代ID>.md` 保存人工验收记录；记录构建/提交标识、浏览器、测试数据、步骤结果和截图/录屏路径。
 - 单元、组件或 API 测试通过不能替代页面人工验收；对应页面、Playwright 和人工记录齐备后才满足前端完成定义。
 
+## I36F 新手引导与首次体验页面（2026-08-05）
+
+- `api/onboarding-api.ts` 是 `/onboarding` 与玩家首页引导入口的唯一浏览器入口：`useOnboardingQuery` 只读 `GET /v1/onboarding`；`useSkipStepMutation`/`useRecordViewStepMutation`/`useClaimOnboardingRewardMutation` 三个引导命令（跳过/浏览意图/领取完成奖励）在同一意图内网络重试复用幂等键、换步骤才换键，成功后只失效 onboarding/dashboard 服务器真相缓存。
+- `/onboarding` 组合 `features/onboarding/onboarding-page.tsx`：按服务端 `OnboardingDto` 渲染进度摘要（「引导进度 x%」aria 说明、已完成 x/6 步、下一步高亮、规则版本与服务端更新时间）与六步目标链卡片（领取工作资金/开出第一包/看懂价格/完成首笔交易/收藏见涨/首次报名），卡片内直接提供对应目标功能入口（/dashboard、/packs、/market/history、/market、/collection/album、/tournaments）；完成/跳过/待完成/下一步状态徽标只取服务端投影。跳过与领取完成奖励均二次确认 + 同步双击锁只投递一次，成功横幅只展示服务端入账金额与入账后余额；未完成全部步骤时只展示说明不显示领取入口。
+- `features/onboarding/onboarding-entry-card.tsx` 是玩家首页常驻引导入口：未完成玩家显示「引导进行中 x/6」徽标与下一步文案，奖励可领取时显示「引导完成 · 可领取完成奖励」，完成并领取后显示「引导已完成」；所有状态只取服务端响应。
+- view_event 步骤的浏览器端：`features/market/price-history-page.tsx` 挂载时以 `useRecordViewStepMutation` 向服务端提交「看懂价格」浏览意图（首次进入只提交一次），服务端记录访问事件并判定完成；页面展示「已向服务器记录本次价格历史浏览」，浏览器不自行判定。
+- 玩家导航「大厅」组新增「新手引导」（/onboarding）入口（原创罗盘内联 SVG 图标）；服务端待办 `continue_onboarding`（「继续新手引导」→ /onboarding）由首页待办列表自动渲染。
+- 权威边界：步骤完成、跳过、奖励状态全部以服务端为准；浏览器只提交意图（浏览/跳过/领取）并复用幂等键，不判定完成、不结算任何经济真相；刷新后只重新读取服务端投影，不伪造进度。
+- `tests/e2e/onboarding-i36f.spec.ts` 与 `tests/manual/I36F.md` 覆盖首次引导完整流程（进度/入口跳转/浏览意图提交）、跳过与重进、奖励领取幂等防重复、首页徽标/待办联动、引导与任务进度同源一致及桌面/窄屏。
+
 ## I33F 收藏图鉴与开包体验页面（2026-08-04）
 
 - `api/collection-api.ts` 是 `/collection/album` 收藏图鉴只读聚合的唯一浏览器入口，只读 `GET /v1/collection/album`；查询键按用户与 `onlyHeld/cursor/limit` 隔离，不提供任何写操作。

@@ -129,6 +129,12 @@ e2e 验证默认由用户手动执行（见第 7 节 E2E 执行策略）。每�
 - 备注：<阻塞点、需要修复的问题>
 ```
 
+### 2026-08-05：I36F（新手引导与首次体验页面）
+- 状态：**待用户手动 e2e 复跑**（本机自动运行会因超时/内存耗尽使 WSL 崩溃，未代跑）。
+- 已由 Agent 完成并通过的自动化：`pnpm check`（含全仓 lint + 各包 tsc）、web tsc（`apps/web/tsconfig.json`）、web vitest 5 例、`pnpm --filter @mtg-market/web build`（`next build` 通过，`/onboarding` 路由生成）；全仓单元测试沿用 I36B 结果 contracts 17 / rules 101 / database 4 / api 257（1 跳过）。
+- 需用户手动验证：`apps/web/tests/e2e/onboarding-i36f.spec.ts`（桌面 + 390px 窄屏共 4 项：引导页六步卡片/进度/入口跳转/「看懂价格」浏览意图只投递一次、跳过二次确认只投递一次与重进、完成奖励领取幂等 + 首页徽标联动、首页常驻入口徽标/待办联动 + 引导与任务进度同源一致）；人工记录见 [I36F.md](apps/web/tests/manual/I36F.md)。
+- 备注：新增 `/onboarding` 新手引导页与玩家首页常驻引导入口（进行中/可领取/已完成徽标）；价格历史页挂载时向服务端提交「看懂价格」浏览意图（view_event）；`daily-work-funding.spec.ts`/`player-loop.spec.ts`/`tasks-growth-i35f.spec.ts`（首页用例）补 `/v1/onboarding` mock，`price-history.spec.ts`/`market-heat-watchlist-i34f.spec.ts` 补 view_event 浏览意图 stub；导航新增「新手引导」链接不影响既有侧栏断言。
+
 ### 2026-08-05：I35F（留存钩子与成长线页面）
 - 状态：**待用户手动 e2e 复跑**（本机自动运行会因超时/内存耗尽使 WSL 崩溃，未代跑）。
 - 已由 Agent 完成并通过的自动化：`pnpm check`（含全仓 lint + 各包 tsc）、全仓单元测试 contracts 15 / rules 97 / database 4 / api 252（1 跳过）/ web 5 全过、`pnpm --filter @mtg-market/web build`（`next build` 通过，`/tasks` 路由生成）。

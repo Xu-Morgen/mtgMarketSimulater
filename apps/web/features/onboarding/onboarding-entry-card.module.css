@@ -1,0 +1,16 @@
+/* I36F 玩家首页常驻引导入口卡片 */
+.card {
+  background: var(--panel-bg);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  padding: 16px 18px;
+}
+.card h2 { color: var(--accent-gold-bright); margin: 0 0 10px; }
+.row { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; }
+.badge { border-radius: 999px; font-size: 0.82rem; font-weight: 700; padding: 4px 12px; white-space: nowrap; }
+.badgeActive { background: rgba(201, 162, 75, 0.18); border: 1px solid var(--border-gold); color: var(--accent-gold-bright); }
+.badgeReady { background: rgba(127, 166, 90, 0.16); border: 1px solid rgba(127, 166, 90, 0.55); color: #a8cf84; }
+.badgeDone { background: rgba(236, 228, 208, 0.08); border: 1px solid var(--border-gold-dim); color: var(--text-secondary); }
+.hint { color: var(--text-secondary); font-size: 0.88rem; margin: 10px 0 0; }
+.meta { color: var(--text-secondary); font-size: 0.78rem; margin: 8px 0 0; }

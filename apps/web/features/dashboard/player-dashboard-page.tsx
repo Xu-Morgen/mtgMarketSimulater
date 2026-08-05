@@ -10,6 +10,7 @@ import { useClaimDailyWorkFundingMutation } from "../../api/daily-work-funding-a
 import { useGrowthQuery } from "../../api/growth-api";
 import { EmptyState, ErrorState, PageSkeleton, Pagination } from "../../components/ui";
 import { GrowthCard } from "../growth/growth-card";
+import { OnboardingEntryCard } from "../onboarding/onboarding-entry-card";
 import { formatMoney } from "../../utils/money";
 
 function serverTime(value: string, timezone: string) {
@@ -90,6 +91,7 @@ export function PlayerDashboardPage() {
   const growthProfile = growth.data?.data;
   return <main className="page dashboard-page"><p className="eyebrow">玩家首页</p><h1>账户概览</h1><p className="intro">余额、净资产、今日比赛、市场指数、收藏统计和待办都由服务器聚合；页面不会自行结算或改写资产。</p>
     {dashboard.isPending ? <PageSkeleton label="正在读取服务端首页概览" /> : dashboard.isError ? <ErrorState title="首页概览加载失败" onRetry={() => void dashboard.refetch()} /> : dashboard.data ? <><OverviewCards overview={dashboard.data.data.overview} /><DailyWorkFundingCard status={dashboard.data.data.overview.dailyWorkFunding} /></> : null}
+    <section className="dashboard-section" aria-labelledby="dashboard-onboarding-title"><OnboardingEntryCard /></section>
     <section className="dashboard-section" aria-labelledby="dashboard-growth-title"><h2 id="dashboard-growth-title">等级与声望</h2>{growth.isPending ? <PageSkeleton label="正在加载等级档案" /> : growth.isError ? <ErrorState title="等级档案加载失败" onRetry={() => void growth.refetch()} /> : growthProfile ? <GrowthCard profile={growthProfile} /> : null}</section>
     <section className="dashboard-section"><h2>账本流水</h2>{ledger.isPending ? <PageSkeleton label="正在加载账本流水" /> : ledger.isError ? <ErrorState title="账本加载失败" onRetry={() => void ledger.refetch()} /> : <><LedgerTable entries={ledgerData?.items ?? []} /><Pagination page={cursors.length + 1} onPrevious={() => setCursors((items) => items.slice(0, -1))} onNext={() => { if (ledgerData?.page.nextCursor) setCursors((items) => [...items, ledgerData.page.nextCursor!]); }} hasNext={ledgerData?.page.hasMore ?? false} /></>}</section>
     <section className="dashboard-section"><h2>继续循环</h2><p className="intro">完成服务端待办后，可继续通过补充包、市场、委托、卡组和比赛入口进行下一次投资。</p></section>

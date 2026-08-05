@@ -220,6 +220,15 @@ test("玩家首页：等级卡片、任务中心入口与服务端待办「领�
   await page.route("**/v1/growth", (route) =>
     route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope(growthProfile)) })
   );
+  // I36F：玩家首页新增常驻「新手引导」入口，需补 /v1/onboarding mock（视为已领取完成奖励）。
+  await page.route("**/v1/onboarding", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(
+        envelope({ onboarding: { ruleVersion: "onboarding/v1", steps: [], completedCount: 0, totalCount: 0, allCompleted: true, currentStepId: null, reward: { status: "claimed", amount: { amount: 500, currency: "GAME_CREDIT" }, claimedAt: now }, updatedAt: now } })
+      )
+    })
+  );
   await page.route("**/v1/archive", (route) =>
     route.fulfill({
       contentType: "application/json",

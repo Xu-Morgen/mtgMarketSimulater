@@ -5,9 +5,10 @@ import type { ColumnsType } from "antd/es/table";
 import type { CardFinish, MarketIndexHistoryPointDto, MarketQuoteListItemDto, PriceHistoryPointDto } from "@mtg-market/contracts";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { type MarketFilters, useMarketQuotesQuery, useMarketIndexHistoryQuery, usePriceHistoryQuery } from "../../api/market-api";
 import { usePublicPriceStatusQuery } from "../../api/pricing-api";
+import { useRecordViewStepMutation } from "../../api/onboarding-api";
 import { PriceStatus } from "../../components/price-status";
 import { type ChartSeries, DualLineChart } from "../../components/market/price-history-chart";
 import { EmptyState, ErrorState, FilterBar, PageSkeleton } from "../../components/ui";
@@ -120,6 +121,16 @@ export function PriceHistoryPage() {
 
   const status = priceStatus.data?.data ?? null;
   const isStale = status?.freshness === "stale";
+  // I36F 新手引导「看懂价格」为 view_event 步骤：实际浏览本页时向服务端提交访问意图，
+  // 由服务端记录访问事件并判定完成；重放/重复访问不重复计数，浏览器不得自行判定。
+  const recordView = useRecordViewStepMutation();
+  const [viewSubmitted, setViewSubmitted] = useState(false);
+  useEffect(() => {
+    if (viewSubmitted) return;
+    setViewSubmitted(true);
+    recordView.mutate({ stepId: "view-price-history", path: "/market/history" });
+    // 仅首次进入页面提交一次意图；后续查询/路由变化不重复投递（recordView 引用稳定，无需入依赖）。
+  }, [viewSubmitted, recordView]);
 
   if (priceStatus.isPending) return <PageSkeleton label="正在加载价格历史与数据状态" />;
 
@@ -140,6 +151,7 @@ export function PriceHistoryPage() {
     <p className="eyebrow">服务端价格历史投影</p>
     <h1>价格历史与市场曲线</h1>
     <p className="intro">所有历史点均由服务端按 UTC 自然日采样后返回。金色曲线为 Cardmarket EUR 参考价/指数，蓝色曲线为游戏内报价/指数；某日缺失参考价或游戏内报价时该段断线，浏览器不插值、不重算。</p>
+    {recordView.isSuccess ? <p className={styles.muted} role="status">已向服务器记录本次价格历史浏览（新手引导「看懂价格」由服务端判定完成）。</p> : null}
 
     <section className={styles.chartCard} aria-label="市场指数历史">
       <div className={styles.summaryHeader}><span>市场指数历史</span><Link href="/market" className="text-button">返回市场报价列表</Link></div>

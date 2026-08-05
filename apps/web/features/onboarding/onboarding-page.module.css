@@ -1,0 +1,95 @@
+/* I36F 新手引导：步骤卡片、进度摘要与完成奖励 */
+.summary {
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--border-gold);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  margin: 24px 0;
+  padding: 18px;
+}
+.summaryRow { align-items: center; display: flex; flex-wrap: wrap; gap: 14px; }
+.progressTrack {
+  background: rgba(18, 21, 26, 0.8);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: 999px;
+  flex: 1;
+  height: 12px;
+  min-width: 160px;
+  overflow: hidden;
+}
+.progressFill {
+  background: linear-gradient(90deg, var(--accent-bronze), var(--accent-gold-bright));
+  border-radius: 999px;
+  box-shadow: 0 0 10px rgba(201, 162, 75, 0.5);
+  height: 100%;
+  transition: width 0.4s ease;
+}
+.summaryText { color: var(--text-secondary); font-size: 0.9rem; }
+.summaryText strong { color: var(--accent-gold-bright); }
+.ruleMeta { color: var(--text-secondary); font-size: 0.82rem; margin-top: 10px; }
+.currentHint { color: var(--accent-gold-bright); font-weight: 700; }
+
+.stepList { display: grid; gap: 14px; list-style: none; margin: 0; padding: 0; }
+.stepCard {
+  align-items: flex-start;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 16px;
+}
+.stepCard.current {
+  border-color: var(--border-gold);
+  box-shadow: 0 0 0 1px var(--border-gold), var(--shadow-panel);
+}
+.stepCard.done { opacity: 0.92; }
+.stepOrder {
+  align-items: center;
+  background: linear-gradient(180deg, rgba(201, 162, 75, 0.2), rgba(201, 162, 75, 0.05));
+  border: 1px solid var(--border-gold-dim);
+  border-radius: 999px;
+  color: var(--accent-gold-bright);
+  display: inline-flex;
+  font-family: var(--font-display);
+  font-weight: 700;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+.stepMain { display: grid; gap: 4px; }
+.stepTitle { color: var(--accent-gold-bright); font-family: var(--font-display); font-weight: 700; margin: 0; }
+.stepDesc { color: var(--text-secondary); font-size: 0.88rem; margin: 0; }
+.stepState { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.stateChip { border-radius: 999px; font-size: 0.78rem; font-weight: 700; padding: 3px 9px; white-space: nowrap; }
+.pending { background: rgba(236, 228, 208, 0.08); border: 1px solid var(--border-gold-dim); color: var(--text-secondary); }
+.current { background: rgba(201, 162, 75, 0.18); border: 1px solid var(--border-gold); color: var(--accent-gold-bright); }
+.done { background: rgba(127, 166, 90, 0.16); border: 1px solid rgba(127, 166, 90, 0.55); color: #a8cf84; }
+.skipped { background: rgba(192, 57, 43, 0.14); border: 1px solid rgba(192, 57, 43, 0.45); color: #e08678; }
+.stepActions { align-items: center; display: flex; flex-direction: column; gap: 8px; }
+.hrefHint { color: var(--text-secondary); font-size: 0.78rem; }
+
+.rewardCard {
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--border-gold);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  margin: 26px 0 0;
+  padding: 18px;
+}
+.rewardCard h2 { color: var(--accent-gold-bright); margin: 0 0 8px; }
+.rewardStatus { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.rewardAmount { font-family: var(--font-display); font-size: 1.3rem; font-weight: 700; }
+.rewardReady { color: #a8cf84; font-weight: 700; }
+.rewardClaimed { color: var(--text-secondary); }
+.resultBar p { margin: 6px 0; }
+.claimSuccess { color: #a8cf84; font-weight: 700; }
+
+@media (max-width: 640px) {
+  .stepCard { grid-template-columns: auto minmax(0, 1fr); }
+  .stepActions { grid-column: 1 / -1; align-items: flex-start; }
+  .summaryRow { align-items: flex-start; flex-direction: column; }
+  .progressTrack { width: 100%; }
+}
