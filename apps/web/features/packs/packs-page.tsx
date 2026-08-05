@@ -167,6 +167,7 @@ function PurchaseDialog({
           <button
             className="button"
             type="button"
+            id="onboarding-pack-confirm"
             disabled={
               preview.isPending ||
               preview.isError ||

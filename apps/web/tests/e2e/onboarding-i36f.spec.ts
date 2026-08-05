@@ -270,9 +270,14 @@ test("首次引导完整流程：开始 → 高亮按钮 → 真实完成创建�
     });
   });
   await page.locator("#onboarding-pack-purchase").click();
+  // 购买弹窗打开后，Tour 目标自动切换到弹窗内的「确认购买并开包」按钮（多锚点按序解析）：
+  // rc-tour 蒙层在目标位置留出可点击孔洞，点击穿透到弹窗按钮；弹窗本身仍在蒙层之下（z-index 10）。
   await expect(page.getByRole("dialog", { name: "购买补充包" })).toBeVisible();
   await expect(page.getByText("本次扣款：500 游戏币")).toBeVisible();
-  await page.getByRole("dialog", { name: "购买补充包" }).getByRole("button", { name: "确认购买并开包" }).dblclick();
+  await expect(tourPanel.getByText(/购买弹窗已打开：点击下方「确认购买并开包」完成本步/)).toBeVisible();
+  await expect(page.locator("#onboarding-pack-confirm")).toBeVisible();
+  await expect(page.locator("#onboarding-pack-confirm")).toBeInViewport();
+  await page.locator("#onboarding-pack-confirm").dblclick();
   expect(openCalls).toBe(1);
   expect(openKeys[0]).toMatch(/^[0-9a-f-]{36}$/i);
   // 开包完成（open-first-pack 由已结算事实推进）：自动前进到「看懂价格」并跳转价格历史页。

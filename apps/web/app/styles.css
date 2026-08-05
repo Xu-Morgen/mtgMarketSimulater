@@ -1015,9 +1015,9 @@ input[type="datetime-local"] {
 
 /* ==========================================================================
    弹窗 —— 游戏窗口（标题条 + 鎏金双线框）
-   z-index 必须高于 antd Tour 蒙层（zIndexPopupBase 1000 + Tour offset 100 = 1100）：
-   引导步骤打开的业务弹窗（购买补充包/NPC 买入/报名确认等）必须渲染在引导蒙层之上才能被点击，
-   否则弹窗被蒙层盖住、目标按钮又不在引导高亮位，表现为引导卡死。
+   z-index 保持在 antd Tour 蒙层（zIndexPopupBase 1000 + offset 100 = 1100）之下：
+   新手引导步骤打开的业务弹窗（购买补充包等）由 Tour 直接高亮弹窗内的确认按钮
+   （rc-tour 蒙层在目标位置留出可点击孔洞，点击会穿透到下方弹窗按钮），因此弹窗无需盖过蒙层。
    ========================================================================== */
 .dialog-backdrop {
   align-items: center;
@@ -1028,7 +1028,7 @@ input[type="datetime-local"] {
   justify-content: center;
   padding: 20px;
   position: fixed;
-  z-index: 1200;
+  z-index: 10;
 }
 .dialog {
   background: linear-gradient(165deg, rgba(201, 162, 75, 0.08) 0%, rgba(201, 162, 75, 0) 40%), var(--bg-panel);

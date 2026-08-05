@@ -8,24 +8,28 @@ import { useOnboardingQuery, useSkipStepMutation } from "../api/onboarding-api";
 import { useOnboardingGuide } from "../providers/onboarding-guide-context";
 import styles from "./onboarding-guide-tour.module.css";
 
-/** 每个引导步骤在对应功能页上的目标按钮/区块锚点 id；不存在的页面在 Tour 中以居中卡片展示。 */
-const ANCHOR_ID_BY_STEP: Record<string, string> = {
-  "create-archive": "onboarding-create-archive",
-  "claim-work-funds": "onboarding-work-funds",
-  "open-first-pack": "onboarding-pack-purchase",
-  "view-price-history": "onboarding-view-price-history",
-  "complete-first-npc-trade": "onboarding-npc-buy",
-  "unlock-collection-album": "onboarding-collection-album",
-  "first-tournament-registration": "onboarding-tournaments"
+/**
+ * 每个引导步骤的目标锚点 id 列表（按序解析，取第一个实际存在于 DOM 的）：
+ * - 「开出第一包」在购买补充包弹窗打开后，把目标从页面「购买并开包」按钮切换到弹窗内的
+ *   「确认购买并开包」按钮——rc-tour 蒙层会在目标位置留出可点击孔洞，点击穿透到弹窗按钮；
+ * - 其余步骤目标直接指向对应功能页按钮/区块；目标页面不存在时以居中卡片展示。
+ */
+const ANCHOR_IDS_BY_STEP: Record<string, string[]> = {
+  "create-archive": ["onboarding-create-archive"],
+  "claim-work-funds": ["onboarding-work-funds"],
+  "open-first-pack": ["onboarding-pack-confirm", "onboarding-pack-purchase"],
+  "view-price-history": ["onboarding-view-price-history"],
+  "complete-first-npc-trade": ["onboarding-npc-buy"],
+  "unlock-collection-album": ["onboarding-collection-album"],
+  "first-tournament-registration": ["onboarding-tournaments"]
 };
 
-function anchorIdFor(stepId: string): string | null {
-  return ANCHOR_ID_BY_STEP[stepId] ?? null;
-}
-
-function anchorOnPage(stepId: string): boolean {
-  const id = anchorIdFor(stepId);
-  return Boolean(id && typeof document !== "undefined" && document.getElementById(id));
+/** 按序解析当前实际存在的目标锚点 id（弹窗打开时确认按钮在 DOM 中，优先于页面按钮）。 */
+function resolveAnchorIdFor(stepId: string): string | null {
+  for (const id of ANCHOR_IDS_BY_STEP[stepId] ?? []) {
+    if (typeof document !== "undefined" && document.getElementById(id)) return id;
+  }
+  return null;
 }
 
 function tourStepTitle(step: OnboardingStepDto, data: OnboardingDto): string {
@@ -60,15 +64,14 @@ export function OnboardingGuideTour() {
   };
 
   // 锚点可能晚于步骤切换才挂载：例如创建存档后首页从「未存档」分支切换并重新拉取概览，
-  // 每日工作资金卡片（#onboarding-work-funds）比 Tour 推进到该步晚一拍才出现。轮询当前步骤
-  // 锚点存在性，出现/消失时强制重渲染，驱动 rc-tour 重新定位并 scrollIntoView（否则气泡一直
-  // 以居中卡片展示，同页「去完成 →」为 no-op，表现为引导卡死）。
+  // 每日工作资金卡片（#onboarding-work-funds）比 Tour 推进到该步晚一拍才出现；购买补充包
+  // 弹窗打开后目标也会从页面按钮切换到弹窗确认按钮。轮询当前步骤锚点（解析结果 id）变化，
+  // 出现/消失/切换时强制重渲染，驱动 rc-tour 重新定位并 scrollIntoView。
   useEffect(() => {
     if (targetStepId === null) return;
-    const id = anchorIdFor(targetStepId);
-    let last = Boolean(id && document.getElementById(id));
+    let last = resolveAnchorIdFor(targetStepId);
     const timer = window.setInterval(() => {
-      const present = Boolean(id && document.getElementById(id));
+      const present = resolveAnchorIdFor(targetStepId);
       if (present !== last) {
         last = present;
         setAnchorTick((tick) => tick + 1);
@@ -139,12 +142,17 @@ export function OnboardingGuideTour() {
   const steps: NonNullable<TourProps["steps"]> = data.steps.map((step) => {
     const done = step.completion !== null;
     const isLastStep = step.order === data.steps.length;
-    const anchorId = anchorIdFor(step.id);
-    const targetHere = step.id === targetStepId && anchorTick >= 0 && anchorOnPage(step.id);
+    const anchorId = resolveAnchorIdFor(step.id);
+    const targetHere = step.id === targetStepId && anchorTick >= 0 && anchorId !== null;
     const primaryLabel = done ? "继续" : targetHere ? (isLastStep ? "完成引导" : "下一步") : "去完成 →";
+    // 目标锚点解析为弹窗内确认按钮时（如购买补充包弹窗已打开），提示玩家在弹窗内完成确认。
+    const isDialogStep = step.id === targetStepId && anchorId === "onboarding-pack-confirm";
+    const description = isDialogStep
+      ? "购买弹窗已打开：点击下方「确认购买并开包」完成本步（弹窗内确认按钮已高亮）。"
+      : step.description;
     return {
       title: tourStepTitle(step, data),
-      description: step.description,
+      description,
       placement: targetHere ? "right" : "center",
       target: anchorId ? (() => document.getElementById(anchorId) ?? null) as () => HTMLElement : null,
       actionsRender: (_, info) => (
