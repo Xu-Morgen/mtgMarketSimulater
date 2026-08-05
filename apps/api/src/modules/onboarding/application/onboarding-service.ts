@@ -252,8 +252,12 @@ export class OnboardingService {
     if (this.profileSatisfied(step.profileKey!, userId)) this.upsertProgress(userId, step.id, now, null, now);
   }
 
-  /** 已结算状态快照判定（只读查询，浏览器不得参与）：账本领取记录/库存/报名表。 */
+  /** 已结算状态快照判定（只读查询，浏览器不得参与）：存档/账本领取记录/库存/报名表。 */
   private profileSatisfied(profileKey: string, userId: string): boolean {
+    if (profileKey === "archive_created") {
+      const row = this.database.prepare("SELECT 1 FROM accounts WHERE user_id = ? LIMIT 1").get(userId);
+      return Boolean(row);
+    }
     if (profileKey === "work_funds_claimed") {
       const row = this.database.prepare("SELECT 1 FROM daily_work_funding_claims WHERE user_id = ? LIMIT 1").get(userId);
       return Boolean(row);

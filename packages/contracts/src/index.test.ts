@@ -435,17 +435,17 @@ describe("共享契约", () => {
     expect(parsed.withReward).toContainEqual({ id: "claim_task_rewards", label: "领取任务中心奖励", href: "/tasks" });
   });
 
-  it("I36B 新手引导 DTO 只承载服务端已结算结果，不含内部判定字段", () => {
+  it("I36B/I36F 新手引导 DTO 只承载服务端已结算结果，不含内部判定字段", () => {
     const onboarding: OnboardingDto = {
-      ruleVersion: "onboarding/v1",
+      ruleVersion: "onboarding/v2",
       steps: [
-        { id: "claim-work-funds", order: 1, title: "领取工作资金", description: "创建游戏存档并领取今日工作资金", href: "/dashboard", skippable: true, completion: "auto", completedAt: "2026-08-05T01:00:00.000Z", skippedAt: null },
-        { id: "open-first-pack", order: 2, title: "开出第一包", description: "购买并开出第一包补充包", href: "/packs", skippable: true, completion: null, completedAt: null, skippedAt: null }
+        { id: "create-archive", order: 1, title: "创建存档", description: "点击玩家首页「创建游戏存档」按钮", href: "/dashboard", skippable: true, completion: "auto", completedAt: "2026-08-05T01:00:00.000Z", skippedAt: null },
+        { id: "claim-work-funds", order: 2, title: "领取工作资金", description: "在玩家首页领取今日工作资金", href: "/dashboard", skippable: true, completion: null, completedAt: null, skippedAt: null }
       ],
       completedCount: 1,
-      totalCount: 6,
+      totalCount: 7,
       allCompleted: false,
-      currentStepId: "open-first-pack",
+      currentStepId: "claim-work-funds",
       reward: { status: "unavailable", amount: { amount: 500, currency: "GAME_CREDIT" }, claimedAt: null },
       updatedAt: "2026-08-05T01:00:00.000Z"
     };
@@ -456,7 +456,7 @@ describe("共享契约", () => {
       claimedAt: "2026-08-05T02:00:00.000Z"
     };
     const parsed = JSON.parse(JSON.stringify({ onboarding, claim }));
-    expect(parsed.onboarding).toMatchObject({ ruleVersion: "onboarding/v1", completedCount: 1, totalCount: 6, allCompleted: false, currentStepId: "open-first-pack", reward: { status: "unavailable", amount: { amount: 500 } } });
+    expect(parsed.onboarding).toMatchObject({ ruleVersion: "onboarding/v2", completedCount: 1, totalCount: 7, allCompleted: false, currentStepId: "claim-work-funds", reward: { status: "unavailable", amount: { amount: 500 } } });
     expect(parsed.onboarding.steps[0]).toMatchObject({ completion: "auto", skippable: true, href: "/dashboard" });
     expect(parsed.claim).toMatchObject({ status: "claimed", reward: { amount: 500 }, balance: { amount: 10_500 } });
     // 引导 DTO 不得携带内部推进来源、贡献值或未结算判定字段。

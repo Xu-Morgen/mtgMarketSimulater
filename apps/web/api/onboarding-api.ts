@@ -25,13 +25,14 @@ export const onboardingApi = {
     apiRequest<{ reward: OnboardingRewardClaimDto }>("/v1/onboarding/reward/claim", { method: "POST", body: {}, accessToken, idempotencyKey })
 };
 
-/** 引导只读投影：步骤、完成度、下一步与完成奖励状态；浏览器不得自行判定完成。 */
-export function useOnboardingQuery() {
+/** 引导只读投影：步骤、完成度、下一步与完成奖励状态；浏览器不得自行判定完成。
+ *  `enabled` 用于常驻 Tour：仅在引导会话激活或引导页上才请求，避免每个玩家页面都轮询。 */
+export function useOnboardingQuery(options: { enabled?: boolean } = {}) {
   const { accessToken, user } = useSession();
   return useQuery({
     queryKey: onboardingQueryKey(user?.id ?? "anonymous"),
     queryFn: () => onboardingApi.overview(accessToken!),
-    enabled: Boolean(accessToken && user),
+    enabled: Boolean(accessToken && user) && (options.enabled ?? true),
     retry: false
   });
 }

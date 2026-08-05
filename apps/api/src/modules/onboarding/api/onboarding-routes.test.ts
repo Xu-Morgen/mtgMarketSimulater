@@ -53,19 +53,19 @@ function seedCatalog(database: ReturnType<typeof openSqliteDatabase>): string {
 }
 
 describe("I36B 新手引导与首次体验服务端", () => {
-  it("初始投影六步待办、奖励不可领；领取工作资金与开包事实自动完成对应步骤", async () => {
+  it("初始投影七步待办、创建存档后第一步自动完成；领取工作资金与开包事实自动完成对应步骤", async () => {
     const { app, database } = await createTestApp();
     const token = await registerPlayer(app, "onboarding-basic@example.test");
     const userId = (database.prepare("SELECT id FROM users WHERE email = ?").get("onboarding-basic@example.test") as { id: string }).id;
     await createArchive(app, token, "onboarding-archive-0001");
 
-    // 未创建存档时只读引导仍可用（引导页为新玩家开放）；先查初始投影。
+    // 创建存档后第一步 create-archive 由服务端按 accounts 存档快照自动完成（引导第一步即「创建存档」）。
     const initial = await app.inject({ method: "GET", url: "/v1/onboarding", headers: { authorization: token } });
     expect(initial.statusCode).toBe(200);
     const initialData = initial.json().data.onboarding;
-    expect(initialData.ruleVersion).toBe("onboarding/v1");
-    expect(initialData.steps).toHaveLength(6);
-    expect(initialData.completedCount).toBe(0);
+    expect(initialData.ruleVersion).toBe("onboarding/v2");
+    expect(initialData.steps).toHaveLength(7);
+    expect(initialData.completedCount).toBe(1);
     expect(initialData.allCompleted).toBe(false);
     expect(initialData.currentStepId).toBe("claim-work-funds");
     expect(initialData.reward.status).toBe("unavailable");
@@ -83,14 +83,15 @@ describe("I36B 新手引导与首次体验服务端", () => {
     const after = await app.inject({ method: "GET", url: "/v1/onboarding", headers: { authorization: token } });
     const data = after.json().data.onboarding;
     const byId = (id: string) => data.steps.find((step: { id: string }) => step.id === id)!;
-    // 档案后 profile 步骤按已结算状态自动完成。
+    // profile 步骤按已结算状态自动完成；首次目标链共 7 步。
+    expect(byId("create-archive").completion).toBe("auto");
     expect(byId("claim-work-funds").completion).toBe("auto");
     expect(byId("open-first-pack").completion).toBe("auto");
     expect(byId("complete-first-npc-trade").completion).toBe("auto");
     expect(byId("view-price-history").completion).toBe(null);
     expect(byId("unlock-collection-album").completion).toBe(null);
     expect(byId("first-tournament-registration").completion).toBe(null);
-    expect(data.completedCount).toBe(3);
+    expect(data.completedCount).toBe(4);
     expect(data.currentStepId).toBe("view-price-history");
     expect(data.reward.status).toBe("unavailable");
     await app.close(); database.close();
@@ -127,9 +128,12 @@ describe("I36B 新手引导与首次体验服务端", () => {
     const { app, database } = await createTestApp();
     const token = await registerPlayer(app, "onboarding-skip@example.test");
 
-    // 未创建存档：只读引导可用，步骤可跳过（老玩家补完路径），但领取奖励要求存档。
+    // 未创建存档：只读引导可用（第一步为「创建存档」，下一步即 create-archive），步骤可跳过（老玩家补完路径），但领取奖励要求存档。
     const overview = await app.inject({ method: "GET", url: "/v1/onboarding", headers: { authorization: token } });
     expect(overview.statusCode).toBe(200);
+    expect(overview.json().data.onboarding.steps).toHaveLength(7);
+    expect(overview.json().data.onboarding.completedCount).toBe(0);
+    expect(overview.json().data.onboarding.currentStepId).toBe("create-archive");
     const claimNoArchive = await app.inject({ method: "POST", url: "/v1/onboarding/reward/claim", headers: { authorization: token, "idempotency-key": "onb-reward-noarchive" }, payload: {} });
     expect(claimNoArchive.statusCode).toBe(409);
     expect(claimNoArchive.json().error.code).toBe("RESOURCE_CONFLICT");
@@ -159,7 +163,8 @@ describe("I36B 新手引导与首次体验服务端", () => {
     const userId = (database.prepare("SELECT id FROM users WHERE email = ?").get("onboarding-reward@example.test") as { id: string }).id;
     await createArchive(app, token, "onboarding-archive-0003");
 
-    // 直接完成全部六步（前两步走事实，profile 走状态快照，view 走访问事件，余下 profile 走状态快照 + 跳过补全）。
+    // 直接完成全部七步（创建存档 profile 走 accounts 快照，开包/NPC 走事实，view 走访问事件，
+    // 领取资金/收藏 profile 走状态快照，报名用跳过补全）。
     settleFact(database, { type: "pack.opened", aggregateType: "pack_opening", aggregateId: "onb-op-0002", payload: { userId, packId: "p", packRuleVersion: "pack/v1", spent: { amount: 100, currency: "GAME_CREDIT" }, received: [{ skuId: "s", quantity: 1 }] }, occurredAt: "2026-08-05T03:00:00.000Z" });
     settleFact(database, { type: "npc.trade.settled", aggregateType: "npc_trade", aggregateId: "onb-trade-0002", payload: { tradeId: "onb-trade-0002", userId, skuId: "s", side: "buy", quantity: 1, unitPrice: { amount: 10, currency: "GAME_CREDIT" }, total: { amount: 10, currency: "GAME_CREDIT" }, quoteVersion: "market/v1" }, occurredAt: "2026-08-05T04:00:00.000Z" });
     database.prepare("INSERT INTO daily_rollover_runs (id, natural_date, timezone, work_funding_amount, work_funding_rule_version, opened_at) VALUES (?, '2026-08-05', 'Asia/Shanghai', 1000, 'daily-work-funds/v1', '2026-08-05T00:00:00.000Z')").run(`rollover-${Math.random().toString(36).slice(2)}`);
@@ -174,7 +179,7 @@ describe("I36B 新手引导与首次体验服务端", () => {
 
     const ready = await app.inject({ method: "GET", url: "/v1/onboarding", headers: { authorization: token } });
     const readyData = ready.json().data.onboarding;
-    expect(readyData.completedCount).toBe(6);
+    expect(readyData.completedCount).toBe(7);
     expect(readyData.allCompleted).toBe(true);
     expect(readyData.currentStepId).toBe(null);
     expect(readyData.reward.status).toBe("available");

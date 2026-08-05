@@ -85,6 +85,8 @@ export function useNpcBuyMutation() {
         void queryClient.invalidateQueries({ queryKey: ["market", "quote", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["market", "index", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["prices", "public-status", user.id] });
+        // I36F：NPC 成交完成「完成首笔交易」引导步骤（npc.trade.settled 事实推进），引导 Tour 需刷新。
+        void queryClient.invalidateQueries({ queryKey: ["onboarding", user.id] });
       }
       intent.current = null;
     }
@@ -136,6 +138,8 @@ export function useNpcSellMutation() {
         void queryClient.invalidateQueries({ queryKey: ["market", "quote", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["market", "index", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["prices", "public-status", user.id] });
+        // I36F：NPC 成交完成「完成首笔交易」引导步骤（npc.trade.settled 事实推进），引导 Tour 需刷新。
+        void queryClient.invalidateQueries({ queryKey: ["onboarding", user.id] });
       }
       intent.current = null;
     }

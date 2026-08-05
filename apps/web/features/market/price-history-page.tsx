@@ -164,7 +164,7 @@ export function PriceHistoryPage() {
     {viewFeedback === "submitted" ? <p className={styles.muted} role="status">已向服务器记录本次价格历史浏览（新手引导「看懂价格」由服务端判定完成）。</p> : null}
     {viewFeedback === "error" ? <p className={styles.stale} role="alert">记录价格历史浏览意图未完成，可重新进入本页重试。</p> : null}
 
-    <section className={styles.chartCard} aria-label="市场指数历史">
+    <section id="onboarding-view-price-history" className={styles.chartCard} aria-label="市场指数历史">
       <div className={styles.summaryHeader}><span>市场指数历史</span><Link href="/market" className="text-button">返回市场报价列表</Link></div>
       <PriceStatus status={status} tradable={false} />
       {isStale ? <p className={styles.stale} role="status">价格同步失败时沿用最近成功快照；这不是实时 Cardmarket 价格。</p> : null}

@@ -1,17 +1,17 @@
 /**
- * I36B 新手引导纯规则。引导步骤定义、完成判定与一次性完成奖励均在此以纯函数实现：
+ * I36B/I36F 新手引导纯规则。引导步骤定义、完成判定与一次性完成奖励均在此以纯函数实现：
  * 显式版本、显式输入、可重放、不依赖数据库、HTTP、时间或随机源。
  * 进度持久化、跳过标记与奖励发放仍由 API 的 application 在短事务内原子完成。
  *
- * 步骤按「首次目标链」排序：创建存档并领取工作资金 → 开包 → 看懂价格 →
+ * 步骤按「首次目标链」排序：创建存档 → 领取工作资金 → 开包 → 看懂价格 →
  * 首笔 NPC 交易 → 收藏见涨 → 首次报名。完成判定分为三类：
  * - `fact`：由已结算事实（pack.opened/npc.trade.settled）的同事务幂等消费者推进，
  *   计数型（goal 为累计目标），重放同一事实不重复计数；
- * - `profile`：由服务端对已结算状态（账本/库存/报名表）快照判定，满足即完成、只升不降；
+ * - `profile`：由服务端对已结算状态（存档/账本/库存/报名表）快照判定，满足即完成、只升不降；
  * - `view_event`：仅价格历史页要求玩家实际浏览，由浏览器提交意图、服务端记录访问事件
  *   后完成，浏览器不得自行判定。
  */
-export const ONBOARDING_RULE_VERSION = "onboarding/v1" as const;
+export const ONBOARDING_RULE_VERSION = "onboarding/v2" as const;
 
 export type OnboardingStepSource = "fact" | "profile" | "view_event";
 
@@ -39,9 +39,19 @@ export function resolveOnboardingSteps(version: string): OnboardingStepDefinitio
   if (version !== ONBOARDING_RULE_VERSION) throw new RangeError(`不支持的新手引导规则版本：${version}`);
   return [
     {
+      id: "create-archive",
+      title: "创建存档",
+      description: "点击玩家首页「创建游戏存档」按钮，服务器会初始化你的账户和初始资金",
+      href: "/dashboard",
+      targetPath: null,
+      skippable: true,
+      source: "profile",
+      profileKey: "archive_created"
+    },
+    {
       id: "claim-work-funds",
       title: "领取工作资金",
-      description: "创建游戏存档并领取今日工作资金，开始你的卡牌交易所之旅",
+      description: "在玩家首页领取今日工作资金，开始你的卡牌交易所之旅",
       href: "/dashboard",
       targetPath: null,
       skippable: true,

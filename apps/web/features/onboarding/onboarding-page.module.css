@@ -8,6 +8,17 @@
   padding: 18px;
 }
 .summaryRow { align-items: center; display: flex; flex-wrap: wrap; gap: 14px; }
+.startBar {
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--border-gold);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  margin: 22px 0 4px;
+  padding: 16px 18px;
+}
+.startBar p { margin: 0 0 12px; }
+.ready { color: var(--text-primary); }
+.allDone { color: #a8cf84; font-weight: 700; }
 .progressTrack {
   background: rgba(18, 21, 26, 0.8);
   border: 1px solid var(--border-gold-dim);

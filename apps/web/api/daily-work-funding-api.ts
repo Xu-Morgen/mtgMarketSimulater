@@ -52,7 +52,9 @@ export function useClaimDailyWorkFundingMutation() {
         queryClient.invalidateQueries({ queryKey: dailyWorkFundingQueryKey(user.id) }),
         queryClient.invalidateQueries({ queryKey: archiveQueryKey(user.id) }),
         queryClient.invalidateQueries({ queryKey: ledgerQueryKey(user.id, null) }),
-        queryClient.invalidateQueries({ queryKey: dashboardQueryKey(user.id) })
+        queryClient.invalidateQueries({ queryKey: dashboardQueryKey(user.id) }),
+        // I36F：领取工作资金完成「领取工作资金」引导步骤，引导 Tour 需刷新服务端进度。
+        queryClient.invalidateQueries({ queryKey: ["onboarding", user.id] })
       ]);
     }
   });

@@ -37,15 +37,16 @@
 - 每个用户可见迭代在 `tests/manual/<迭代ID>.md` 保存人工验收记录；记录构建/提交标识、浏览器、测试数据、步骤结果和截图/录屏路径。
 - 单元、组件或 API 测试通过不能替代页面人工验收；对应页面、Playwright 和人工记录齐备后才满足前端完成定义。
 
-## I36F 新手引导与首次体验页面（2026-08-05）
+## I36F 新手引导与首次体验页面（2026-08-05，Tour 跨页引导）
 
-- `api/onboarding-api.ts` 是 `/onboarding` 与玩家首页引导入口的唯一浏览器入口：`useOnboardingQuery` 只读 `GET /v1/onboarding`；`useSkipStepMutation`/`useRecordViewStepMutation`/`useClaimOnboardingRewardMutation` 三个引导命令（跳过/浏览意图/领取完成奖励）在同一意图内网络重试复用幂等键、换步骤才换键，成功后只失效 onboarding/dashboard 服务器真相缓存。
-- `/onboarding` 组合 `features/onboarding/onboarding-page.tsx`：按服务端 `OnboardingDto` 渲染进度摘要（「引导进度 x%」aria 说明、已完成 x/6 步、下一步高亮、规则版本与服务端更新时间）与六步目标链卡片（领取工作资金/开出第一包/看懂价格/完成首笔交易/收藏见涨/首次报名），卡片内直接提供对应目标功能入口（/dashboard、/packs、/market/history、/market、/collection/album、/tournaments）；完成/跳过/待完成/下一步状态徽标只取服务端投影。跳过与领取完成奖励均二次确认 + 同步双击锁只投递一次，成功横幅只展示服务端入账金额与入账后余额；未完成全部步骤时只展示说明不显示领取入口。
-- `features/onboarding/onboarding-entry-card.tsx` 是玩家首页常驻引导入口：未完成玩家显示「引导进行中 x/6」徽标与下一步文案，奖励可领取时显示「引导完成 · 可领取完成奖励」，完成并领取后显示「引导已完成」；所有状态只取服务端响应。
+- `api/onboarding-api.ts` 是 `/onboarding` 与玩家首页引导入口的唯一浏览器入口：`useOnboardingQuery` 只读 `GET /v1/onboarding`（支持 `enabled` 开关：仅引导会话激活或位于引导页时请求，避免常驻 Tour 在每个玩家页面轮询）；`useSkipStepMutation`/`useRecordViewStepMutation`/`useClaimOnboardingRewardMutation` 三个引导命令（跳过/浏览意图/领取完成奖励）在同一意图内网络重试复用幂等键、换步骤才换键，成功后只失效 onboarding/dashboard 服务器真相缓存。
+- 引导任务用 antd Tour 完成：`providers/onboarding-guide-context.tsx`（跨页面持久 Provider，置于 `(player)` 布局，`retarget(stepId)` 切换当前引导目标步骤）与 `components/onboarding-guide-tour.tsx`（常驻 Tour，挂在玩家 `PlayerShell` 内容之后）。气泡标题「下一步：x / x（已完成）」+ 说明 + 上一步/跳过此步/去完成→/下一步/完成引导；目标按钮锚点存在时高亮该按钮（蒙层不拦截，可直接点击），否则以居中卡片展示；步骤完成（服务端推进）后自动前进到下一个未完成步骤，全部完成结束会话。目标锚点：`#onboarding-create-archive`（首页创建存档）、`#onboarding-work-funds`（每日工作资金领取）、`#onboarding-pack-purchase`（补充包「购买并开包」）、`#onboarding-view-price-history`（价格历史双曲线区）、`#onboarding-npc-buy`（市场「向 NPC 买入」）、`#onboarding-collection-album`（收藏图鉴）、`#onboarding-tournaments`（今日比赛）。创建存档/领取工作资金/开包（单包+批量）/NPC 成交/赛事报名五个 mutation 成功后追加失效 `["onboarding", userId]`，使 Tour 在玩家真实完成动作后自动前进。
+- `/onboarding` 组合 `features/onboarding/onboarding-page.tsx`（引导会话控制器）：按服务端 `OnboardingDto` 渲染进度摘要（「引导进度 x%」aria 说明、已完成 x/7 步、下一步高亮、规则版本与服务端更新时间）、「开始引导」/每步「引导我完成」入口与七步目标链清单（创建存档/领取工作资金/开出第一包/看懂价格/完成首笔交易/收藏见涨/首次报名）；完成/跳过/待完成/下一步状态徽标只取服务端投影。完成奖励领取仅在 `available` 时显示，二次确认 + 幂等键只投递一次，成功横幅只展示服务端入账金额与入账后余额。
+- `features/onboarding/onboarding-entry-card.tsx` 是玩家首页常驻引导入口：未完成玩家显示「引导进行中 x/7」徽标与下一步文案，「继续引导」直接启动常驻 Tour；奖励可领取时显示「引导完成 · 可领取完成奖励」，完成并领取后显示「引导已完成」；所有状态只取服务端响应。
 - view_event 步骤的浏览器端：`features/market/price-history-page.tsx` 挂载时以 `useRecordViewStepMutation` 向服务端提交「看懂价格」浏览意图（首次进入只提交一次），服务端记录访问事件并判定完成；页面展示「已向服务器记录本次价格历史浏览」，浏览器不自行判定。
 - 玩家导航「大厅」组新增「新手引导」（/onboarding）入口（原创罗盘内联 SVG 图标）；服务端待办 `continue_onboarding`（「继续新手引导」→ /onboarding）由首页待办列表自动渲染。
-- 权威边界：步骤完成、跳过、奖励状态全部以服务端为准；浏览器只提交意图（浏览/跳过/领取）并复用幂等键，不判定完成、不结算任何经济真相；刷新后只重新读取服务端投影，不伪造进度。
-- `tests/e2e/onboarding-i36f.spec.ts` 与 `tests/manual/I36F.md` 覆盖首次引导完整流程（进度/入口跳转/浏览意图提交）、跳过与重进、奖励领取幂等防重复、首页徽标/待办联动、引导与任务进度同源一致及桌面/窄屏。
+- 权威边界：步骤完成、跳过、奖励状态全部以服务端为准（`onboarding/v2` 首次目标链第一步为「创建存档」）；浏览器只提交意图（浏览/跳过/领取）并复用幂等键，不判定完成、不结算任何经济真相；刷新后只重新读取服务端投影，不伪造进度。
+- `tests/e2e/onboarding-i36f.spec.ts` 与 `tests/manual/I36F.md` 覆盖首次引导完整流程（Tour 跨页高亮 + 真实完成创建存档/领取资金 + 浏览意图只投递一次）、Tour 内跳过与重进、奖励领取幂等防重复、首页徽标/待办联动、未创建存档新玩家首页及桌面/窄屏。
 
 ## I33F 收藏图鉴与开包体验页面（2026-08-04）
 

@@ -30,7 +30,7 @@ async function session(page: Page) {
       status: 201,
       contentType: "application/json",
       body: JSON.stringify(
-        envelope({ onboarding: { ruleVersion: "onboarding/v1", steps: [], completedCount: 0, totalCount: 0, allCompleted: false, currentStepId: "view-price-history", reward: { status: "unavailable", amount: { amount: 500, currency: "GAME_CREDIT" }, claimedAt: null }, updatedAt: now } })
+        envelope({ onboarding: { ruleVersion: "onboarding/v2", steps: [], completedCount: 0, totalCount: 0, allCompleted: false, currentStepId: "view-price-history", reward: { status: "unavailable", amount: { amount: 500, currency: "GAME_CREDIT" }, claimedAt: null }, updatedAt: now } })
       )
     })
   );

@@ -575,6 +575,7 @@ function PackCard({
         <button
           className="button"
           type="button"
+          id="onboarding-pack-purchase"
           disabled={!purchasable}
           title={offerReason ?? undefined}
           onClick={() => onPurchase(pack)}

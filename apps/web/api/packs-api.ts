@@ -116,6 +116,8 @@ export function useOpenPackMutation() {
         // I33F：开包会改变收藏图鉴与系列收集率里程碑进度。
         void queryClient.invalidateQueries({ queryKey: ["collection", "album", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["achievements", user.id] });
+        // I36F：开包完成「开出第一包」引导步骤（已结算事实推进），引导 Tour 需刷新服务端进度。
+        void queryClient.invalidateQueries({ queryKey: ["onboarding", user.id] });
       }
       intent.current = null;
     }
@@ -137,6 +139,8 @@ export function invalidateOpeningTruth(queryClient: QueryClient, userId: string)
   void queryClient.invalidateQueries({ queryKey: ["pack-openings", userId] });
   void queryClient.invalidateQueries({ queryKey: ["collection", "album", userId] });
   void queryClient.invalidateQueries({ queryKey: ["achievements", userId] });
+  // I36F：开包完成「开出第一包」引导步骤（已结算事实推进），引导 Tour 需刷新服务端进度。
+  void queryClient.invalidateQueries({ queryKey: ["onboarding", userId] });
 }
 
 type BulkIntent = { key: string; packId: string; ruleVersion: string; count: number };

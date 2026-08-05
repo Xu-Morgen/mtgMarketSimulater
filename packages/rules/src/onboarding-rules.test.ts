@@ -8,10 +8,11 @@ import {
   resolveOnboardingSteps
 } from "./onboarding-rules.js";
 
-describe("I36B 新手引导纯规则", () => {
-  it("解析版本化步骤定义：首次目标链六步，fact/profile/view_event 三类完成判定齐备", () => {
+describe("I36B/I36F 新手引导纯规则", () => {
+  it("解析版本化步骤定义：首次目标链七步（创建存档 → 领取资金 → 开包 → 看价 → 交易 → 收藏 → 报名），fact/profile/view_event 三类完成判定齐备", () => {
     const steps = resolveOnboardingSteps(ONBOARDING_RULE_VERSION);
     expect(steps.map((step) => step.id)).toEqual([
+      "create-archive",
       "claim-work-funds",
       "open-first-pack",
       "view-price-history",
@@ -20,6 +21,7 @@ describe("I36B 新手引导纯规则", () => {
       "first-tournament-registration"
     ]);
     expect(steps.every((step) => step.title.length > 0 && step.description.length > 0 && step.href.startsWith("/") && step.skippable)).toBe(true);
+    expect(steps[0]).toMatchObject({ source: "profile", profileKey: "archive_created" });
     expect(steps.find((step) => step.id === "open-first-pack")).toMatchObject({ source: "fact", factEventType: "pack.opened", goal: 1 });
     expect(steps.find((step) => step.id === "complete-first-npc-trade")).toMatchObject({ source: "fact", factEventType: "npc.trade.settled", goal: 1 });
     expect(steps.find((step) => step.id === "view-price-history")).toMatchObject({ source: "view_event", targetPath: "/market/history" });
@@ -30,8 +32,8 @@ describe("I36B 新手引导纯规则", () => {
   });
 
   it("未知规则版本抛 RangeError；奖励金额固定且版本解析一致", () => {
-    expect(() => resolveOnboardingSteps("onboarding/v2")).toThrow(RangeError);
-    expect(() => resolveOnboardingReward("onboarding/v2")).toThrow(RangeError);
+    expect(() => resolveOnboardingSteps("onboarding/v3")).toThrow(RangeError);
+    expect(() => resolveOnboardingReward("onboarding/v3")).toThrow(RangeError);
     expect(ONBOARDING_REWARD).toEqual({ amount: 500, currency: "GAME_CREDIT" });
     expect(resolveOnboardingReward(ONBOARDING_RULE_VERSION)).toEqual(ONBOARDING_REWARD);
   });
@@ -46,7 +48,7 @@ describe("I36B 新手引导纯规则", () => {
     expect(replay).toEqual({ newValue: 2, achieved: true });
     expect(() => applyOnboardingAdvance({ ruleVersion: ONBOARDING_RULE_VERSION, step: packStep, previousValue: 0, contribution: -1 })).toThrow(RangeError);
     expect(() => applyOnboardingAdvance({ ruleVersion: ONBOARDING_RULE_VERSION, step: packStep, previousValue: -1, contribution: 1 })).toThrow(RangeError);
-    expect(() => applyOnboardingAdvance({ ruleVersion: "onboarding/v2", step: packStep, previousValue: 0, contribution: 1 })).toThrow(RangeError);
+    expect(() => applyOnboardingAdvance({ ruleVersion: "onboarding/v3", step: packStep, previousValue: 0, contribution: 1 })).toThrow(RangeError);
   });
 
   it("profile/view_event 步骤不可累加推进，view_event 路径必须与定义匹配", () => {

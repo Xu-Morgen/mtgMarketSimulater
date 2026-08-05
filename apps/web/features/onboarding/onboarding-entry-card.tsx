@@ -1,7 +1,7 @@
 "use client";
 
 import type { OnboardingDto } from "@mtg-market/contracts";
-import Link from "next/link";
+import { useOnboardingGuide } from "../../providers/onboarding-guide-context";
 import { ErrorState, PageSkeleton } from "../../components/ui";
 import { useOnboardingQuery } from "../../api/onboarding-api";
 import styles from "./onboarding-entry-card.module.css";
@@ -9,9 +9,11 @@ import styles from "./onboarding-entry-card.module.css";
 /**
  * I36F 玩家首页常驻引导入口：未完成玩家显示引导徽标（进行中 x/y 或可领取完成奖励），
  * 完成并领取后显示已完成；进度与状态只取服务端响应，刷新后不伪造进度。
+ * 「继续引导」直接启动常驻的 antd Tour 引导会话（从当前未完成步骤开始）。
  */
 export function OnboardingEntryCard() {
   const onboarding = useOnboardingQuery();
+  const guide = useOnboardingGuide();
 
   if (onboarding.isPending) return <PageSkeleton label="正在加载新手引导入口" />;
   if (onboarding.isError) {
@@ -31,7 +33,7 @@ export function OnboardingEntryCard() {
       <h2 id="onboarding-entry-title">新手引导</h2>
       <div className={styles.row}>
         <span className={`${styles.badge} ${badge.className}`} role="status">{badge.label}</span>
-        <Link className="button secondary" href="/onboarding">{data.currentStepId ? "继续引导" : "查看新手引导"}</Link>
+        <button className="button secondary" type="button" onClick={() => guide.retarget(data.currentStepId ?? data.steps[0]?.id ?? null)}>{data.currentStepId ? "继续引导" : "查看新手引导"}</button>
       </div>
       <p className={styles.hint}>
         {data.currentStepId

@@ -131,7 +131,7 @@ export function CollectionAlbumPage() {
   );
 
   return (
-    <main className="page">
+    <main id="onboarding-collection-album" className="page">
       <Link className="back-link" href="/collection">
         返回收藏册
       </Link>

@@ -8,6 +8,7 @@ import { useArchiveQuery } from "../api/archive-api";
 import { useDailyWorkFundingStatusQuery } from "../api/daily-work-funding-api";
 import { useSession } from "../providers/session-provider";
 import { formatMoney } from "../utils/money";
+import { OnboardingGuideTour } from "./onboarding-guide-tour";
 
 /** 宝石徽章图标：原创内联 SVG（stroke 风格），不用 emoji。 */
 function GemIcon({ size = 14 }: { size?: number }) {
@@ -169,6 +170,7 @@ function Shell({ children, admin }: Readonly<{ children: React.ReactNode; admin:
       </nav>
       <main className="content">{children}</main>
     </div>
+    {!admin ? <OnboardingGuideTour /> : null}
   </div>;
 }
 

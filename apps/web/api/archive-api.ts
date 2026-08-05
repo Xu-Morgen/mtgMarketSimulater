@@ -53,6 +53,9 @@ export function useCreateArchiveMutation() {
     onSuccess: ({ data }) => {
       queryClient.setQueryData(archiveQueryKey(user!.id), { data });
       void queryClient.invalidateQueries({ queryKey: ["ledger", user!.id] });
+      // I36F：创建存档完成「创建存档」引导第一步（服务端按 accounts 快照判定），引导 Tour 需刷新。
+      void queryClient.invalidateQueries({ queryKey: ["onboarding", user!.id] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard", user!.id] });
       idempotencyKey.current = null;
     }
   });
