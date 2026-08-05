@@ -230,8 +230,52 @@ test("首次引导完整流程：开始 → 高亮按钮 → 真实完成创建�
   await expect(tourPanelOnPacks.getByText("下一步：开出第一包", { exact: true })).toBeVisible();
   await expect(page.locator("#onboarding-pack-purchase")).toBeVisible();
   await expect(page.locator("#onboarding-pack-purchase")).toBeInViewport();
-  // 继续 → 看懂价格：点击「下一步」自动跳转到价格历史页并提交浏览意图（只投递一次）。
-  await tourPanel.getByRole("button", { name: "下一步" }).click();
+  // 真实完成购买开包：购买弹窗必须渲染在引导蒙层之上（z-index 1200 > Tour 蒙层 1100），
+  // 否则弹窗被蒙层盖住、开包按钮无法点击，表现为引导卡死。
+  let openCalls = 0;
+  const openKeys: string[] = [];
+  // 开包结果卡展示所需的卡牌详情/报价以 404 兜底（不影响开包结果与引导流程）。
+  await page.route("**/v1/catalog/cards/30000000-0000-4000-8000-00000000036*", (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ ok: false, error: { code: "RESOURCE_NOT_FOUND", message: "卡牌不存在" }, meta: { requestId: "i36f-card" } }) }));
+  await page.route("**/v1/market/quotes/30000000-0000-4000-8000-00000000036*", (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ ok: false, error: { code: "RESOURCE_NOT_FOUND", message: "暂无报价" }, meta: { requestId: "i36f-quote" } }) }));
+  await page.route("**/v1/store/packs/50000000-0000-4000-8000-000000000360/purchase-preview", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(
+        envelope({ preview: { pack: activePack, ruleVersion: "pack/v1", cost: { amount: 500, currency: "GAME_CREDIT" }, canPurchase: true, unavailableReason: null } })
+      )
+    })
+  );
+  await page.route("**/v1/packs/50000000-0000-4000-8000-000000000360/open", async (route) => {
+    openCalls += 1;
+    openKeys.push(route.request().headers()["idempotency-key"] ?? "");
+    expect(route.request().postDataJSON()).toEqual({ ruleVersion: "pack/v1" });
+    state.auto = [...state.auto, "open-first-pack"];
+    return route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify(
+        envelope({
+          opening: {
+            id: "opening-i36f", packId: activePack.id, packRuleVersion: "pack/v1",
+            spent: { amount: 500, currency: "GAME_CREDIT" },
+            received: [
+              { skuId: "30000000-0000-4000-8000-000000000361", quantity: 1, cost: { amount: 250, currency: "GAME_CREDIT" }, referencePrice: null, gamePrice: null, priceStatus: "unavailable_until_i17", isNewToCollection: true, collectionProgressAfter: { setCode: "ONB", collected: 1, total: 2, basisPoints: 5000 } },
+              { skuId: "30000000-0000-4000-8000-000000000362", quantity: 1, cost: { amount: 250, currency: "GAME_CREDIT" }, referencePrice: null, gamePrice: null, priceStatus: "unavailable_until_i17", isNewToCollection: true, collectionProgressAfter: { setCode: "ONB", collected: 1, total: 2, basisPoints: 5000 } }
+            ],
+            profitLoss: { spent: { amount: 500, currency: "GAME_CREDIT" }, referenceValue: null, gameValue: null, referenceProfitLoss: null, gameProfitLoss: null, priceStatus: "unavailable_until_i17" },
+            totalCost: { amount: 500, currency: "GAME_CREDIT" }, totalGameValue: null, openedAt: now
+          }
+        })
+      )
+    });
+  });
+  await page.locator("#onboarding-pack-purchase").click();
+  await expect(page.getByRole("dialog", { name: "购买补充包" })).toBeVisible();
+  await expect(page.getByText("本次扣款：500 游戏币")).toBeVisible();
+  await page.getByRole("dialog", { name: "购买补充包" }).getByRole("button", { name: "确认购买并开包" }).dblclick();
+  expect(openCalls).toBe(1);
+  expect(openKeys[0]).toMatch(/^[0-9a-f-]{36}$/i);
+  // 开包完成（open-first-pack 由已结算事实推进）：自动前进到「看懂价格」并跳转价格历史页。
   await expect(page).toHaveURL(/\/market\/history/);
   await expect(tourPanel.getByText("下一步：看懂价格", { exact: true })).toBeVisible();
   await expect(page.locator("#onboarding-view-price-history")).toBeVisible();
