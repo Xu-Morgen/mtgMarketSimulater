@@ -79,6 +79,8 @@
 .actionGroup { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .skuName { align-items: center; display: flex; gap: 6px; }
+.nameLink { color: var(--text-primary); font-weight: 700; text-decoration: none; }
+.nameLink:hover { color: var(--accent-gold-bright); text-decoration: underline; text-underline-offset: 3px; }
 .previewTrigger {
   align-items: center;
   background: transparent;

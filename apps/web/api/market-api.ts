@@ -1,6 +1,6 @@
 "use client";
 
-import type { CardFinish, MarketIndexHistoryDto, MarketQuoteListItemDto, Page, PriceHistoryDto, PriceHistoryRange, QuoteDto } from "@mtg-market/contracts";
+import type { CardFinish, MarketAnnouncementsDto, MarketHeatDto, MarketIndexHistoryDto, MarketQuoteListItemDto, Page, PriceHistoryDto, PriceHistoryRange, QuoteDto } from "@mtg-market/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "./client";
 import { useSession } from "../providers/session-provider";
@@ -33,7 +33,11 @@ export const marketApi = {
   /** I17F：按自然日采样的只追加历史；服务端决定 7d/30d/all 窗口与 null 缺失点，浏览器不插值。 */
   history: (accessToken: string, skuId: string, range: PriceHistoryRange) => apiRequest<PriceHistoryDto>(`/v1/market/quotes/${skuId}/history?range=${range}`, { accessToken }),
   /** I17F：全服指数历史；与单卡历史共用 range 语义。 */
-  indexHistory: (accessToken: string, range: PriceHistoryRange) => apiRequest<MarketIndexHistoryDto>(`/v1/market/index/history?range=${range}`, { accessToken })
+  indexHistory: (accessToken: string, range: PriceHistoryRange) => apiRequest<MarketIndexHistoryDto>(`/v1/market/index/history?range=${range}`, { accessToken }),
+  /** I34B：行情屏涨跌榜/活跃榜只读聚合；涨跌幅与方向由服务端按报价快照与已结算事实计算。 */
+  heat: (accessToken: string) => apiRequest<MarketHeatDto>("/v1/market/heat", { accessToken }),
+  /** I34B：系列周期与市场活动公告只读聚合；只含标题、影响范围与生效区间，不含内部系数。 */
+  announcements: (accessToken: string) => apiRequest<MarketAnnouncementsDto>("/v1/market/announcements", { accessToken })
 };
 
 export function useMarketQuotesQuery(filters: MarketFilters) {
@@ -84,6 +88,28 @@ export function useMarketIndexHistoryQuery(range: PriceHistoryRange) {
   return useQuery({
     queryKey: ["market", "index-history", user?.id ?? "anonymous", range],
     queryFn: () => marketApi.indexHistory(accessToken!, range),
+    enabled: Boolean(accessToken && user),
+    retry: false
+  });
+}
+
+/** I34F：市场热度（涨跌榜/活跃榜）只读查询；数据仅供展示，浏览器不计算涨跌。 */
+export function useMarketHeatQuery() {
+  const { accessToken, user } = useSession();
+  return useQuery({
+    queryKey: ["market", "heat", user?.id ?? "anonymous"],
+    queryFn: () => marketApi.heat(accessToken!),
+    enabled: Boolean(accessToken && user),
+    retry: false
+  });
+}
+
+/** I34F：系列周期与市场活动公告只读查询；公告标题/范围/区间均来自服务端。 */
+export function useMarketAnnouncementsQuery() {
+  const { accessToken, user } = useSession();
+  return useQuery({
+    queryKey: ["market", "announcements", user?.id ?? "anonymous"],
+    queryFn: () => marketApi.announcements(accessToken!),
     enabled: Boolean(accessToken && user),
     retry: false
   });

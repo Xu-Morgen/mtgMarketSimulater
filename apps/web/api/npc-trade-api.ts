@@ -1,6 +1,6 @@
 "use client";
 
-import type { AccountBalanceDto, DuplicatesSellResultDto, InventoryHoldingDto, NpcBuyPreviewDto, NpcSellPreviewDto, NpcTradeDto } from "@mtg-market/contracts";
+import type { AccountBalanceDto, BatchNpcSellResultDto, DuplicatesSellResultDto, InventoryHoldingDto, NpcBuyPreviewDto, NpcSellPreviewDto, NpcTradeDto } from "@mtg-market/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { apiRequest } from "./client";
@@ -175,6 +175,54 @@ export function useSellDuplicatesMutation() {
         // I33F：卖出重复卡会改变收藏图鉴完成度与系列收集率里程碑进度。
         void queryClient.invalidateQueries({ queryKey: ["collection", "album", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["achievements", user.id] });
+      }
+      keyRef.current = null;
+    }
+  });
+  return {
+    ...mutation,
+    beginNewIntent: () => {
+      keyRef.current = null;
+      mutation.reset();
+    }
+  };
+}
+
+/** I34B（D4）：按筛选结果批量向 NPC 卖出；请求体只提交 SKU 意图列表，逐 SKU 结算由服务端单事务完成。 */
+export const sellBatchApi = {
+  sell: (accessToken: string, skuIds: string[], idempotencyKey: string) =>
+    apiRequest<{ result: BatchNpcSellResultDto }>("/v1/npc-trades/sell/batch", {
+      method: "POST",
+      body: { skuIds },
+      accessToken,
+      idempotencyKey
+    })
+};
+
+/**
+ * I34F（I34B D4）：按筛选结果批量卖出。同一份 SKU 列表（顺序无关）固定复用同一个幂等键，
+ * 网络重试只投递一次；成功后失效库存、账本、市场与价格等服务器真相查询。
+ */
+export function useSellBatchMutation() {
+  const { accessToken, user } = useSession();
+  const queryClient = useQueryClient();
+  const keyRef = useRef<{ key: string; fingerprint: string } | null>(null);
+  const mutation = useMutation({
+    mutationFn: async (input: { skuIds: string[] }) => {
+      const fingerprint = [...input.skuIds].sort().join(",");
+      if (!keyRef.current || keyRef.current.fingerprint !== fingerprint) keyRef.current = { key: createIdempotencyKey(), fingerprint };
+      return sellBatchApi.sell(accessToken!, input.skuIds, keyRef.current.key);
+    },
+    onSuccess: () => {
+      if (user) {
+        void queryClient.invalidateQueries({ queryKey: ["archive", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["ledger", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["inventory", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["collection", "album", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["market", "quotes", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["market", "index", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["market", "heat", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["prices", "public-status", user.id] });
       }
       keyRef.current = null;
     }

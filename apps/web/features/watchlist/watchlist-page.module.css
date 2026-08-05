@@ -1,0 +1,88 @@
+/* 价格提醒：提醒列表、添加表单、条目行（暗色奇幻装帧） */
+.sectionCard {
+  background: linear-gradient(150deg, rgba(236, 228, 208, 0.035) 0%, rgba(236, 228, 208, 0) 42%), var(--bg-panel);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  margin: 18px 0;
+  padding: 18px;
+}
+.sectionCard h2 { color: var(--accent-gold-bright); margin-bottom: 10px; }
+.sectionHead { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; margin-bottom: 6px; }
+.secondary { color: var(--text-secondary); font-size: 0.82rem; }
+.nameLink { color: var(--text-primary); font-weight: 700; text-decoration: none; }
+.nameLink:hover { color: var(--accent-gold-bright); text-decoration: underline; text-underline-offset: 3px; }
+.alertList,
+.itemList,
+.candidateList { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.alertRow,
+.itemRow {
+  background: rgba(18, 21, 26, 0.45);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  justify-content: space-between;
+  padding: 12px;
+}
+.alertUnread { border-color: rgba(201, 162, 75, 0.6); box-shadow: 0 0 0 2px rgba(201, 162, 75, 0.2); }
+.alertMain,
+.itemMain { display: grid; gap: 2px; min-width: 0; }
+.alertDetail,
+.itemDetail { display: grid; gap: 2px; }
+.alertActions,
+.itemActions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+.itemTarget { color: var(--accent-gold-bright); }
+.stateChip { border-radius: 999px; display: inline-block; font-size: 0.75rem; font-weight: 700; padding: 2px 9px; }
+.stateOn { background: rgba(127, 166, 90, 0.16); border: 1px solid rgba(168, 207, 132, 0.55); color: #a8cf84; }
+.stateOff { background: rgba(236, 228, 208, 0.08); border: 1px solid var(--border-gold-dim); color: var(--text-secondary); }
+.unreadChip {
+  background: rgba(192, 57, 43, 0.18);
+  border: 1px solid rgba(224, 134, 120, 0.6);
+  border-radius: 999px;
+  color: #e08678;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 2px 10px;
+}
+.candidateButton {
+  background: rgba(18, 21, 26, 0.45);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 9px 12px;
+  text-align: left;
+  width: 100%;
+}
+.candidateButton:hover { border-color: var(--border-gold); color: var(--accent-gold-bright); }
+.addForm {
+  background: rgba(18, 21, 26, 0.4);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  margin-top: 12px;
+  padding: 14px;
+}
+.addGrid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 12px 0; }
+.addGrid label { display: grid; font-size: 0.9rem; font-weight: 700; gap: 5px; color: var(--text-primary); }
+.addGrid select,
+.addGrid input {
+  background: rgba(18, 21, 26, 0.7);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  min-height: 40px;
+  padding: 7px 9px;
+  width: 100%;
+}
+.inlineError {
+  background: rgba(192, 57, 43, 0.12);
+  border: 1px solid rgba(192, 57, 43, 0.55);
+  border-radius: var(--radius-sm);
+  color: #e08678;
+  margin-top: 12px;
+  padding: 12px;
+}
+.inlineError button { margin-top: 8px; }
+@media (max-width: 700px) { .addGrid { grid-template-columns: 1fr; } }

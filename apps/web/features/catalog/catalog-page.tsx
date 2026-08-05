@@ -3,6 +3,7 @@
 import { Button, Pagination as AntPagination, Table } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { CardFinish, CatalogSkuDto } from "@mtg-market/contracts";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { type CatalogFilters, useCatalogQuery } from "../../api/catalog-api";
@@ -24,6 +25,7 @@ function filtersFromSearch(search: URLSearchParams | null): CatalogFilters {
   return { query: value.get("query") || undefined, setCode: value.get("setCode") || undefined, rarity: value.get("rarity") || undefined, finish: finish === "nonfoil" || finish === "foil" || finish === "etched" ? finish : undefined, cursor: value.get("cursor") || undefined, limit };
 }
 function toUrl(filters: CatalogFilters): string { const search = new URLSearchParams(); for (const [key, value] of Object.entries(filters)) if (value && (key !== "limit" || value !== defaultPageSize)) search.set(key, String(value)); const suffix = search.toString(); return suffix ? `/catalog?${suffix}` : "/catalog"; }
+function skuHistoryHref(skuId: string): string { return `/market/history?skuId=${encodeURIComponent(skuId)}`; }
 
 export function CatalogPage() {
   const router = useRouter(); const search = useSearchParams(); const filters = filtersFromSearch(search); const catalog = useCatalogQuery(filters); const priceStatus = usePublicPriceStatusQuery();
@@ -32,7 +34,7 @@ export function CatalogPage() {
   const pageSize = filters.limit ?? defaultPageSize;
   const currentPage = Math.floor(Number.parseInt(filters.cursor ?? "0", 10) / pageSize) + 1;
   const columns = useMemo<ColumnsType<CatalogSkuDto>>(() => [
-    { title: "名称", dataIndex: "name", key: "name", render: (name: string, sku) => <strong><span className="rarity-dot" data-rarity={sku.rarity?.toLowerCase()} aria-hidden="true" />{name}</strong> },
+    { title: "名称", dataIndex: "name", key: "name", render: (name: string, sku) => <strong><span className="rarity-dot" data-rarity={sku.rarity?.toLowerCase()} aria-hidden="true" /><Link className="text-button" href={skuHistoryHref(sku.id)}>{name}</Link></strong> },
     { title: "系列 / 编号", key: "printing", render: (_, sku) => `${sku.setCode} · #${sku.collectorNumber}` },
     { title: "工艺", dataIndex: "finish", key: "finish", render: (finish: CardFinish) => finishLabel(finish) },
     { title: "稀有度", dataIndex: "rarity", key: "rarity" },

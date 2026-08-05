@@ -98,4 +98,83 @@
   color: #a8cf84;
   margin-bottom: 20px;
 }
-@media (max-width: 700px) { .summary { grid-template-columns: 1fr; } }
+
+/* I34F 行情屏：涨跌榜 ▲/▼、迷你走势条、公告区与叙事横幅 */
+.historyPrice { color: var(--accent-gold-bright); text-decoration: none; }
+.historyPrice:hover { text-decoration: underline; text-underline-offset: 3px; }
+.priceCell { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+.heatBoard {
+  background: linear-gradient(150deg, rgba(236, 228, 208, 0.035) 0%, rgba(236, 228, 208, 0) 42%), var(--bg-panel);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  margin: 18px 0;
+  padding: 18px;
+}
+.heatHeader { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+.heatHeader h2 { color: var(--accent-gold-bright); }
+.heatGrid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.heatPanel {
+  background: rgba(18, 21, 26, 0.45);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+.heatPanel h3 {
+  align-items: center;
+  color: var(--accent-gold-bright);
+  display: flex;
+  font-size: 0.95rem;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.heatPanel h3::before { background: var(--accent-gold-bright); box-shadow: 0 0 5px rgba(201, 162, 75, 0.6); content: ""; height: 7px; transform: rotate(45deg); width: 7px; }
+.heatList { list-style: none; margin: 0; padding: 0; }
+.heatRow {
+  align-items: center;
+  border-top: 1px solid rgba(236, 228, 208, 0.08);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  justify-content: space-between;
+  padding: 8px 2px;
+}
+.heatRowMain { display: grid; gap: 2px; min-width: 0; }
+.heatRowPrice { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+.heatName { color: var(--text-primary); font-weight: 700; text-decoration: none; }
+.heatName:hover { color: var(--accent-gold-bright); text-decoration: underline; text-underline-offset: 3px; }
+.heatPrice { color: var(--accent-gold-bright); font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; text-decoration: none; }
+.heatPrice:hover { text-decoration: underline; text-underline-offset: 3px; }
+.changeBadge { border-radius: 999px; display: inline-block; font-size: 0.78rem; font-weight: 700; padding: 2px 8px; white-space: nowrap; }
+.changeUp { background: rgba(192, 57, 43, 0.18); border: 1px solid rgba(224, 134, 120, 0.6); color: #e08678; }
+.changeDown { background: rgba(127, 166, 90, 0.16); border: 1px solid rgba(168, 207, 132, 0.55); color: #a8cf84; }
+.changeFlat { background: rgba(236, 228, 208, 0.08); border: 1px solid var(--border-gold-dim); color: var(--text-secondary); }
+.sparklineBox { margin: 12px 0; }
+.sparklineHead { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; margin-bottom: 4px; }
+.sparklineValue { color: var(--accent-gold-bright); font-size: 1.05rem; font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+.sparkline { display: block; height: 56px; margin-top: 6px; width: 100%; }
+.announceSection {
+  background: linear-gradient(150deg, rgba(236, 228, 208, 0.035) 0%, rgba(236, 228, 208, 0) 42%), var(--bg-panel);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  margin: 18px 0;
+  padding: 18px;
+}
+.announceSection h2 { color: var(--accent-gold-bright); margin-bottom: 10px; }
+.announceList { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0; }
+.announceItem { background: rgba(18, 21, 26, 0.45); border: 1px solid var(--border-gold-dim); border-radius: var(--radius-sm); padding: 12px; }
+.announceHead { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
+.announceHead strong { color: var(--text-primary); }
+.announceScope { border: 1px solid var(--border-gold-dim); border-radius: 999px; color: var(--accent-gold-bright); font-size: 0.75rem; padding: 2px 8px; }
+.narrativeBanner {
+  background: rgba(201, 162, 75, 0.08);
+  border: 1px solid rgba(201, 162, 75, 0.45);
+  border-radius: var(--radius-sm);
+  color: #e6c87c;
+  margin: 16px 0;
+  padding: 12px 14px;
+}
+.narrativeBanner h2 { color: var(--accent-gold-bright); font-size: 0.95rem; margin-bottom: 4px; }
+.narrativeBanner p { margin: 0; }
+@media (max-width: 700px) { .summary { grid-template-columns: 1fr; } .heatGrid { grid-template-columns: 1fr; } }

@@ -223,11 +223,12 @@ export function OrdersPage() {
       {!selectedBookSkuId ? <EmptyState title="尚未选择订单簿 SKU">默认选择你最近一笔未完成委托的 SKU；也可在上方下拉手动切换。</EmptyState>
         : book.isPending ? <p aria-busy="true">正在加载订单簿…</p>
         : book.isError ? <section className={styles.staleHint} role="status"><p>订单簿数据可能过期，连接失败，正在重试。</p><button className="button secondary" type="button" onClick={() => void book.refetch()}>立即刷新</button></section>
-        : <><div className={styles.bookGrid}>
+        : <><div className={styles.bookMeta} aria-label="盘口中间价与价差">中间价 <strong>{bookData?.midPrice ? formatMoney(bookData.midPrice) : "—"}</strong> · 价差 <strong>{bookData?.spread ? formatMoney(bookData.spread) : "—"}</strong>{bookData?.midPrice === null || bookData?.spread === null ? <span className={styles.secondary}>（买/卖任一档缺失时由服务端返回空值，页面不推导）</span> : null}</div>
+          <div className={styles.bookGrid}>
           <div className={`${styles.bookSide} ${styles.bookBids}`}><h3>买单（价格降序）</h3><BookLevels rows={bookData?.bids ?? []} emptyHint="无买单" /></div>
           <div className={`${styles.bookSide} ${styles.bookAsks}`}><h3>卖单（价格升序）</h3><BookLevels rows={bookData?.asks ?? []} emptyHint="无卖单" /></div>
         </div>
-        <p className={styles.bookMeta}>订单簿数据截至 {formatDate(bookData?.capturedAt ?? new Date().toISOString())}；价格—时间优先顺序由服务端返回，不含用户身份。页面每 10 秒自动刷新；切到后台不轮询。</p></>}
+        <p className={styles.bookMeta}>订单簿数据截至 {formatDate(bookData?.capturedAt ?? new Date().toISOString())}；价格—时间优先顺序由服务端返回，不含用户身份。累计量从最优档起由服务端逐档聚合，页面每 10 秒自动刷新；切到后台不轮询。</p></>}
     </section>
 
     <section className={`${styles.sectionCard} panel`} aria-label="我的成交与待履约资产">
@@ -266,12 +267,12 @@ export function OrdersPage() {
   </main>;
 }
 
-/** 订单簿档位只读展示；价格、剩余数量与委托数全部由服务端聚合返回。 */
-function BookLevels({ rows, emptyHint }: { rows: Array<{ limitPrice: { amount: number }; remainingQuantity: number; orderCount: number }>; emptyHint: string }) {
+/** 订单簿档位只读展示；价格、剩余数量、累计量与委托数全部由服务端聚合返回。 */
+function BookLevels({ rows, emptyHint }: { rows: Array<{ limitPrice: { amount: number }; remainingQuantity: number; cumulativeQuantity: number; orderCount: number }>; emptyHint: string }) {
   if (rows.length === 0) return <p className={styles.secondary}>{emptyHint}</p>;
   return <table>
-    <thead><tr><th>限价</th><th>剩余数量</th><th>委托数</th></tr></thead>
-    <tbody>{rows.map((row) => <tr key={row.limitPrice.amount}><td>{formatMoney({ amount: row.limitPrice.amount, currency: "GAME_CREDIT" })}</td><td>{row.remainingQuantity}</td><td>{row.orderCount}</td></tr>)}</tbody>
+    <thead><tr><th>限价</th><th>剩余数量</th><th>累计量</th><th>委托数</th></tr></thead>
+    <tbody>{rows.map((row) => <tr key={row.limitPrice.amount}><td>{formatMoney({ amount: row.limitPrice.amount, currency: "GAME_CREDIT" })}</td><td>{row.remainingQuantity}</td><td>{row.cumulativeQuantity}</td><td>{row.orderCount}</td></tr>)}</tbody>
   </table>;
 }
 

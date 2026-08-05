@@ -322,10 +322,11 @@ function OpeningCardPresentation({ card, className }: { card: PackOpeningCardDto
       ? card.isNewToCollection
       : null;
   const progress = card.collectionProgressAfter;
+  const historyHref = `/market/history?skuId=${encodeURIComponent(card.skuId)}`;
   return (
     <div className={className ?? styles.openingCardContent}>
       <div className={styles.openingCardHeader}>
-        <strong>{catalog.isPending ? "正在加载卡牌名称…" : name ?? "卡牌资料暂不可用"}</strong>
+        <Link className={styles.openingNameLink} href={historyHref}>{catalog.isPending ? "正在加载卡牌名称…" : name ?? "卡牌资料暂不可用"}</Link>
         <button className="text-button" type="button" onClick={() => setSelectedSkuId(card.skuId)}>
           详情
         </button>
@@ -345,7 +346,7 @@ function OpeningCardPresentation({ card, className }: { card: PackOpeningCardDto
       {catalog.isError ? <span className={styles.metadata}>卡牌名称暂不可用。</span> : null}
       <span>数量：{card.quantity}</span>
       <span>本次分摊成本：{formatMoney(card.cost)}</span>
-      <span>当前市场价：{quote.isPending ? "正在加载…" : quote.data ? formatMoney(quote.data.data.quote.marketPrice) : "暂无有效市场报价"}</span>
+      <span>当前市场价：{quote.isPending ? "正在加载…" : quote.data ? <Link className={styles.openingNameLink} href={historyHref}>{formatMoney(quote.data.data.quote.marketPrice)}</Link> : "暂无有效市场报价"}</span>
       {progress && progress.totalSkuCount > 0 ? (
         <span className={styles.metadata}>
           系列 {progress.setCode} 进度 {formatBasisPoints(progress.completionBasisPoints)}（已收集 {progress.collectedSkuCount} / {progress.totalSkuCount}）

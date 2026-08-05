@@ -129,6 +129,12 @@ e2e 验证默认由用户手动执行（见第 7 节 E2E 执行策略）。每�
 - 备注：<阻塞点、需要修复的问题>
 ```
 
+### 2026-08-05：I34F（市场行情与交易体验页面）
+- 状态：**待用户手动 e2e 复跑**（本机自动运行会因超时/内存耗尽使 WSL 崩溃，未代跑）。
+- 已由 Agent 完成并通过的自动化：`pnpm check`（含全仓 lint + 各包 tsc）、全仓单元测试 contracts 13 / rules 85 / database 4 / api 245（1 跳过）/ web 5 全过、`pnpm --filter @mtg-market/web build`（`next build` 通过，`/watchlist` 路由生成）。
+- 需用户手动验证：`apps/web/tests/e2e/market-heat-watchlist-i34f.spec.ts`（桌面 + 390px 窄屏共 4 项：市场页行情屏/公告区/叙事横幅/价格跳转、价格提醒页增删启停与标记已读只投递一次、订单簿盘口深度累计量/中间价/价差、库存页按筛选批量卖出幂等 + 汇总横幅）；人工记录见 [I34F.md](apps/web/tests/manual/I34F.md)。
+- 备注：回归修复了 I33B/I34B 两个 API 夹具的日期敏感问题（「当日额度已用尽」的 `settlement_date` 改为与运行当天一致）；现有 market.spec / orders.spec / inventory.spec 未改动，仅补充新 spec；导航新增「价格提醒」链接不影响既有侧栏断言。
+
 ### 2026-08-04：I33F（收藏图鉴与开包体验页面）
 - 状态：**待用户手动 e2e 复跑**（本机自动运行会因超时/内存耗尽使 WSL 崩溃，未代跑）。
 - 已由 Agent 完成并通过的自动化：`pnpm check`（含全仓 lint + 各包 tsc）、`pnpm --filter @mtg-market/web test`（vitest 5 例）、`pnpm --filter @mtg-market/web build`（`next build` 通过，`/collection/album` 路由生成）；全仓单元测试 contracts 12 / rules 84 / database 4 / api 235（1 跳过）/ web 5 全过。

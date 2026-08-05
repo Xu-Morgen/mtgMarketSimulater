@@ -136,6 +136,8 @@
 .openingCardContent { display: grid; gap: 7px; }
 .openingCardHeader { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
 .openingCardHeader strong { color: var(--accent-gold-bright); }
+.openingNameLink { color: var(--accent-gold-bright); text-decoration: none; }
+.openingNameLink:hover { text-decoration: underline; text-underline-offset: 3px; }
 .hiddenCard {
   align-items: center;
   background: repeating-linear-gradient(45deg, rgba(201, 162, 75, 0.07) 0 8px, rgba(201, 162, 75, 0.03) 8px 16px);

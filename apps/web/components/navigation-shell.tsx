@@ -41,6 +41,8 @@ function NavIcon({ kind, size = 15 }: { kind: string; size?: number }) {
       return <svg {...common}><path d="M3 17l6-6 4 4 8-9" /><path d="M17 6h4v4" /></svg>;
     case "orders": // 羊皮卷（委托）
       return <svg {...common}><path d="M5 3h14v18H5z" /><path d="M9 8h6M9 12h6M9 16h4" /></svg>;
+    case "watchlist": // 铃铛（价格提醒）
+      return <svg {...common}><path d="M12 3a5 5 0 0 0-5 5v3L5 15v2h14v-2l-2-4V8a5 5 0 0 0-5-5Z" /><path d="M10 20a2 2 0 0 0 4 0" /></svg>;
     case "packs": // 包体（补充包）
       return <svg {...common}><rect x="4" y="6" width="16" height="12" rx="2" /><path d="M4 10h16M12 6v12" /><circle cx="12" cy="13" r="1.6" /></svg>;
     case "inventory": // 货箱（库存）
@@ -87,7 +89,7 @@ type NavGroup = { title: string; links: NavLink[] };
 
 const playerGroups: NavGroup[] = [
   { title: "大厅", links: [{ href: "/dashboard", label: "玩家首页", icon: "dashboard" }, { href: "/collection", label: "收藏册", icon: "collection" }, { href: "/collection/album", label: "收藏图鉴", icon: "collection" }] },
-  { title: "市场", links: [{ href: "/catalog", label: "卡牌目录", icon: "catalog" }, { href: "/market", label: "市场", icon: "market" }, { href: "/market/history", label: "价格历史", icon: "history" }, { href: "/orders", label: "我的委托", icon: "orders" }] },
+  { title: "市场", links: [{ href: "/catalog", label: "卡牌目录", icon: "catalog" }, { href: "/market", label: "市场", icon: "market" }, { href: "/market/history", label: "价格历史", icon: "history" }, { href: "/orders", label: "我的委托", icon: "orders" }, { href: "/watchlist", label: "价格提醒", icon: "watchlist" }] },
   { title: "卡牌经营", links: [{ href: "/packs", label: "补充包商店", icon: "packs" }, { href: "/inventory", label: "我的库存", icon: "inventory" }, { href: "/decks", label: "我的卡组", icon: "decks" }] },
   { title: "赛事与成长", links: [{ href: "/tournaments", label: "比赛", icon: "tournaments" }, { href: "/achievements", label: "成就", icon: "achievements" }] },
   { title: "数据", links: [{ href: "/exports", label: "我的数据导出", icon: "exports" }] }

@@ -7,6 +7,8 @@ import { createApiApp } from "../../../app.js";
 import { loadApiConfig } from "../../../config/environment.js";
 
 const directories: string[] = [];
+// 服务端按当前 UTC 自然日聚合交易额度；夹具里“当日已用额度”的成交日期必须与运行当天一致，否则该日额度不会生效。
+const today = new Date().toISOString().slice(0, 10);
 const ids = {
   set: "10000000-0000-4000-8000-000000000171",
   printing: "20000000-0000-4000-8000-000000000171",
@@ -74,7 +76,7 @@ describe("I33B 重复卡批量卖出", () => {
     seedTradableQuote(database);
     const { authorization, userId } = await playerWithHoldings(app, database);
     // 当日卖出额度已用尽：给当前玩家插入一笔已结算当日成交使 remaining=0，所有重复都被跳过。
-    database.prepare("INSERT INTO npc_trades (id, user_id, sku_id, side, quote_id, quote_version, unit_price_amount, unit_fee_amount, total_amount, quantity, settlement_date, created_at) VALUES (?, ?, ?, 'sell', ?, 'market/v1', 170, 20, 510, 3, ?, ?)").run("80000000-0000-4000-8000-000000000171", userId, ids.sku, ids.quote, "2026-08-04", "2026-08-04T00:00:00.000Z");
+    database.prepare("INSERT INTO npc_trades (id, user_id, sku_id, side, quote_id, quote_version, unit_price_amount, unit_fee_amount, total_amount, quantity, settlement_date, created_at) VALUES (?, ?, ?, 'sell', ?, 'market/v1', 170, 20, 510, 3, ?, ?)").run("80000000-0000-4000-8000-000000000171", userId, ids.sku, ids.quote, today, `${today}T00:00:00.000Z`);
     database.prepare("UPDATE npc_trade_limits SET max_quantity_per_user_sku_day = 3").run();
     const limited = await app.inject({ method: "POST", url: "/v1/inventory/duplicates/sell", headers: { authorization, "idempotency-key": "dup-sell-limit-01" }, payload: {} });
     expect(limited.statusCode).toBe(201);
