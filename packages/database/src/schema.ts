@@ -764,3 +764,49 @@ export const mtgjsonImportDrafts = sqliteTable(
 // 与只在迁移中定义的 bilateral_orders/tournaments 等表保持一致的访问约定（应用层用 raw SQL 读写）。
 // - backup_records：SQLite 一致性备份，由 backup.create 任务产出；失败只追加 failed，绝不删最近成功备份。
 // - export_records：玩家经营报表，严格按 user_id 过滤；下载时服务端再次复核 ownership 防越权。
+
+/** I35B 每日/每周任务定义与实例（迁移 0037）；实例进度由已结算事实推进，奖励显式领取。 */
+export const taskDefinitions = sqliteTable(
+  "task_definitions",
+  {
+    id: text("id").primaryKey(),
+    period: text("period").notNull(),
+    metricType: text("metric_type").notNull(),
+    targetAmount: integer("target_amount").notNull(),
+    rewardAmount: integer("reward_amount").notNull(),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    ruleVersion: text("rule_version").notNull(),
+    createdAt: text("created_at").notNull()
+  }
+);
+
+export const taskInstances = sqliteTable(
+  "task_instances",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    definitionId: text("definition_id").notNull().references(() => taskDefinitions.id),
+    periodKey: text("period_key").notNull(),
+    currentValue: integer("current_value").notNull(),
+    status: text("status").notNull(),
+    claimedAt: text("claimed_at"),
+    claimedIdempotencyKey: text("claimed_idempotency_key"),
+    updatedAt: text("updated_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("task_instances_user_definition_period_unique").on(table.userId, table.definitionId, table.periodKey),
+    index("task_instances_user_period_index").on(table.userId, table.periodKey, table.status)
+  ]
+);
+
+/** I35B 等级/声望快照：total_xp/level 只升不降，净资产峰值只增不减。 */
+export const playerGrowth = sqliteTable("player_growth", {
+  userId: text("user_id").primaryKey().references(() => users.id),
+  totalXp: integer("total_xp").notNull(),
+  level: integer("level").notNull(),
+  title: text("title").notNull(),
+  peakNetWorthAmount: integer("peak_net_worth_amount").notNull(),
+  ruleVersion: text("rule_version").notNull(),
+  updatedAt: text("updated_at").notNull()
+});

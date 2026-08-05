@@ -20,7 +20,7 @@ describe("database foundation", () => {
     const database = openSqliteDatabase(join(directory, "test.db"));
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
     expect(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get()).toEqual({
-      count: 36
+      count: 37
     });
     expect(
       database
@@ -132,6 +132,13 @@ describe("database foundation", () => {
     expect(database.prepare("SELECT max_items_per_user FROM watchlist_limits WHERE singleton = 1").get()).toEqual({ max_items_per_user: 50 });
     expect(database.prepare("SELECT npc_bias_bps, npc_bias_reason FROM market_parameters WHERE singleton = 1").get()).toEqual({ npc_bias_bps: 10000, npc_bias_reason: "NPC 做市商倾向" });
     expect(database.prepare("SELECT max_rewards_per_day FROM achievement_risk_limits WHERE singleton = 1").get()).toEqual({ max_rewards_per_day: 20 });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'task_definitions'").get()).toEqual({ name: "task_definitions" });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'task_instances'").get()).toEqual({ name: "task_instances" });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM task_definitions").get()).toEqual({ count: 6 });
+    expect(database.prepare("SELECT period, metric_type, target_amount, reward_amount FROM task_definitions WHERE id = 'daily-open-3/v1'").get()).toEqual({ period: "daily", metric_type: "pack.open", target_amount: 3, reward_amount: 100 });
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'player_growth'").get()).toEqual({ name: "player_growth" });
+    expect(database.prepare("SELECT version FROM rule_versions WHERE rule_set = 'daily-task'").get()).toEqual({ version: "daily-task/v1" });
+    expect(database.prepare("SELECT version FROM rule_versions WHERE rule_set = 'level'").get()).toEqual({ version: "level/v1" });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'backup_records'").get()).toEqual({ name: "backup_records" });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'export_records'").get()).toEqual({ name: "export_records" });
     expect(

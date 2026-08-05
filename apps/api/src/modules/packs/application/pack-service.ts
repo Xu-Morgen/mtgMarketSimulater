@@ -22,6 +22,7 @@ import {
 import { InventoryService } from "../../inventory/application/inventory-service.js";
 import { UserService } from "../../users/application/user-service.js";
 import { MarketService } from "../../market/application/market-service.js";
+import { GrowthService } from "../../growth/application/growth-service.js";
 import { enqueueMarketRepriceJob, enqueuePackAchievementProcessJob } from "../../jobs/application/task-service.js";
 import { failure, success } from "../../../shared/http/api-response.js";
 
@@ -102,14 +103,17 @@ export class PackService {
   private readonly inventory: InventoryService;
   private readonly users: UserService;
   private readonly market: MarketService;
+  private readonly growth: GrowthService;
   constructor(
     private readonly database: Database.Database,
-    private readonly createSeed: () => string = () => randomBytes(32).toString("hex")
+    private readonly createSeed: () => string = () => randomBytes(32).toString("hex"),
+    timezone = "Asia/Shanghai"
   ) {
     this.packs = new SqlitePackRepository(database);
     this.inventory = new InventoryService(database);
     this.users = new UserService(database);
     this.market = new MarketService(database);
+    this.growth = new GrowthService(database, timezone);
   }
 
   list(now = new Date().toISOString()): PackDto[] {
@@ -357,6 +361,10 @@ export class PackService {
         return this.completeBulkFailure(input, now, 409, "RULE_VIOLATION", "补充包配置包含无效卡牌，暂时无法购买");
       if (!this.users.balance(input.userId))
         return this.completeBulkFailure(input, now, 409, "RESOURCE_CONFLICT", "请先创建游戏存档");
+      // I35B（F5）：批量开包数量上限随等级提升；等级 1 默认 10，50/100 需更高等级解锁。
+      const bulkPackMax = this.growth.capabilities(input.userId).bulkPackMax;
+      if (input.count > bulkPackMax)
+        return this.completeBulkFailure(input, now, 409, "RULE_VIOLATION", `单次批量开包上限 ${bulkPackMax} 包，提升等级可解锁更大批量`);
       const offer = toPackOfferDto(this.packs.findOffer(pack.id), now);
       if (offer !== null && offer.status !== "active")
         return this.completeBulkFailure(input, now, 409, "RESOURCE_CONFLICT", "限时补充包当前不在销售窗口内，暂时无法购买");
@@ -592,6 +600,8 @@ export class PackService {
     enqueueMarketRepriceJob(this.database, `fact-event:${eventId}`, input.now);
     // I33B：系列收集率成就以独立幂等任务消费 pack.opened fact；任务至少执行一次，唯一约束收敛至多一次解锁/发奖。
     enqueuePackAchievementProcessJob(this.database, eventId, input.now);
+    // I35B：在事实写入的同一事务内同步推进任务实例进度与等级快照（外层事务保证至多一次）。
+    this.growth.advanceFromFact(eventId);
     this.users.writeEconomicAudit(
       input.userId,
       input.grantSource === "tournament_reward" ? "tournament_reward.pack_opened" : "pack.opened",

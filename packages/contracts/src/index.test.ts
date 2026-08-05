@@ -16,12 +16,16 @@ import {
   type DeckPowerSnapshotDto,
   type DuplicatesSellResultDto,
   type EconomicFactEvent,
+  type GrowthProfileDto,
   type MarketAnnouncementDto,
   type MarketHeatDto,
   type PackOfferDto,
   type PackOpeningCardDto,
   type PackOpeningDto,
   type PlayerBilateralTradeDto,
+  type TaskCenterDto,
+  type TaskClaimDto,
+  type TaskInstanceDto,
   type WatchlistAlertsDto,
   type WatchlistItemDto
 } from "./index.js";
@@ -372,5 +376,50 @@ describe("共享契约", () => {
     expect(parsed.alerts).toMatchObject({ unreadCount: 1 });
     expect(parsed.book.bids[0]).toMatchObject({ cumulativeQuantity: 2 });
     expect(parsed.book).toMatchObject({ midPrice: { amount: 105 }, spread: { amount: 10 } });
+  });
+
+  it("I35B 任务中心/领取与等级档案 DTO 只承载服务端已结算结果", () => {
+    const task: TaskInstanceDto = {
+      id: "instance-0001",
+      definitionId: "daily-open-3/v1",
+      period: "daily",
+      periodKey: "2026-08-05",
+      currentValue: 3,
+      targetAmount: 3,
+      rewardAmount: 100,
+      status: "claimable",
+      claimedAt: null
+    };
+    const center: TaskCenterDto = {
+      daily: [task],
+      weekly: [],
+      pendingRewardCount: 1,
+      period: { day: "2026-08-05", week: "2026-W32" }
+    };
+    const claim: TaskClaimDto = {
+      instanceId: "instance-0001",
+      status: "claimed",
+      reward: { amount: 100, currency: "GAME_CREDIT" },
+      balance: { amount: 10_000, currency: "GAME_CREDIT" }
+    };
+    const growth: GrowthProfileDto = {
+      level: 2,
+      title: "资深收藏家",
+      totalXp: 200,
+      nextLevelXp: 500,
+      progressBasisPoints: 0,
+      capabilities: { npcDailyTradeMultiplier: 1, bulkPackMax: 50 },
+      peakNetWorth: { amount: 12_000, currency: "GAME_CREDIT" },
+      ruleVersion: "level/v1",
+      updatedAt: "2026-08-05T00:00:00.000Z"
+    };
+    const parsed = JSON.parse(JSON.stringify({ task, center, claim, growth }));
+    expect(parsed.task).toMatchObject({ period: "daily", status: "claimable", currentValue: 3, targetAmount: 3, rewardAmount: 100 });
+    expect(parsed.center).toMatchObject({ pendingRewardCount: 1, period: { day: "2026-08-05", week: "2026-W32" } });
+    expect(parsed.claim).toMatchObject({ status: "claimed", reward: { amount: 100 }, balance: { amount: 10_000 } });
+    expect(parsed.growth.capabilities).toMatchObject({ npcDailyTradeMultiplier: 1, bulkPackMax: 50 });
+    // 任务/等级 DTO 不得携带内部推进来源或未结算字段。
+    expect(parsed.task).not.toHaveProperty("factId");
+    expect(parsed.growth).not.toHaveProperty("peakNetWorthExcluded");
   });
 });

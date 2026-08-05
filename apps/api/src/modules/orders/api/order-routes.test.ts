@@ -591,9 +591,11 @@ describe("I20B 模拟履约、取消与到期", () => {
     expect(buyerHolding).toMatchObject({ quantity: 2, available_quantity: 2, average_cost_amount: 200 });
 
     // 卖方：保证金 40 返还（frozen 扣 40、available 加 40）；收入 = 2*200 - 2*4 = 392 到 available。
+    // I35B：履约写 p2p.trade.settled 事实时等级同步——卖方净资产跨过 10000 → 等级 2，一次性升级奖励 200 入账。
     const sellerAfter = (database.prepare("SELECT total_amount, available_amount, frozen_amount FROM accounts WHERE user_id = ?").get(trade.seller_user_id) as { total_amount: number; available_amount: number; frozen_amount: number });
     expect(sellerAfter.frozen_amount).toBe(sellerBefore.frozen_amount - 40);
-    expect(sellerAfter.available_amount).toBe(sellerBefore.available_amount + 40 + 392);
+    expect(sellerAfter.available_amount).toBe(sellerBefore.available_amount + 40 + 392 + 200);
+    expect((database.prepare("SELECT COUNT(*) AS count FROM ledger_entries WHERE reason = 'level_up_reward' AND account_id = (SELECT id FROM accounts WHERE user_id = ?)").get(trade.seller_user_id) as { count: number }).count).toBe(1);
     // 卖方库存：原 2 张已成交离开持有，履约后仍为 0（库存已转给买方）。
     const sellerHolding = database.prepare("SELECT quantity, available_quantity, order_locked_quantity FROM inventory_holdings WHERE user_id = ?").get(trade.seller_user_id) as { quantity: number; available_quantity: number; order_locked_quantity: number };
     expect(sellerHolding).toMatchObject({ quantity: 0, available_quantity: 0, order_locked_quantity: 0 });
@@ -802,7 +804,8 @@ describe("I22B P2P 全链路一致性与恢复", () => {
 
     // 买方的待履约资金完整释放；卖方仅损失已成交两张对应的保证金 40。
     expect(database.prepare("SELECT total_amount, available_amount, frozen_amount FROM accounts WHERE user_id = (SELECT buyer_user_id FROM bilateral_trades WHERE id = ?)").get(trade.id)).toEqual({ total_amount: 10000, available_amount: 10000, frozen_amount: 0 });
-    expect(database.prepare("SELECT total_amount, available_amount, frozen_amount FROM accounts WHERE user_id = (SELECT seller_user_id FROM bilateral_trades WHERE id = ?)").get(trade.id)).toEqual({ total_amount: 8710, available_amount: 8710, frozen_amount: 0 });
+    // I35B：卖方首次履约写 p2p.trade.settled 时净资产跨过 10000 → 等级 2，一次性升级奖励 200 入账（8710 → 8910）。
+    expect(database.prepare("SELECT total_amount, available_amount, frozen_amount FROM accounts WHERE user_id = (SELECT seller_user_id FROM bilateral_trades WHERE id = ?)").get(trade.id)).toEqual({ total_amount: 8910, available_amount: 8910, frozen_amount: 0 });
     expect(database.prepare("SELECT quantity, available_quantity, order_locked_quantity FROM inventory_holdings WHERE user_id = (SELECT seller_user_id FROM bilateral_trades WHERE id = ?)").get(trade.id)).toEqual({ quantity: 5, available_quantity: 5, order_locked_quantity: 0 });
     expect(database.prepare("SELECT status FROM bilateral_trades WHERE id = ?").get(trade.id)).toEqual({ status: "cancelled" });
     expect(database.prepare("SELECT status, remaining_quantity FROM bilateral_orders WHERE id = ?").get(sellerOrder.id)).toEqual({ status: "cancelled", remaining_quantity: 3 });

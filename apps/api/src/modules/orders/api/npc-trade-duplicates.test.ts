@@ -65,7 +65,9 @@ describe("I33B 重复卡批量卖出", () => {
     expect(result.skippedItems).toEqual([]);
     // 保留 1 张可用 + 1 张锁定；账本、库存流水与成交各一次。
     expect(database.prepare("SELECT quantity, available_quantity, order_locked_quantity FROM inventory_holdings").get()).toEqual({ quantity: 2, available_quantity: 1, order_locked_quantity: 1 });
-    expect(database.prepare("SELECT total_amount, available_amount FROM accounts").get()).toEqual({ total_amount: 10510, available_amount: 10510 });
+    // I35B：批量卖出写 npc.trade.settled 时等级同步——净资产跨过 10000 → 等级 2，一次性升级奖励 200 入账（10510 → 10710）。
+    expect(database.prepare("SELECT total_amount, available_amount FROM accounts").get()).toEqual({ total_amount: 10710, available_amount: 10710 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM ledger_entries WHERE reason = 'level_up_reward'").get()).toEqual({ count: 1 });
     expect(database.prepare("SELECT reason, quantity_delta FROM inventory_entries WHERE reason = 'npc_sell_duplicates'").get()).toEqual({ reason: "npc_sell_duplicates", quantity_delta: -3 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM npc_trades WHERE side = 'sell'").get()).toEqual({ count: 1 });
     await app.close(); database.close();

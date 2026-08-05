@@ -18,6 +18,7 @@ import { InventoryService } from "../../inventory/application/inventory-service.
 import { enqueueMarketRepriceJob } from "../../jobs/application/task-service.js";
 import { MarketService, type NpcSettlementQuote } from "../../market/application/market-service.js";
 import { UserService } from "../../users/application/user-service.js";
+import { GrowthService } from "../../growth/application/growth-service.js";
 import { failure, success } from "../../../shared/http/api-response.js";
 
 type LimitsRow = { max_quantity_per_trade: number; max_quantity_per_user_sku_day: number };
@@ -56,11 +57,13 @@ export class NpcTradeService {
   private readonly inventory: InventoryService;
   private readonly users: UserService;
   private readonly market: MarketService;
+  private readonly growth: GrowthService;
 
-  constructor(private readonly database: Database.Database) {
+  constructor(private readonly database: Database.Database, timezone = "Asia/Shanghai") {
     this.inventory = new InventoryService(database);
     this.users = new UserService(database);
     this.market = new MarketService(database);
+    this.growth = new GrowthService(database, timezone);
   }
 
   buyPreview(userId: string, skuId: string, quantity: number, now = new Date()): NpcBuyPreviewResult {
@@ -254,7 +257,7 @@ export class NpcTradeService {
       if (!this.users.balance(input.userId))
         return this.completeDuplicatesFailure(input, now, 409, "RESOURCE_CONFLICT", "请先创建游戏存档");
 
-      const limits = this.limits();
+      const limits = this.limitsFor(input.userId);
       const day = now.slice(0, 10);
       const holdings = this.database.prepare(
         "SELECT sku_id, available_quantity, quantity FROM inventory_holdings WHERE user_id = ? AND quantity > 1 ORDER BY sku_id"
@@ -360,7 +363,7 @@ export class NpcTradeService {
       if (!this.users.balance(input.userId))
         return this.completeBatchFailure(input, now, 409, "RESOURCE_CONFLICT", "请先创建游戏存档");
 
-      const limits = this.limits();
+      const limits = this.limitsFor(input.userId);
       const day = now.slice(0, 10);
       const uniqueSkuIds = [...new Set(input.skuIds)];
       const holdings = new Map((this.database.prepare(
@@ -441,7 +444,7 @@ export class NpcTradeService {
   }
 
   private previewForQuote(userId: string, quantity: number, quote: NpcSettlementQuote, now: string): NpcBuyPreviewDto {
-    const limits = this.limits();
+    const limits = this.limitsFor(userId);
     const day = now.slice(0, 10);
     const used = (this.database.prepare(
       "SELECT COALESCE(SUM(quantity), 0) AS quantity FROM npc_trades WHERE user_id = ? AND sku_id = ? AND side = 'buy' AND settlement_date = ?"
@@ -474,7 +477,7 @@ export class NpcTradeService {
   }
 
   private sellPreviewForQuote(userId: string, quantity: number, quote: NpcSettlementQuote, now: string): NpcSellPreviewDto {
-    const limits = this.limits();
+    const limits = this.limitsFor(userId);
     const day = now.slice(0, 10);
     const used = (this.database.prepare(
       "SELECT COALESCE(SUM(quantity), 0) AS quantity FROM npc_trades WHERE user_id = ? AND sku_id = ? AND side = 'sell' AND settlement_date = ?"
@@ -508,12 +511,17 @@ export class NpcTradeService {
     };
   }
 
-  private limits(): LimitsRow {
+  /**
+   * 按玩家等级读取 NPC 交易额度：`max_quantity_per_user_sku_day` 随等级倍率放大
+   * （等级 1 倍率=1，行为与既有一致），`max_quantity_per_trade` 不受等级影响。
+   */
+  private limitsFor(userId: string): LimitsRow {
     const limits = this.database.prepare(
       "SELECT max_quantity_per_trade, max_quantity_per_user_sku_day FROM npc_trade_limits WHERE singleton = 1"
     ).get() as LimitsRow | undefined;
     if (!limits) throw new Error("NPC 交易额度未初始化");
-    return limits;
+    const multiplier = this.growth.capabilities(userId).npcDailyTradeMultiplier;
+    return { max_quantity_per_trade: limits.max_quantity_per_trade, max_quantity_per_user_sku_day: limits.max_quantity_per_user_sku_day * multiplier };
   }
 
   private tradeDto(id: string, userId: string, skuId: string, side: "buy" | "sell", quantity: number, quote: NpcSettlementQuote, totalAmount: number, settledAt: string): NpcTradeDto {
@@ -536,6 +544,8 @@ export class NpcTradeService {
     this.database.prepare(
       "INSERT INTO outbox (id, event_id, destination, payload_json, status, created_at, dispatched_at) VALUES (?, ?, 'market.fact-event', ?, 'pending', ?, NULL)"
     ).run(randomUUID(), eventId, JSON.stringify(event), now);
+    // I35B：在事实写入的同一事务内同步推进任务实例进度与等级快照（外层事务保证至多一次）。
+    this.growth.advanceFromFact(eventId);
     return eventId;
   }
 

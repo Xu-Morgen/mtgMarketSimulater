@@ -4,6 +4,7 @@ import { z } from "zod";
 import { isValidIdempotencyKey } from "@mtg-market/contracts";
 import { failure, success } from "../../../shared/http/api-response.js";
 import { requireRole } from "../../auth/api/auth-routes.js";
+import type { ApiConfig } from "../../../config/environment.js";
 import { packOpenRequestFingerprint, PackService } from "../application/pack-service.js";
 
 const packParamsSchema = z.object({ packId: z.string().uuid() }).strict();
@@ -20,9 +21,10 @@ const openingHistoryQuerySchema = z
 /** 仅公示服务端版本化配置；不暴露候选池、随机种子、保底或任何开奖写命令。 */
 export async function registerPackRoutes(
   app: FastifyInstance,
-  database: Database.Database
+  database: Database.Database,
+  config: Pick<ApiConfig, "APP_TIMEZONE">
 ): Promise<void> {
-  const packs = new PackService(database);
+  const packs = new PackService(database, undefined, config.APP_TIMEZONE);
   app.get("/v1/packs", { preHandler: requireRole("player") }, async (request) =>
     success(request.requestId, { items: packs.list() })
   );

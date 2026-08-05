@@ -128,7 +128,10 @@ export const publicApiPaths = [
   "/v1/admin/backups/{id}/download",
   "/v1/admin/backups/{id}/restore-rehearsal",
   "/v1/exports",
-  "/v1/exports/{id}/download"
+  "/v1/exports/{id}/download",
+  "/v1/tasks",
+  "/v1/tasks/{instanceId}/claim",
+  "/v1/growth"
 ] as const;
 
 export const openApiDocument = {
@@ -548,6 +551,24 @@ export const openApiDocument = {
       post: {
         summary: "以幂等键将一条提醒标记为已读（只读自己，越权 404）",
         responses: { "200": { description: "已读或幂等重放" }, "400": { description: "缺少幂等键" }, "404": { description: "提醒不存在" }, "401": { description: "认证无效或过期" } }
+      }
+    },
+    "/v1/tasks": {
+      get: {
+        summary: "读取今日/本周任务实例（进度与可领取状态只由服务端推进）",
+        responses: { "200": { description: "任务中心" }, "401": { description: "认证无效或过期" }, "409": { description: "请先创建游戏存档" } }
+      }
+    },
+    "/v1/tasks/{instanceId}/claim": {
+      post: {
+        summary: "以幂等键领取一条已达标任务的奖励（状态机防重复入账）",
+        responses: { "201": { description: "奖励已入账" }, "200": { description: "幂等重放" }, "400": { description: "缺少幂等键或请求无效" }, "404": { description: "任务实例不存在" }, "409": { description: "任务未完成、已领取或幂等冲突" } }
+      }
+    },
+    "/v1/growth": {
+      get: {
+        summary: "读取等级/声望档案（等级、经验、称号与已解锁能力只由服务端计算）",
+        responses: { "200": { description: "等级档案" }, "401": { description: "认证无效或过期" }, "409": { description: "请先创建游戏存档" } }
       }
     },
     "/v1/admin/catalog/sync": {

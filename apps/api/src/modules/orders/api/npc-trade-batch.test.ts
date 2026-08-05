@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openSqliteDatabase } from "@mtg-market/database";
 import { createApiApp } from "../../../app.js";
 import { loadApiConfig } from "../../../config/environment.js";
+import { GrowthService } from "../../growth/application/growth-service.js";
 
 const directories: string[] = [];
 // 服务端按当前 UTC 自然日聚合交易额度；夹具里“当日已用额度”的成交日期必须与运行当天一致，否则该日额度不会生效。
@@ -75,7 +76,9 @@ describe("I34B 按筛选结果批量卖出", () => {
       { sku_id: ids.sku, quantity: 0, available_quantity: 0 },
       { sku_id: skuB, quantity: 0, available_quantity: 0 }
     ]);
-    expect(database.prepare("SELECT total_amount, available_amount FROM accounts").get()).toEqual({ total_amount: 10850, available_amount: 10850 });
+    expect(database.prepare("SELECT total_amount, available_amount FROM accounts").get()).toEqual({ total_amount: 11050, available_amount: 11050 });
+    // I35B：批量卖出同步推进等级（净资产 10000 → 等级 2），发放一次性升级奖励 200。
+    expect(database.prepare("SELECT COUNT(*) AS count FROM ledger_entries WHERE reason = 'level_up_reward'").get()).toEqual({ count: 1 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM npc_trades WHERE side = 'sell'").get()).toEqual({ count: 2 });
     expect(database.prepare("SELECT reason, COUNT(*) AS count FROM inventory_entries WHERE reason = 'npc_sell_batch' GROUP BY reason").get()).toEqual({ reason: "npc_sell_batch", count: 2 });
     await app.close(); database.close();
@@ -129,6 +132,34 @@ describe("I34B 按筛选结果批量卖出", () => {
     const registration2 = await app.inject({ method: "POST", url: "/v1/auth/register", payload: { email: "batch-norecord@example.test", displayName: "无存档玩家", password: "correct-horse-battery-staple" } });
     const noArchive = await app.inject({ method: "POST", url: "/v1/npc-trades/sell/batch", headers: { authorization: `Bearer ${registration2.json().data.accessToken as string}`, "idempotency-key": "batch-noarchive-01" }, payload: { skuIds: [ids.sku] } });
     expect(noArchive.json()).toMatchObject({ ok: false, error: { code: "RESOURCE_CONFLICT" } });
+    await app.close(); database.close();
+  });
+
+  it("I35B 等级能力：NPC 每日交易额度按等级倍率放大（等级 3 倍率 2），预览同步反映", async () => {
+    const { app, database } = await createTestApp();
+    const skuB = "30000000-0000-4000-8000-000000000185";
+    seedTradableQuote(database, ids.sku, ids.printing, ids.set, ids.snapshot, ids.run, ids.quote, "倍率卡甲", "1");
+    seedTradableQuote(database, skuB, "20000000-0000-4000-8000-000000000185", ids.set, "50000000-0000-4000-8000-000000000185", "40000000-0000-4000-8000-000000000185", "60000000-0000-4000-8000-000000000185", "倍率卡乙", "2");
+    // 单例每日额度收紧到 3，等级 1（倍率 1）卖出受 3 张上限约束。
+    database.prepare("UPDATE npc_trade_limits SET max_quantity_per_user_sku_day = 3").run();
+    const level1 = await playerWithHoldings(app, database, "mult-level1@example.test", [{ skuId: ids.sku, quantity: 5, available: 5 }]);
+    const level1Result = await app.inject({ method: "POST", url: "/v1/npc-trades/sell/batch", headers: { authorization: level1.authorization, "idempotency-key": "mult-level1-0001" }, payload: { skuIds: [ids.sku] } });
+    // 等级 1：每日额度 3 只够卖 3 张，剩余 2 张受额度约束留在库存。
+    expect(level1Result.json().data.result.cardCount).toBe(3);
+    expect(level1Result.json().data.result.soldItems[0]).toMatchObject({ skuId: ids.sku, quantity: 3 });
+    expect(database.prepare("SELECT available_quantity FROM inventory_holdings WHERE user_id = ? AND sku_id = ?").get(level1.userId, ids.sku)).toEqual({ available_quantity: 2 });
+    // 等级 3（倍率 2）：每日额度 3×2=6，可一次卖完 5 张；预览同步反映放大后的额度。
+    const level3 = await playerWithHoldings(app, database, "mult-level3@example.test", [{ skuId: skuB, quantity: 5, available: 5 }]);
+    // 以真实已结算事实使玩家达到等级 3（净资产 30000 → 600 经验）：避免手工夹具被结算同步覆盖。
+    database.prepare("UPDATE accounts SET total_amount = 30000, available_amount = 30000 WHERE user_id = ?").run(level3.userId);
+    new GrowthService(database, "Asia/Shanghai").syncLevelForUser(level3.userId);
+    expect((database.prepare("SELECT level FROM player_growth WHERE user_id = ?").get(level3.userId) as { level: number }).level).toBe(3);
+    const level3Result = await app.inject({ method: "POST", url: "/v1/npc-trades/sell/batch", headers: { authorization: level3.authorization, "idempotency-key": "mult-level3-0001" }, payload: { skuIds: [skuB] } });
+    expect(level3Result.json().data.result.soldItems).toHaveLength(1);
+    expect(level3Result.json().data.result.soldItems[0]).toMatchObject({ skuId: skuB, quantity: 5 });
+    // 预览同步反映放大后的额度：已卖出 5 张后剩余 1 张额度（6−5）。
+    const preview = await app.inject({ method: "GET", url: `/v1/npc-trades/sell/${skuB}/preview?quantity=5`, headers: { authorization: level3.authorization } });
+    expect(preview.json().data.preview.limit).toMatchObject({ maxQuantityPerUserSkuDay: 6, remainingQuantityToday: 1 });
     await app.close(); database.close();
   });
 });

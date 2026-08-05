@@ -5,6 +5,7 @@ import { isValidIdempotencyKey } from "@mtg-market/contracts";
 import { failure, success } from "../../../shared/http/api-response.js";
 import { requireRole } from "../../auth/api/auth-routes.js";
 import { orderCancelRequestFingerprint, orderCreateRequestFingerprint, orderTradeRequestFingerprint, OrderService, type OrderCommandResult, type TradeCommandResult } from "../application/order-service.js";
+import type { ApiConfig } from "../../../config/environment.js";
 
 const skuParams = z.object({ skuId: z.string().uuid() }).strict();
 const previewQuery = z.object({ quantity: z.coerce.number().int().min(1).max(1000) }).strict();
@@ -34,8 +35,8 @@ const riskListQuery = z.object({ outcome: z.enum(["blocked", "flagged"]).optiona
  * 双边委托 HTTP 边界。只验证意图与幂等键；限价带、费用、保证金、额度与预占/释放
  * 均由 OrderService 在经济短事务内决定，浏览器不得自报金额或保证金。
  */
-export async function registerOrderRoutes(app: FastifyInstance, database: Database.Database): Promise<void> {
-  const orders = new OrderService(database);
+export async function registerOrderRoutes(app: FastifyInstance, database: Database.Database, config: Pick<ApiConfig, "APP_TIMEZONE">): Promise<void> {
+  const orders = new OrderService(database, config.APP_TIMEZONE);
 
   app.get("/v1/orders/buy/:skuId/preview", { preHandler: requireRole("player") }, async (request, reply) => {
     const preview = orders.preview(request.actor!.id, skuParams.parse(request.params).skuId, "buy", previewQuery.parse(request.query).quantity);

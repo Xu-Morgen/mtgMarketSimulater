@@ -42,6 +42,7 @@ import { InventoryService } from "../../inventory/application/inventory-service.
 import { enqueueMarketRepriceJob, enqueueOrderExpireJob } from "../../jobs/application/task-service.js";
 import { MarketService } from "../../market/application/market-service.js";
 import { UserService } from "../../users/application/user-service.js";
+import { GrowthService } from "../../growth/application/growth-service.js";
 import { success, failure } from "../../../shared/http/api-response.js";
 import {
   assertPositiveQuantity,
@@ -173,11 +174,13 @@ export class OrderService {
   private readonly inventory: InventoryService;
   private readonly users: UserService;
   private readonly market: MarketService;
+  private readonly growth: GrowthService;
 
-  constructor(private readonly database: Database.Database) {
+  constructor(private readonly database: Database.Database, timezone = "Asia/Shanghai") {
     this.inventory = new InventoryService(database);
     this.users = new UserService(database);
     this.market = new MarketService(database);
+    this.growth = new GrowthService(database, timezone);
   }
 
   preview(userId: string, skuId: string, side: OrderSide, quantity: number, now = new Date()): OrderPreviewResult {
@@ -968,6 +971,8 @@ export class OrderService {
       "INSERT INTO outbox (id, event_id, destination, payload_json, status, created_at, dispatched_at) VALUES (?, ?, 'market.fact-event', ?, 'pending', ?, NULL)"
     ).run(randomUUID(), eventId, JSON.stringify(event), now);
     enqueueMarketRepriceJob(this.database, `fact-event:${eventId}`, now);
+    // I35B：在事实写入的同一事务内同步推进任务实例进度与等级快照（外层事务保证至多一次）。
+    this.growth.advanceFromFact(eventId);
     return eventId;
   }
 

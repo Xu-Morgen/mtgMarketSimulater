@@ -29,6 +29,7 @@ import { DeckService } from "../../decks/application/deck-service.js";
 import { LeylineEvaluationError, type LeylineClient } from "../../decks/infrastructure/leyline-client.js";
 import { InventoryService } from "../../inventory/application/inventory-service.js";
 import { enqueueAchievementProcessJob, enqueueTournamentSettleJob } from "../../jobs/application/task-service.js";
+import { GrowthService } from "../../growth/application/growth-service.js";
 import { PackService } from "../../packs/application/pack-service.js";
 import { UserService } from "../../users/application/user-service.js";
 import { naturalDateAt } from "../../users/domain/natural-day.js";
@@ -175,6 +176,7 @@ export class TournamentService {
   private readonly users: UserService;
   private readonly decks: DeckService;
   private readonly packs: PackService;
+  private readonly growth: GrowthService;
 
   constructor(
     private readonly database: Database.Database,
@@ -184,6 +186,7 @@ export class TournamentService {
     this.users = new UserService(database);
     this.decks = new DeckService(database);
     this.packs = new PackService(database);
+    this.growth = new GrowthService(database, config.timezone);
   }
 
   /** 同一 actor+key 只持久化一次命令结果，供无外部 I/O 的玩家赛事写命令使用。 */
@@ -1021,6 +1024,8 @@ export class TournamentService {
     ).run(factEventId, input.aggregateType, input.aggregateId, JSON.stringify({ tournamentId: input.tournamentId, playerId: input.playerId, result: input.result, reward: { amount: input.rewardAmount, currency: "GAME_CREDIT" }, ruleVersion: input.ruleVersion, randomSeedHash: input.randomSeedHash }), input.now);
     // I26B：成就处理以独立、幂等的 achievement.process 任务消费该 fact；任务至少执行一次，解锁唯一约束收敛至多一次业务结果。
     enqueueAchievementProcessJob(this.database, factEventId, input.now);
+    // I35B：在事实写入的同一事务内同步推进任务实例进度与等级快照（外层事务保证至多一次）。
+    this.growth.advanceFromFact(factEventId);
   }
 
   private tournamentDto(tournament: Tournament, userId: string): TournamentDto {

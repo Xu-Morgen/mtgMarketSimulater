@@ -144,11 +144,12 @@ function reconcileGlobalEconomy(database: Database.Database): void {
     expect(account.total_amount).toBe(account.ledger_net);
   }
 
-  // 2. 账本 balance_after 单调性：按账户、按时间重放 credit/debit 必须严格等于 balance_after。
-  //    balance_after 不得是任意写入值；任何漂移在此暴露。
+  // 2. 账本 balance_after 单调性：按账户、按写入顺序（occurred_at 相同则按插入序 rowid）重放
+  //    credit/debit 必须严格等于 balance_after。I35B 起同一经济事务可能为同一账户写多条账本
+  //    （如开包消费与等级升级奖励同 occurred_at），故必须以插入序（rowid）重放而非随机 id。
   const entriesByAccount = database
     .prepare(
-      "SELECT account_id, direction, amount, balance_after FROM ledger_entries ORDER BY account_id, occurred_at, id"
+      "SELECT account_id, direction, amount, balance_after FROM ledger_entries ORDER BY account_id, occurred_at, rowid"
     )
     .all() as Array<{ account_id: string; direction: string; amount: number; balance_after: number }>;
   const running = new Map<string, number>();

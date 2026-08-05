@@ -27,6 +27,7 @@ import { registerAdminRoutes } from "./modules/admin/api/admin-routes.js";
 import { registerBackupRoutes } from "./modules/backup/api/backup-routes.js";
 import { registerExportRoutes } from "./modules/export/api/export-routes.js";
 import { registerWatchlistRoutes } from "./modules/watchlist/api/watchlist-routes.js";
+import { registerGrowthRoutes } from "./modules/growth/api/growth-routes.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -111,12 +112,12 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
   await registerUserRoutes(app, database, config);
   await registerCatalogRoutes(app, config, database);
   await registerInventoryRoutes(app, database);
-  await registerPackRoutes(app, database);
+  await registerPackRoutes(app, database, config);
   await registerCollectionRoutes(app, database);
   await registerPricingRoutes(app, config, database);
   await registerMarketRoutes(app, database);
-  await registerNpcTradeRoutes(app, database);
-  await registerOrderRoutes(app, database);
+  await registerNpcTradeRoutes(app, database, config);
+  await registerOrderRoutes(app, database, config);
   await registerDeckRoutes(app, database);
   await registerTournamentRoutes(app, database, config);
   await registerAchievementRoutes(app, database, config);
@@ -124,6 +125,7 @@ export async function createApiApp(config: ApiConfig, database: Database.Databas
   await registerBackupRoutes(app, config, database);
   await registerExportRoutes(app, config, database);
   await registerWatchlistRoutes(app, database);
+  await registerGrowthRoutes(app, database, config.APP_TIMEZONE);
 
   app.get("/health", async (request) => success(request.requestId, { status: "ok", database: databaseHealth(database) }));
 

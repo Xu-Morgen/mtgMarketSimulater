@@ -1096,6 +1096,68 @@ export interface AchievementUnlockDto {
   rewardCorrelationId: string | null;
 }
 
+/** I35B 每日/每周任务：定义、实例与领取结果只承载服务端已结算结果，浏览器不得判定进度或发放奖励。 */
+export type TaskPeriodKindDto = "daily" | "weekly";
+export type TaskMetricTypeDto = "pack.open" | "trade" | "npc.sell" | "collection.value" | "tournament.play" | "set.completion";
+export type TaskInstanceStatusDto = "pending" | "claimable" | "claimed";
+export interface TaskDefinitionDto {
+  id: string;
+  period: TaskPeriodKindDto;
+  metricType: TaskMetricTypeDto;
+  targetAmount: number;
+  rewardAmount: number;
+  title: string;
+  description: string;
+  ruleVersion: string;
+}
+export interface TaskInstanceDto {
+  id: string;
+  definitionId: string;
+  period: TaskPeriodKindDto;
+  periodKey: string;
+  currentValue: number;
+  targetAmount: number;
+  rewardAmount: number;
+  status: TaskInstanceStatusDto;
+  claimedAt: string | null;
+}
+/** 任务中心：今日 + 本周实例（含未创建实例的 0 进度空态）与可领取数。 */
+export interface TaskCenterDto {
+  daily: TaskInstanceDto[];
+  weekly: TaskInstanceDto[];
+  pendingRewardCount: number;
+  /** 服务端自然日/周键，浏览器不得以本地日期推导周期。 */
+  period: { day: string; week: string };
+}
+export interface TaskClaimDto {
+  instanceId: string;
+  status: TaskInstanceStatusDto;
+  reward: Money;
+  /** 领取后可用余额；浏览器只展示，不推导。 */
+  balance: Money;
+}
+
+/** I35B 等级/声望：等级、经验与已解锁能力只由服务端计算与存储，浏览器只展示。 */
+export interface GrowthCapabilitiesDto {
+  /** 等级解锁的 NPC 每日交易额度倍数（等级 1 为 1）。 */
+  npcDailyTradeMultiplier: number;
+  /** 等级解锁的批量开包数量上限（等级 1 为 10）。 */
+  bulkPackMax: number;
+}
+export interface GrowthProfileDto {
+  level: number;
+  title: string;
+  totalXp: number;
+  nextLevelXp: number | null;
+  /** 当前级内进度 bp（0–10000）。 */
+  progressBasisPoints: number;
+  capabilities: GrowthCapabilitiesDto;
+  /** 历史峰值净资产（服务端只增不减）。 */
+  peakNetWorth: Money;
+  ruleVersion: string;
+  updatedAt: string;
+}
+
 export interface FactEvent<TType extends string, TPayload> {
   id: string;
   type: TType;

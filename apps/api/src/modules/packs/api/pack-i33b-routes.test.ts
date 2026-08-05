@@ -126,11 +126,44 @@ describe("I33B 开包 DTO 增强与批量开包", () => {
     await app.close(); database.close();
   });
 
+  it("I35B 等级能力：等级 1 批量开包超过 10 包被拒绝，等级 2 解锁 50 包", async () => {
+    const { app, database } = await createTestApp();
+    const { activePackId } = seedCatalogAndPacks(database);
+    const token = await authorization(app);
+    await createArchive(app, token, "i35b-bulk-gate-archive-01");
+    const userId = (database.prepare("SELECT id FROM users WHERE email = 'i33b-packs@example.test'").get() as { id: string }).id;
+    // 等级 1（无 player_growth 行）：count=50 被服务端能力门禁拒绝。
+    const denied = await app.inject({
+      method: "POST",
+      url: `/v1/packs/${activePackId}/bulk`,
+      headers: { authorization: token, "idempotency-key": "i35b-bulk-gate-low-0001" },
+      payload: { ruleVersion: "pack/v1", count: 50 }
+    });
+    expect(denied.statusCode).toBe(409);
+    expect(denied.json().error.code).toBe("RULE_VIOLATION");
+    expect(database.prepare("SELECT COUNT(*) AS count FROM pack_openings").get()).toEqual({ count: 0 });
+    // 提升到等级 2（bulkPackMax=50）后可执行（余额充足时成功，这里以余额断言到达结算路径）。
+    database.prepare("INSERT INTO player_growth (user_id, total_xp, level, title, peak_net_worth_amount, rule_version, updated_at) VALUES (?, 200, 2, '资深收藏家', 10000, 'level/v1', ?)").run(userId, "2026-08-05T00:00:00.000Z");
+    database.prepare("UPDATE accounts SET total_amount = 500, available_amount = 500").run();
+    const lowBalance = await app.inject({
+      method: "POST",
+      url: `/v1/packs/${activePackId}/bulk`,
+      headers: { authorization: token, "idempotency-key": "i35b-bulk-gate-ok-0001" },
+      payload: { ruleVersion: "pack/v1", count: 50 }
+    });
+    expect(lowBalance.json()).toMatchObject({ ok: false, error: { code: "INSUFFICIENT_BALANCE" } });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM pack_openings").get()).toEqual({ count: 0 });
+    await app.close(); database.close();
+  });
+
   it("余额不足或库存写入故障时整批回滚，不留下半完成开包", async () => {
     const { app, database } = await createTestApp();
     const { activePackId } = seedCatalogAndPacks(database);
     const token = await authorization(app);
     await createArchive(app, token, "i33b-bulk-archive-02");
+    // I35B（F5）：批量开包上限随等级提升，count=50 需要等级 2（bulkPackMax=50）。
+    const userId = (database.prepare("SELECT id FROM users WHERE email = 'i33b-packs@example.test'").get() as { id: string }).id;
+    database.prepare("INSERT INTO player_growth (user_id, total_xp, level, title, peak_net_worth_amount, rule_version, updated_at) VALUES (?, 200, 2, '资深收藏家', 10000, 'level/v1', ?)").run(userId, "2026-08-05T00:00:00.000Z");
     database.prepare("UPDATE accounts SET total_amount = 500, available_amount = 500").run();
     const lowBalance = await app.inject({
       method: "POST",
