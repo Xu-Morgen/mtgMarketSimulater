@@ -15,7 +15,7 @@ export async function registerDashboardRoutes(app: FastifyInstance, database: Da
     leyline: new LeylineClient({ endpoint: config.LEYLINE_ENDPOINT, timeoutMs: config.LEYLINE_TIMEOUT_MS, maxRetries: config.LEYLINE_MAX_RETRIES }),
     logger: app.log
   });
-  const dashboard = new PlayerDashboardService(tournaments, database, { timezone: config.APP_TIMEZONE, ruleVersion: config.DAILY_WORK_FUNDING_RULE_VERSION });
+  const dashboard = new PlayerDashboardService(tournaments, database, { timezone: config.APP_TIMEZONE, ruleVersion: config.DAILY_WORK_FUNDING_RULE_VERSION }, config.APP_TIMEZONE);
   app.get("/v1/dashboard", { preHandler: requireRole("player") }, async (request, reply) => {
     const overview = dashboard.overview(request.actor!.id);
     return overview

@@ -1,0 +1,74 @@
+/* I35F 等级/声望卡片：与任务中心、玩家首页共用同一展示配方 */
+.card {
+  background: linear-gradient(150deg, rgba(236, 228, 208, 0.035) 0%, rgba(236, 228, 208, 0) 42%), var(--bg-panel);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  padding: 18px;
+}
+.head { align-items: flex-start; display: flex; gap: 12px; }
+.head h2 { color: var(--accent-gold-bright); margin: 0; }
+.icon {
+  align-items: center;
+  background: linear-gradient(180deg, rgba(201, 162, 75, 0.2), rgba(201, 162, 75, 0.05));
+  border: 1px solid var(--border-gold-dim);
+  border-radius: 10px;
+  color: var(--accent-gold-bright);
+  display: inline-flex;
+  flex: none;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+  box-shadow: var(--shadow-panel);
+}
+.levelBadge {
+  background: linear-gradient(180deg, rgba(201, 162, 75, 0.28), rgba(201, 162, 75, 0.08));
+  border: 1px solid var(--border-gold);
+  border-radius: 999px;
+  box-shadow: 0 0 12px rgba(201, 162, 75, 0.25);
+  color: var(--accent-gold-bright);
+  font-family: var(--font-display);
+  font-weight: 700;
+  margin-left: auto;
+  padding: 5px 12px;
+  white-space: nowrap;
+}
+.xpRow { align-items: center; display: flex; gap: 10px; margin: 16px 0 12px; }
+.xpLabel { color: var(--text-secondary); font-size: 0.84rem; }
+.xpTrack {
+  background: rgba(18, 21, 26, 0.8);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: 999px;
+  flex: 1;
+  height: 10px;
+  min-width: 120px;
+  overflow: hidden;
+}
+.xpFill {
+  background: linear-gradient(90deg, var(--accent-bronze), var(--accent-gold-bright));
+  border-radius: 999px;
+  box-shadow: 0 0 10px rgba(201, 162, 75, 0.5);
+  height: 100%;
+  transition: width 0.4s ease;
+}
+.xpValue {
+  color: var(--accent-gold-bright);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  white-space: nowrap;
+}
+.capabilities { display: flex; flex-wrap: wrap; gap: 8px; }
+.cap {
+  background: rgba(201, 162, 75, 0.08);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: 999px;
+  color: var(--text-primary);
+  font-size: 0.84rem;
+  padding: 4px 10px;
+}
+.meta { color: var(--text-secondary); font-size: 0.85rem; margin: 12px 0 0; }
+@media (max-width: 480px) {
+  .head { align-items: flex-start; flex-wrap: wrap; }
+  .levelBadge { margin-left: 0; }
+}

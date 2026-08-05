@@ -552,7 +552,7 @@ export interface PlayerDashboardDto {
   };
   marketIndex: MarketIndexDto;
   todos: Array<{
-    id: "claim_daily_work_funding" | "acquire_cards" | "build_deck" | "register_tournament";
+    id: "claim_daily_work_funding" | "acquire_cards" | "build_deck" | "register_tournament" | "claim_task_rewards";
     label: string;
     href: string;
   }>;
@@ -1115,6 +1115,10 @@ export interface TaskInstanceDto {
   definitionId: string;
   period: TaskPeriodKindDto;
   periodKey: string;
+  /** 定义展示字段随实例返回（只读展示，不作为判定依据）。 */
+  title: string;
+  description: string;
+  metricType: TaskMetricTypeDto;
   currentValue: number;
   targetAmount: number;
   rewardAmount: number;

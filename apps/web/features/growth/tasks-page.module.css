@@ -1,0 +1,67 @@
+/* I35F 任务中心：任务条目、只读进度条与领取状态 */
+.taskList { display: grid; gap: 12px; list-style: none; margin: 0; padding: 0; }
+.taskItem {
+  align-items: center;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(200px, 1.4fr) minmax(180px, 1fr) auto auto;
+  padding: 16px;
+}
+.taskMain { display: grid; gap: 4px; }
+.taskTitle { color: var(--accent-gold-bright); font-family: var(--font-display); font-weight: 700; margin: 0; }
+.taskDesc { color: var(--text-secondary); font-size: 0.85rem; margin: 0; }
+.taskProgress { align-items: center; display: flex; gap: 10px; min-width: 0; }
+.progressTrack {
+  background: rgba(18, 21, 26, 0.8);
+  border: 1px solid var(--border-gold-dim);
+  border-radius: 999px;
+  flex: 1;
+  height: 10px;
+  min-width: 90px;
+  overflow: hidden;
+}
+.progressFill {
+  background: linear-gradient(90deg, var(--accent-bronze), var(--accent-gold-bright));
+  border-radius: 999px;
+  box-shadow: 0 0 8px rgba(201, 162, 75, 0.4);
+  height: 100%;
+}
+.progressValue {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  white-space: nowrap;
+}
+.stateChip { border-radius: 999px; font-size: 0.8rem; font-weight: 700; padding: 4px 10px; white-space: nowrap; }
+.pending { background: rgba(236, 228, 208, 0.08); border: 1px solid var(--border-gold-dim); color: var(--text-secondary); }
+.claimable { background: rgba(127, 166, 90, 0.16); border: 1px solid rgba(127, 166, 90, 0.55); color: #a8cf84; }
+.claimed { background: rgba(192, 57, 43, 0.14); border: 1px solid rgba(192, 57, 43, 0.45); color: #e08678; }
+.taskActions { display: flex; justify-content: flex-end; }
+.claimBar {
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--border-gold);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  margin: 26px 0 4px;
+  padding: 14px 18px;
+  position: relative;
+}
+.claimBar p { margin: 4px 0; }
+.claimReady { color: var(--accent-gold-bright); font-weight: 700; }
+.claimIdle { color: var(--text-secondary); }
+.claimSuccess { color: #a8cf84; font-weight: 700; }
+.growthRow { margin: 26px 0 0; }
+.periodMeta { color: var(--text-secondary); font-size: 0.85rem; margin-top: 18px; }
+@media (max-width: 900px) {
+  .taskItem { grid-template-columns: 1fr auto; }
+  .taskProgress { grid-column: 1 / -1; }
+}
+@media (max-width: 480px) {
+  .taskItem { grid-template-columns: 1fr; }
+  .taskActions { justify-content: flex-start; }
+}

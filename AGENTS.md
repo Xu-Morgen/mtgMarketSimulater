@@ -129,6 +129,12 @@ e2e 验证默认由用户手动执行（见第 7 节 E2E 执行策略）。每�
 - 备注：<阻塞点、需要修复的问题>
 ```
 
+### 2026-08-05：I35F（留存钩子与成长线页面）
+- 状态：**待用户手动 e2e 复跑**（本机自动运行会因超时/内存耗尽使 WSL 崩溃，未代跑）。
+- 已由 Agent 完成并通过的自动化：`pnpm check`（含全仓 lint + 各包 tsc）、全仓单元测试 contracts 15 / rules 97 / database 4 / api 252（1 跳过）/ web 5 全过、`pnpm --filter @mtg-market/web build`（`next build` 通过，`/tasks` 路由生成）。
+- 需用户手动验证：`apps/web/tests/e2e/tasks-growth-i35f.spec.ts`（桌面 + 390px 窄屏共 4 项：任务中心等级卡片/进度条/状态徽章/服务端周期键只读展示、任务领取二次确认只投递一次 + 成功横幅 + 状态刷新、领取失败与空态、玩家首页等级区块/任务中心入口/服务端待办「领取任务中心奖励」联动）；人工记录见 [I35F.md](apps/web/tests/manual/I35F.md)。
+- 备注：玩家首页新增「等级与声望」区块（复用 GrowthCard）与「查看任务中心」入口；`daily-work-funding.spec.ts`/`player-loop.spec.ts` 已补 `/v1/growth` mock，其余既有 e2e 未改动；导航新增「任务中心」链接不影响既有侧栏断言；`PlayerDashboardDto.todos` 新增 `claim_task_rewards` 且 `TaskInstanceDto` 补充 `title/description/metricType` 展示字段。
+
 ### 2026-08-05：I34F（市场行情与交易体验页面）
 - 状态：**待用户手动 e2e 复跑**（本机自动运行会因超时/内存耗尽使 WSL 崩溃，未代跑）。
 - 已由 Agent 完成并通过的自动化：`pnpm check`（含全仓 lint + 各包 tsc）、全仓单元测试 contracts 13 / rules 85 / database 4 / api 245（1 跳过）/ web 5 全过、`pnpm --filter @mtg-market/web build`（`next build` 通过，`/watchlist` 路由生成）。

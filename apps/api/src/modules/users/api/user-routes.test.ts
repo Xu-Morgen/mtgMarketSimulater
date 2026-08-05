@@ -137,4 +137,28 @@ describe("I27F 玩家首页聚合快照", () => {
     expect(database.prepare("SELECT COUNT(*) AS count FROM ledger_entries").get()).toEqual(before);
     await app.close(); database.close();
   });
+
+  it("I35F 有可领取任务奖励时首页待办提供任务中心入口，领取后不再出现", async () => {
+    const { app, database } = await createTestApp();
+    const authorization = await playerAuthorization(app);
+    await app.inject({ method: "POST", url: "/v1/archive", headers: { authorization, "idempotency-key": "dashboard-task-archive-0001" }, payload: {} });
+    const userId = (database.prepare("SELECT id FROM users WHERE email = 'archive@example.test'").get() as { id: string }).id;
+    const definition = database.prepare("SELECT id FROM task_definitions WHERE id = 'daily-sell-1/v1'").get() as { id: string };
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+    const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)!.value;
+    const naturalDate = `${part("year")}-${part("month")}-${part("day")}`;
+    // 直接插入一条今日已达标的任务实例（claimable），模拟已结算事实推进完成。
+    database.prepare(
+      "INSERT INTO task_instances (id, user_id, definition_id, period_key, current_value, status, claimed_at, claimed_idempotency_key, updated_at) VALUES (?, ?, ?, ?, ?, 'claimable', NULL, NULL, ?)"
+    ).run("task-instance-i35f", userId, definition.id, naturalDate, 1, now.toISOString());
+
+    const withReward = await app.inject({ method: "GET", url: "/v1/dashboard", headers: { authorization } });
+    expect(withReward.json().data.overview.todos).toEqual(expect.arrayContaining([{ id: "claim_task_rewards", label: "领取任务中心奖励", href: "/tasks" }]));
+    // 领取后待办消失（首页待办只反映服务端当前可领取状态）。
+    database.prepare("UPDATE task_instances SET status = 'claimed', claimed_at = ? WHERE id = ?").run(now.toISOString(), "task-instance-i35f");
+    const afterClaim = await app.inject({ method: "GET", url: "/v1/dashboard", headers: { authorization } });
+    expect(afterClaim.json().data.overview.todos).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: "claim_task_rewards" })]));
+    await app.close(); database.close();
+  });
 });

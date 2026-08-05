@@ -7,7 +7,9 @@ import { ApiClientError } from "../../api/client";
 import { useArchiveQuery, useCreateArchiveMutation, useLedgerQuery } from "../../api/archive-api";
 import { useDashboardQuery } from "../../api/dashboard-api";
 import { useClaimDailyWorkFundingMutation } from "../../api/daily-work-funding-api";
+import { useGrowthQuery } from "../../api/growth-api";
 import { EmptyState, ErrorState, PageSkeleton, Pagination } from "../../components/ui";
+import { GrowthCard } from "../growth/growth-card";
 import { formatMoney } from "../../utils/money";
 
 function serverTime(value: string, timezone: string) {
@@ -61,7 +63,7 @@ function OverviewCards({ overview }: { overview: PlayerDashboardDto }) {
         <article><span>收藏册基础进度</span><strong className="num">{overview.collection.distinctSkuCount} 种 / {overview.collection.totalCardCount} 张</strong><small>{overview.collection.unpricedSkuCount > 0 ? `${overview.collection.unpricedSkuCount} 种持仓暂无有效报价` : `服务端市值 ${formatMoney(overview.collection.marketValue!)}`}</small></article>
         <article><span>市场指数</span><strong className="num">{index.gameIndex === null ? "暂无游戏内指数" : index.gameIndex.toLocaleString("zh-CN")}</strong><small>{index.referenceIndex === null ? "暂无外部参考指数" : `外部参考 ${index.referenceIndex.toLocaleString("zh-CN")} EUR 分`} · 已报价 {index.quotedSkus} 个 SKU</small></article>
       </div>
-      <div className="actions"><Link className="button secondary" href="/collection">查看收藏册</Link><Link className="button secondary" href="/tournaments">查看今日比赛</Link><Link className="button secondary" href="/market">查看市场</Link></div>
+      <div className="actions"><Link className="button secondary" href="/tasks">查看任务中心</Link><Link className="button secondary" href="/collection">查看收藏册</Link><Link className="button secondary" href="/tournaments">查看今日比赛</Link><Link className="button secondary" href="/market">查看市场</Link></div>
     </section>
     <section className="dashboard-section" aria-labelledby="dashboard-todo-title">
       <h2 id="dashboard-todo-title">服务端待办</h2>
@@ -73,6 +75,7 @@ function OverviewCards({ overview }: { overview: PlayerDashboardDto }) {
 export function PlayerDashboardPage() {
   const archive = useArchiveQuery();
   const dashboard = useDashboardQuery();
+  const growth = useGrowthQuery();
   const createArchive = useCreateArchiveMutation();
   const [cursors, setCursors] = useState<string[]>([]);
   const cursor = cursors.at(-1) ?? null;
@@ -84,8 +87,10 @@ export function PlayerDashboardPage() {
   if (!hasArchive) return <main className="page"><p className="eyebrow">玩家首页</p><h1>开始你的市场之旅</h1><EmptyState title="尚未创建游戏存档">创建后，服务器会初始化你的账户和初始资金。</EmptyState><div className="actions"><button className="button" type="button" onClick={() => createArchive.mutate()} disabled={createArchive.isPending}>{createArchive.isPending ? "正在创建存档…" : "创建游戏存档"}</button></div>{createArchive.isError ? <p className="form-error" role="alert">{createArchive.error instanceof Error ? createArchive.error.message : "创建存档失败，请重试。"}</p> : null}</main>;
 
   const ledgerData = ledger.data?.data;
+  const growthProfile = growth.data?.data;
   return <main className="page dashboard-page"><p className="eyebrow">玩家首页</p><h1>账户概览</h1><p className="intro">余额、净资产、今日比赛、市场指数、收藏统计和待办都由服务器聚合；页面不会自行结算或改写资产。</p>
     {dashboard.isPending ? <PageSkeleton label="正在读取服务端首页概览" /> : dashboard.isError ? <ErrorState title="首页概览加载失败" onRetry={() => void dashboard.refetch()} /> : dashboard.data ? <><OverviewCards overview={dashboard.data.data.overview} /><DailyWorkFundingCard status={dashboard.data.data.overview.dailyWorkFunding} /></> : null}
+    <section className="dashboard-section" aria-labelledby="dashboard-growth-title"><h2 id="dashboard-growth-title">等级与声望</h2>{growth.isPending ? <PageSkeleton label="正在加载等级档案" /> : growth.isError ? <ErrorState title="等级档案加载失败" onRetry={() => void growth.refetch()} /> : growthProfile ? <GrowthCard profile={growthProfile} /> : null}</section>
     <section className="dashboard-section"><h2>账本流水</h2>{ledger.isPending ? <PageSkeleton label="正在加载账本流水" /> : ledger.isError ? <ErrorState title="账本加载失败" onRetry={() => void ledger.refetch()} /> : <><LedgerTable entries={ledgerData?.items ?? []} /><Pagination page={cursors.length + 1} onPrevious={() => setCursors((items) => items.slice(0, -1))} onNext={() => { if (ledgerData?.page.nextCursor) setCursors((items) => [...items, ledgerData.page.nextCursor!]); }} hasNext={ledgerData?.page.hasMore ?? false} /></>}</section>
     <section className="dashboard-section"><h2>继续循环</h2><p className="intro">完成服务端待办后，可继续通过补充包、市场、委托、卡组和比赛入口进行下一次投资。</p></section>
   </main>;

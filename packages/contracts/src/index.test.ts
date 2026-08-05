@@ -384,6 +384,9 @@ describe("共享契约", () => {
       definitionId: "daily-open-3/v1",
       period: "daily",
       periodKey: "2026-08-05",
+      title: "每日开包",
+      description: "本日开包 3 次",
+      metricType: "pack.open",
       currentValue: 3,
       targetAmount: 3,
       rewardAmount: 100,
@@ -414,12 +417,21 @@ describe("共享契约", () => {
       updatedAt: "2026-08-05T00:00:00.000Z"
     };
     const parsed = JSON.parse(JSON.stringify({ task, center, claim, growth }));
-    expect(parsed.task).toMatchObject({ period: "daily", status: "claimable", currentValue: 3, targetAmount: 3, rewardAmount: 100 });
+    expect(parsed.task).toMatchObject({ period: "daily", status: "claimable", currentValue: 3, targetAmount: 3, rewardAmount: 100, title: "每日开包", metricType: "pack.open" });
     expect(parsed.center).toMatchObject({ pendingRewardCount: 1, period: { day: "2026-08-05", week: "2026-W32" } });
     expect(parsed.claim).toMatchObject({ status: "claimed", reward: { amount: 100 }, balance: { amount: 10_000 } });
     expect(parsed.growth.capabilities).toMatchObject({ npcDailyTradeMultiplier: 1, bulkPackMax: 50 });
     // 任务/等级 DTO 不得携带内部推进来源或未结算字段。
     expect(parsed.task).not.toHaveProperty("factId");
     expect(parsed.growth).not.toHaveProperty("peakNetWorthExcluded");
+  });
+
+  it("I35F 玩家首页待办在任务中心有可领取奖励时携带任务入口，只由服务端聚合", () => {
+    const withReward: PlayerDashboardDto["todos"] = [
+      { id: "claim_daily_work_funding", label: "领取今日工作资金", href: "/dashboard#daily-work-funding-title" },
+      { id: "claim_task_rewards", label: "领取任务中心奖励", href: "/tasks" }
+    ];
+    const parsed = JSON.parse(JSON.stringify({ withReward }));
+    expect(parsed.withReward).toContainEqual({ id: "claim_task_rewards", label: "领取任务中心奖励", href: "/tasks" });
   });
 });

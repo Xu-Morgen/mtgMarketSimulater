@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type { InventoryHoldingDto, PlayerDashboardDto } from "@mtg-market/contracts";
 import { DeckService } from "../../decks/application/deck-service.js";
+import { TaskService } from "../../growth/application/task-service.js";
 import { InventoryService } from "../../inventory/application/inventory-service.js";
 import { MarketService } from "../../market/application/market-service.js";
 import type { TournamentService } from "../../tournaments/application/tournament-service.js";
@@ -26,13 +27,17 @@ export class PlayerDashboardService {
   constructor(
     private readonly tournaments: TournamentService,
     database: Database.Database,
-    dailyWorkFundingConfig: DailyWorkFundingConfig
+    dailyWorkFundingConfig: DailyWorkFundingConfig,
+    timezone: string
   ) {
     this.users = new UserService(database, dailyWorkFundingConfig);
     this.inventory = new InventoryService(database);
     this.decks = new DeckService(database);
     this.market = new MarketService(database);
+    this.tasks = new TaskService(database, timezone);
   }
+
+  private readonly tasks: TaskService;
 
   overview(userId: string, now = new Date()): PlayerDashboardDto | null {
     const archive = this.users.archive(userId);
@@ -57,6 +62,9 @@ export class PlayerDashboardService {
     if (!hasValidDeck) todos.push({ id: "build_deck", label: "构筑合法 Commander 卡组", href: "/decks/new" });
     if (hasValidDeck && today.some((tournament) => tournament.status === "open" && !tournament.registered)) {
       todos.push({ id: "register_tournament", label: "报名今日比赛", href: "/tournaments" });
+    }
+    if (this.tasks.overview(userId, now).pendingRewardCount > 0) {
+      todos.push({ id: "claim_task_rewards", label: "领取任务中心奖励", href: "/tasks" });
     }
 
     return {
