@@ -32,7 +32,7 @@ function PreviewDetails({ preview }: { preview: NpcSellPreviewDto }) {
 }
 
 /** 卖出只提交数量意图或 `all`；可用量、锁定量、价格、费用与成交均由服务端处理。 */
-export function NpcSellDialog({ holding, onClose, onSettled }: { holding: InventoryHoldingDto; onClose: () => void; onSettled: (trade: NpcTradeDto) => void }) {
+export function NpcSellDialog({ holding, onClose, onSettled, onboardingGuarantee = false }: { holding: InventoryHoldingDto; onClose: () => void; onSettled: (trade: NpcTradeDto) => void; onboardingGuarantee?: boolean }) {
   const [quantityText, setQuantityText] = useState("1");
   const [requestedQuantity, setRequestedQuantity] = useState<number | "all">(1);
   const [quantityError, setQuantityError] = useState<string | null>(null);
@@ -93,10 +93,10 @@ export function NpcSellDialog({ holding, onClose, onSettled }: { holding: Invent
       <p className={styles.secondary}>当前持有 {holding.quantity} 张；可用 {holding.availableQuantity} 张；订单锁定 {holding.orderLockedQuantity} 张；比赛锁定 {holding.tournamentLockedQuantity} 张。</p>
       <form className={styles.quantityForm} onSubmit={requestPreview}>
         <label>卖出数量
-          <input aria-label="卖出数量" type="number" min="1" max="1000" step="1" value={quantityText} disabled={sell.isPending} onChange={(event) => setQuantityText(event.target.value)} />
+          <input aria-label="卖出数量" type="number" min="1" max={onboardingGuarantee ? 1 : 1000} step="1" value={quantityText} disabled={sell.isPending || onboardingGuarantee} onChange={(event) => setQuantityText(event.target.value)} />
         </label>
-        <button className="button secondary" type="submit" disabled={sell.isPending || confirmationPending}>获取服务端预览</button>
-        <button className="button secondary" type="button" disabled={sell.isPending || confirmationPending} onClick={requestAllPreview}>全部可用库存</button>
+        <button id={!previewValue?.canSell || preview.isFetching ? "onboarding-npc-sell-preview" : undefined} className="button secondary" type="submit" disabled={sell.isPending || confirmationPending}>获取服务端预览</button>
+        {onboardingGuarantee ? <span className={styles.secondary}>新手保底机会固定交易 1 张</span> : <button className="button secondary" type="button" disabled={sell.isPending || confirmationPending} onClick={requestAllPreview}>全部可用库存</button>}
       </form>
       {quantityError ? <p className={styles.tradeError} role="alert">{quantityError}</p> : null}
       {preview.isPending || preview.isFetching ? <p aria-busy="true">正在获取服务端卖出预览…</p> : null}
@@ -105,7 +105,7 @@ export function NpcSellDialog({ holding, onClose, onSettled }: { holding: Invent
       {mutationError ? <section className={styles.inlineError} role="alert"><p>{mutationError}</p><button className="button secondary" type="button" onClick={refreshPreview}>重新预览</button></section> : null}
       <div className="actions">
         <button className="button secondary" type="button" disabled={sell.isPending || confirmationPending} onClick={onClose}>取消</button>
-        <button className="button" type="button" disabled={!previewValue?.canSell || preview.isFetching || sell.isPending || confirmationPending} onClick={confirm}>{sell.isPending || confirmationPending ? "正在由服务端成交…" : "确认向 NPC 卖出"}</button>
+        <button id={previewValue?.canSell && !preview.isFetching ? "onboarding-npc-sell-confirm" : undefined} className="button" type="button" disabled={!previewValue?.canSell || preview.isFetching || sell.isPending || confirmationPending} onClick={confirm}>{sell.isPending || confirmationPending ? "正在由服务端成交…" : "确认向 NPC 卖出"}</button>
       </div>
     </section>
   </div>;

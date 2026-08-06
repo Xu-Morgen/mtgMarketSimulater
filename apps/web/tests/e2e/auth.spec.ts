@@ -88,6 +88,7 @@ test.describe("管理员登录", () => {
     await page.getByRole("button", { name: "登录" }).click();
     await expect(page).toHaveURL(/\/admin$/);
     await expect(page.getByRole("navigation", { name: "管理导航" })).toBeVisible();
+    await expect(page.getByText("useOnboardingGuide 必须在 OnboardingGuideProvider 内使用")).toHaveCount(0);
   });
 
   test("管理员登录时忽略 next，始终进入管理后台首页", async ({ page }) => {
@@ -101,5 +102,6 @@ test.describe("管理员登录", () => {
     await page.getByRole("button", { name: "登录" }).click();
     await expect(page).toHaveURL(/\/admin$/);
     await expect(page.getByRole("navigation", { name: "管理导航" })).toBeVisible();
+    await expect(page.getByText("useOnboardingGuide 必须在 OnboardingGuideProvider 内使用")).toHaveCount(0);
   });
 });

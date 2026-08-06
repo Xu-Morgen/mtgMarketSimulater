@@ -31,8 +31,8 @@ function DailyWorkFundingCard({ status }: { status: DailyWorkFundingStatusDto })
   const claim = useClaimDailyWorkFundingMutation();
   const canClaim = status.status === "available" && status.amount !== null;
   const statusLabel = status.status === "available" ? "今日可领取" : status.status === "claimed" ? "今日已领取" : status.status === "not_open" ? "等待服务器开放" : "需要先创建存档";
-  // I36F：锚点放在卡片区而非领取按钮上——无论「可领取/已领取/未开放」卡片都会渲染，
-  // 引导 Tour 在创建存档切换首页分支后总能定位并滚动到本卡片；领取按钮在卡片内（蒙层不拦截点击）。
+  // I36F：卡片提供晚挂载/异常状态下的稳定兜底锚点；可领取时 Tour 优先框选按钮，
+  // 避免以整张卡片为目标时气泡覆盖真正需要点击的操作。
   return <section id="onboarding-work-funds" className="dashboard-section daily-work-funding panel" aria-labelledby="daily-work-funding-title">
     <h2 className="panel-title" id="daily-work-funding-title">每日工作资金</h2>
     <article className="daily-work-funding-card">
@@ -43,7 +43,7 @@ function DailyWorkFundingCard({ status }: { status: DailyWorkFundingStatusDto })
       {status.openedAt ? <p className="daily-work-funding-meta">服务器开放时间：{serverTime(status.openedAt, status.timezone)}</p> : null}
       {status.claim ? <p>领取记录：{formatMoney(status.claim.amount)}，{serverTime(status.claim.claimedAt, status.timezone)} 已由服务器记入账本。</p> : null}
       <p>下一次可领取：<strong>{serverTime(status.nextEligibleAt, status.timezone)}</strong></p>
-      {canClaim ? <div className="actions"><button className="button" type="button" disabled={claim.isPending} onClick={claim.claim}>{claim.isPending ? "正在向服务器领取…" : `领取 ${formatMoney(status.amount!)}`}</button></div> : status.status === "claimed" ? <div className="actions"><button className="button" type="button" disabled>今日已领取</button></div> : null}
+      {canClaim ? <div className="actions"><button id="onboarding-work-funds-claim" className="button" type="button" disabled={claim.isPending} onClick={claim.claim}>{claim.isPending ? "正在向服务器领取…" : `领取 ${formatMoney(status.amount!)}`}</button></div> : status.status === "claimed" ? <div className="actions"><button className="button" type="button" disabled>今日已领取</button></div> : null}
       {claim.isSuccess ? <p className="daily-work-funding-success" role="status">领取请求已由服务器完成，余额、资格和账本流水已刷新。</p> : null}
       {claim.isError ? <p className="form-error" role="alert">{claim.error instanceof Error ? claim.error.message : "领取失败；正在重新查询服务器状态。"}</p> : null}
     </article>

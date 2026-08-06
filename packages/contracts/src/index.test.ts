@@ -19,10 +19,14 @@ import {
   type GrowthProfileDto,
   type MarketAnnouncementDto,
   type MarketHeatDto,
+  type OnboardingDto,
+  type OnboardingRewardClaimDto,
+  type OnboardingTradeOpportunityDto,
   type PackOfferDto,
   type PackOpeningCardDto,
   type PackOpeningDto,
   type PlayerBilateralTradeDto,
+  type PlayerDashboardDto,
   type TaskCenterDto,
   type TaskClaimDto,
   type TaskInstanceDto,
@@ -437,13 +441,13 @@ describe("共享契约", () => {
 
   it("I36B/I36F 新手引导 DTO 只承载服务端已结算结果，不含内部判定字段", () => {
     const onboarding: OnboardingDto = {
-      ruleVersion: "onboarding/v2",
+      ruleVersion: "onboarding/v3",
       steps: [
         { id: "create-archive", order: 1, title: "创建存档", description: "点击玩家首页「创建游戏存档」按钮", href: "/dashboard", skippable: true, completion: "auto", completedAt: "2026-08-05T01:00:00.000Z", skippedAt: null },
         { id: "claim-work-funds", order: 2, title: "领取工作资金", description: "在玩家首页领取今日工作资金", href: "/dashboard", skippable: true, completion: null, completedAt: null, skippedAt: null }
       ],
       completedCount: 1,
-      totalCount: 7,
+      totalCount: 9,
       allCompleted: false,
       currentStepId: "claim-work-funds",
       reward: { status: "unavailable", amount: { amount: 500, currency: "GAME_CREDIT" }, claimedAt: null },
@@ -456,7 +460,7 @@ describe("共享契约", () => {
       claimedAt: "2026-08-05T02:00:00.000Z"
     };
     const parsed = JSON.parse(JSON.stringify({ onboarding, claim }));
-    expect(parsed.onboarding).toMatchObject({ ruleVersion: "onboarding/v2", completedCount: 1, totalCount: 7, allCompleted: false, currentStepId: "claim-work-funds", reward: { status: "unavailable", amount: { amount: 500 } } });
+    expect(parsed.onboarding).toMatchObject({ ruleVersion: "onboarding/v3", completedCount: 1, totalCount: 9, allCompleted: false, currentStepId: "claim-work-funds", reward: { status: "unavailable", amount: { amount: 500 } } });
     expect(parsed.onboarding.steps[0]).toMatchObject({ completion: "auto", skippable: true, href: "/dashboard" });
     expect(parsed.claim).toMatchObject({ status: "claimed", reward: { amount: 500 }, balance: { amount: 10_500 } });
     // 引导 DTO 不得携带内部推进来源、贡献值或未结算判定字段。
@@ -469,5 +473,18 @@ describe("共享契约", () => {
     const withOnboarding: PlayerDashboardDto["todos"] = [{ id: "continue_onboarding", label: "继续新手引导", href: "/onboarding" }];
     const parsed = JSON.parse(JSON.stringify({ withOnboarding }));
     expect(parsed.withOnboarding).toContainEqual({ id: "continue_onboarding", label: "继续新手引导", href: "/onboarding" });
+  });
+
+  it("I36B 首笔交易机会明确区分保底规则与不可用原因", () => {
+    const opportunity: OnboardingTradeOpportunityDto = {
+      status: "unavailable",
+      ruleVersion: "onboarding-liquidity/v1",
+      reason: "quote_unavailable"
+    };
+    expect(JSON.parse(JSON.stringify(opportunity))).toEqual({
+      status: "unavailable",
+      ruleVersion: "onboarding-liquidity/v1",
+      reason: "quote_unavailable"
+    });
   });
 });

@@ -200,16 +200,18 @@ describe("I27B 服务端玩家经济闭环", () => {
     seedLoopCatalog(database);
 
     // 先执行日切任务；领取 API 只消费由服务端任务打开的资格，绝不以浏览器日期判断。
-    const clock = new Date(Date.now() + 1_000);
+    // worker 时钟始终领先真实业务时钟一小段，但不能冻结：赛事处理器会按真实服务端时间
+    // 投递后继成就任务，冻结时钟会使慢速全量测试中的第二次领取产生竞态。
+    const clock = () => new Date(Date.now() + 1_000);
     ensureDailyRolloverScheduled(
       database,
       { timezone: config.APP_TIMEZONE, ruleVersion: config.DAILY_WORK_FUNDING_RULE_VERSION },
-      clock
+      clock()
     );
     const worker = new TaskWorker(
       new SqliteJobRepository(database),
       createTaskRegistry(config, database),
-      () => clock
+      clock
     );
     expect(await worker.runOne()).toBe(true);
 
@@ -342,7 +344,7 @@ describe("I27B 服务端玩家经济闭环", () => {
       .prepare(
         "UPDATE jobs SET status = 'succeeded', updated_at = ? WHERE type NOT IN ('tournament.settle', 'achievement.process') AND status IN ('pending', 'failed')"
       )
-      .run(clock.toISOString());
+      .run(clock().toISOString());
     expect(await worker.runOne()).toBe(true);
     expect(await worker.runOne()).toBe(true);
     expect(

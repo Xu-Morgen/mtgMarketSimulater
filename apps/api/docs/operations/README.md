@@ -41,6 +41,7 @@
 
 - 成功 `prices.sync` 会以 `price-sync:<YYYY-MM-DD>`（下载完成的 UTC 自然日）投递唯一 `market.reprice`；已结算开包等经济事实以 `fact-event:<eventId>` 投递唯一任务。报价新鲜度取决于「本日是否成功 reprice 过」，不再耦合 MTGJSON 的 `meta.date`。用 `/v1/admin/jobs` 和 `job_runs` 按唯一键、运行 ID 和错误摘要追踪，禁止手工改 `market_quotes`、`market_events`、任务状态或外部快照。
 - 同一 UTC 日内重复 `market.reprice`（triggerKey 相同）由 `market_quotes` 的 `ON CONFLICT(sku_id, trigger_key) DO UPDATE` 覆盖全部业务字段（价格、参数、reasons、`calculated_at`、`valid_until`）——即「同日只保留最新业务结果」，业务结果按 SKU 维度至多一次；跨日因 triggerKey 不同而保留各自历史版本。`reprice` 返回的「落库行数」语义为新增或覆盖之和，不再是纯新增数。
+- 报价有效期固定为 15 分钟，task runner 每 10 分钟投递 `market.reprice`，复用最近成功的外部快照刷新游戏内报价。任务唯一键为 `market-refresh:<10 分钟 UTC 桶>`，报价 triggerKey 为 `market-refresh:<UTC 日期>`；同桶重放不重复任务、同日刷新不追加整套 SKU 行。若玩家集中收到 `VERSION_STALE`，先检查最近两个刷新任务及 `job_runs`，禁止直接延长或修改 `market_quotes.valid_until`。
 - 处理器只读取最近成功运行中的有效 EUR 快照、已结算事实、当前处于 UTC 生效区间的系列周期/关联/市场事件及版本化参数，写入带参数/原因 JSON 的报价投影。失败时旧报价保持可读；修复数据或代码后只重试原任务，勿通过复制或修改系数补偿。
 - 报价有效期固定 15 分钟（`MARKET_QUOTE_VALIDITY_MS`）。`/v1/npc-trades/*/preview` 与 `/v1/orders/*/preview` 对超过 `valid_until` 的报价返回 `VERSION_STALE`，要求等待服务端刷新——这是预期行为，不是故障。
 - 基础市场事件必须同时核对 scope（global/set/sku）、目标、UTC `starts_at`/`ends_at`、5,000–20,000 bp 上限和原因。到期事件自然退出后续重定价；I30B 才会提供受审计的发布/暂停/结束命令，在此之前不允许数据库手工运营。

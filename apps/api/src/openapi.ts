@@ -14,6 +14,7 @@ export const publicApiPaths = [
   "/v1/market/heat",
   "/v1/market/announcements",
   "/v1/npc-trades/buy/{skuId}/preview",
+  "/v1/npc-trades/onboarding-opportunity",
   "/v1/npc-trades/buy/{skuId}",
   "/v1/npc-trades/sell/{skuId}/preview",
   "/v1/npc-trades/sell/{skuId}",
@@ -155,6 +156,7 @@ export const openApiDocument = {
     "/v1/market/quotes": {
       get: {
         summary: "按服务端筛选分页查询市场报价投影",
+        parameters: [{ name: "cardRole", in: "query", required: false, schema: { type: "string", enum: ["commander"] }, description: "组卡采购时只返回可作为 Commander 候选的传奇生物" }],
         responses: { "200": { description: "市场报价分页" }, "401": { description: "认证无效或过期" } }
       }
     },
@@ -193,6 +195,12 @@ export const openApiDocument = {
       get: {
         summary: "取得服务端 NPC 买入预览、不可变报价标识和额度",
         responses: { "200": { description: "NPC 买入预览" }, "404": { description: "无可结算报价" }, "409": { description: "报价已过期" } }
+      }
+    },
+    "/v1/npc-trades/onboarding-opportunity": {
+      get: {
+        summary: "取得当前玩家首笔 NPC 交易的服务端保底机会",
+        responses: { "200": { description: "保底机会、已完成或暂不可用状态" }, "401": { description: "认证无效或过期" } }
       }
     },
     "/v1/npc-trades/buy/{skuId}": {

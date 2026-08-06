@@ -52,6 +52,7 @@ export function useDeckSaveMutation(deckId: string | undefined) {
       if (user) {
         queryClient.setQueryData(["decks", user.id, data.id], { data });
         void queryClient.invalidateQueries({ queryKey: ["decks", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["onboarding", user.id] });
       }
       intent.current = null;
     }

@@ -272,7 +272,7 @@ async function buildReconciliationApp(): Promise<{
   app: Awaited<ReturnType<typeof createApiApp>>;
   database: Database.Database;
   worker: TaskWorker;
-  clock: Date;
+  clock: () => Date;
 }> {
   const directory = mkdtempSync(join(tmpdir(), "mtg-i32b-recon-"));
   directories.push(directory);
@@ -287,16 +287,17 @@ async function buildReconciliationApp(): Promise<{
   });
   const app = await createApiApp(config, database);
   seedReconciliationCatalog(database);
-  const clock = new Date(Date.now() + 1_000);
+  // 与真实服务端时间同步前进，避免赛事任务投递后继成就任务时落在冻结的 worker 时钟之后。
+  const clock = () => new Date(Date.now() + 1_000);
   ensureDailyRolloverScheduled(
     database,
     { timezone: config.APP_TIMEZONE, ruleVersion: config.DAILY_WORK_FUNDING_RULE_VERSION },
-    clock
+    clock()
   );
   const worker = new TaskWorker(
     new SqliteJobRepository(database),
     createTaskRegistry(config, database),
-    () => clock
+    clock
   );
   return { app, database, worker, clock };
 }
@@ -443,7 +444,7 @@ describe("I32B 全局经济对账发布门禁", () => {
       .prepare(
         "UPDATE jobs SET status = 'succeeded', updated_at = ? WHERE type NOT IN ('tournament.settle', 'achievement.process') AND status IN ('pending', 'failed')"
       )
-      .run(clock.toISOString());
+      .run(clock().toISOString());
     expect(await worker.runOne()).toBe(true);
     expect(await worker.runOne()).toBe(true);
 

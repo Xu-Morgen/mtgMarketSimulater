@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { useSession } from "../providers/session-provider";
 import { createIdempotencyKey } from "../utils/idempotency";
-import { apiRequest } from "./client";
+import { apiRequest, ApiClientError } from "./client";
 
 type PackGrant = { id: string; tournamentId: string; packId: string; status: "available" | "claimed"; createdAt: string; claimedAt: string | null };
 type PlayerMode = "game" | "tabletop";
@@ -35,14 +35,24 @@ export const tournamentsApi = {
   confirmRound: (token: string, id: string, key: string) => apiRequest<{ status: "confirmed_or_pending" }>(`/v1/player-tournament-rounds/${id}/confirm`, { method: "POST", accessToken: token, idempotencyKey: key })
 };
 
-function useTournamentQuery<T>(key: unknown[], run: (token: string) => Promise<T>, enabled = true) {
+function useTournamentQuery<T>(key: unknown[], run: (token: string) => Promise<T>, enabled = true, pollWhileNotFound = false) {
   const { accessToken, user } = useSession();
-  return useQuery({ queryKey: ["tournaments", user?.id ?? "anonymous", ...key], queryFn: () => run(accessToken!), enabled: enabled && Boolean(accessToken && user), retry: false, refetchInterval: (query) => query.state.error ? false : 10_000, refetchIntervalInBackground: false });
+  return useQuery({
+    queryKey: ["tournaments", user?.id ?? "anonymous", ...key],
+    queryFn: () => run(accessToken!),
+    enabled: enabled && Boolean(accessToken && user),
+    retry: false,
+    refetchInterval: (query) => {
+      if (!query.state.error) return 10_000;
+      return pollWhileNotFound && query.state.error instanceof ApiClientError && query.state.error.code === "RESOURCE_NOT_FOUND" ? 3_000 : false;
+    },
+    refetchIntervalInBackground: false
+  });
 }
 export const useTournamentsQuery = () => useTournamentQuery(["today"], tournamentsApi.list);
 export const useTournamentHistoryQuery = () => useTournamentQuery(["history"], tournamentsApi.history);
 export const useTournamentRegistrationQuery = (id: string, enabled: boolean) => useTournamentQuery(["registration", id], (token) => tournamentsApi.registration(token, id), enabled);
-export const useTournamentResultQuery = (id: string, enabled: boolean) => useTournamentQuery(["result", id], (token) => tournamentsApi.result(token, id), enabled);
+export const useTournamentResultQuery = (id: string, enabled: boolean) => useTournamentQuery(["result", id], (token) => tournamentsApi.result(token, id), enabled, true);
 export const useTournamentGrantsQuery = () => useTournamentQuery(["grants"], tournamentsApi.grants);
 export const usePlayerTournamentGrantsQuery = () => useTournamentQuery(["player-grants"], tournamentsApi.playerGrants);
 export const usePlayerTournamentsQuery = () => useTournamentQuery(["player-list"], tournamentsApi.playerList);

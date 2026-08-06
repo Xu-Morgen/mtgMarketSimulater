@@ -3,9 +3,10 @@
 import type { CollectionSetGroupDto } from "@mtg-market/contracts";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useCollectionAlbumQuery } from "../../api/collection-api";
 import { useAchievementsQuery } from "../../api/achievements-api";
+import { useRecordViewStepMutation } from "../../api/onboarding-api";
 import { EmptyState, ErrorState, PageSkeleton, Pagination } from "../../components/ui";
 import { formatBasisPoints } from "../../utils/percent";
 import styles from "./album-page.module.css";
@@ -102,6 +103,13 @@ export function CollectionAlbumPage() {
   const { onlyHeld, cursor } = filtersFromSearch(search);
   const album = useCollectionAlbumQuery({ onlyHeld, cursor, limit: pageSize });
   const achievements = useAchievementsQuery();
+  const recordView = useRecordViewStepMutation();
+  const viewSubmitted = useRef(false);
+  useEffect(() => {
+    if (viewSubmitted.current) return;
+    viewSubmitted.current = true;
+    recordView.mutate({ stepId: "unlock-collection-album", path: "/collection/album" });
+  }, [recordView]);
   const setOnlyHeld = useCallback(
     (held: "any" | "held") => {
       router.push(toUrl(held, undefined));
@@ -136,7 +144,7 @@ export function CollectionAlbumPage() {
         返回收藏册
       </Link>
       <p className="eyebrow">服务端收藏聚合</p>
-      <h1>收藏图鉴</h1>
+      <h1 id="onboarding-collection-album-focus">收藏图鉴</h1>
       <p className="intro">
         按系列分组的图鉴、每系列完成度与未收集卡位均由服务端核算；浏览器只展示，不统计、不估值、不解锁里程碑。
       </p>

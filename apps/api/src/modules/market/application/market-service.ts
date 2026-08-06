@@ -9,7 +9,7 @@ type ParametersRow = { rule_version: string; eur_cent_to_game_credit_bps: number
 type SnapshotRow = { id: string; sku_id: string; price_amount: number; captured_at: string; source_version: string; set_id: string };
 type MarketReason = NonNullable<QuoteDto["reasons"]>[number];
 type QuoteRow = { id: string; sku_id: string; rule_version: string; reference_price_eur_cents: number; market_price_amount: number; npc_buy_price_amount: number; npc_sell_price_amount: number; npc_buy_fee_amount: number; npc_sell_fee_amount: number; calculated_at: string; valid_until: string; reasons_json: string };
-type MarketListRow = QuoteRow & { name: string; set_code: string; set_name: string; collector_number: string; finish: "nonfoil" | "foil" | "etched"; rarity: string; tradable: number; image_path: string | null };
+type MarketListRow = QuoteRow & { name: string; set_code: string; set_name: string; collector_number: string; finish: "nonfoil" | "foil" | "etched"; rarity: string; type_line: string; tradable: number; image_path: string | null };
 type FactRow = { id: string; event_type: string; payload_json: string };
 type HeatQuoteRow = { sku_id: string; day: string; market_price_amount: number; calculated_at: string; name: string; set_code: string; set_name: string; collector_number: string; finish: "nonfoil" | "foil" | "etched"; rarity: string };
 
@@ -19,6 +19,7 @@ export type MarketQuoteFilters = {
   setCode?: string | undefined;
   rarity?: string | undefined;
   finish?: "nonfoil" | "foil" | "etched" | undefined;
+  cardRole?: "commander" | undefined;
   tradable?: "any" | "tradable" | "untradable" | undefined;
   sort: "name" | "marketPrice" | "referencePrice";
   direction: "asc" | "desc";
@@ -152,6 +153,7 @@ export class MarketService {
     if (filters.setCode) { where.push("s.code = ?"); values.push(filters.setCode); }
     if (filters.rarity) { where.push("p.rarity = ?"); values.push(filters.rarity); }
     if (filters.finish) { where.push("sku.finish = ?"); values.push(filters.finish); }
+    if (filters.cardRole === "commander") where.push("lower(p.type_line) LIKE '%legendary%' AND lower(p.type_line) LIKE '%creature%'");
     if (filters.tradable === "tradable") where.push("sku.tradable = 1");
     if (filters.tradable === "untradable") where.push("sku.tradable = 0");
     const offset = filters.cursor ? Number.parseInt(filters.cursor, 10) : 0;
@@ -176,7 +178,7 @@ export class MarketService {
       )`;
     const total = (this.database.prepare(`SELECT COUNT(*) AS count ${from} ${clause}`).get(...values) as { count: number }).count;
     const rows = this.database.prepare(
-      `SELECT sku.id AS sku_id, p.name, s.code AS set_code, s.name AS set_name, p.collector_number, sku.finish, p.rarity, sku.tradable, image.cache_path AS image_path,
+      `SELECT sku.id AS sku_id, p.name, s.code AS set_code, s.name AS set_name, p.collector_number, sku.finish, p.rarity, p.type_line, sku.tradable, image.cache_path AS image_path,
         quote.id, quote.rule_version, quote.reference_price_eur_cents, quote.market_price_amount, quote.npc_buy_price_amount, quote.npc_sell_price_amount, quote.npc_buy_fee_amount, quote.npc_sell_fee_amount,
         quote.calculated_at, quote.valid_until, quote.reasons_json
        ${from} ${clause}
@@ -185,7 +187,7 @@ export class MarketService {
     const hasMore = rows.length > filters.limit;
     return {
       items: rows.slice(0, filters.limit).map((row) => ({
-        sku: { id: row.sku_id, name: row.name, setCode: row.set_code, setName: row.set_name, collectorNumber: row.collector_number, finish: row.finish, rarity: row.rarity, imagePath: publicImagePath(row.image_path) },
+        sku: { id: row.sku_id, name: row.name, setCode: row.set_code, setName: row.set_name, collectorNumber: row.collector_number, finish: row.finish, rarity: row.rarity, imagePath: publicImagePath(row.image_path), typeLine: row.type_line },
         quote: row.rule_version === null ? null : this.toQuote(row),
         tradable: row.tradable === 1,
         tradeDisabledReason: row.tradable === 1 ? (row.rule_version === null ? "quote_unavailable" : null) : "no_valid_reference_price"

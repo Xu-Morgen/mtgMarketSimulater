@@ -82,7 +82,8 @@ export class OnboardingService {
 
   /** 玩家首页只读判定：引导未全部完成或完成奖励未领取时返回 true（纯读，不写快照）。 */
   hasIncompleteOnboarding(userId: string): boolean {
-    if (!this.rewardGrant(userId)) return true;
+    // 已领取任一历史版本完成奖励即视为已完成；规则升级不能重新打开已结案引导。
+    if (this.rewardGrant(userId)) return false;
     for (const step of this.orderedSteps) {
       const row = this.progressRow(userId, step.id);
       if (row?.completed_at || row?.skipped_at) continue;
@@ -154,6 +155,9 @@ export class OnboardingService {
       if (!step) return this.completeFailure(input, now, 404, "RESOURCE_NOT_FOUND", "引导步骤不存在");
       if (!isViewEventStepMatch(step, input.path)) {
         return this.completeFailure(input, now, 409, "RULE_VIOLATION", "该访问路径与引导步骤不匹配");
+      }
+      if (step.id === "finish-first-tournament" && !this.hasSettledTournament(input.userId)) {
+        return this.completeFailure(input, now, 409, "RULE_VIOLATION", "赛事尚未结算，暂不能完成赛果查看步骤");
       }
       const inserted = this.database.prepare(
         "INSERT OR IGNORE INTO onboarding_events (id, user_id, event_kind, step_id, occurred_at) VALUES (?, ?, 'view', ?, ?)"
@@ -262,9 +266,15 @@ export class OnboardingService {
       const row = this.database.prepare("SELECT 1 FROM daily_work_funding_claims WHERE user_id = ? LIMIT 1").get(userId);
       return Boolean(row);
     }
-    if (profileKey === "collection_has_any") {
-      const row = this.database.prepare("SELECT 1 FROM inventory_holdings WHERE user_id = ? AND quantity > 0 LIMIT 1").get(userId);
-      return Boolean(row);
+    if (profileKey === "legal_deck_saved") {
+      const rows = this.database.prepare("SELECT legality_json FROM decks WHERE user_id = ?").all(userId) as Array<{ legality_json: string }>;
+      return rows.some((row) => {
+        try {
+          return (JSON.parse(row.legality_json) as { valid?: unknown }).valid === true;
+        } catch {
+          throw new Error("已保存卡组合法性快照损坏");
+        }
+      });
     }
     if (profileKey === "tournament_registered") {
       const npc = this.database.prepare("SELECT 1 FROM tournament_registrations WHERE user_id = ? LIMIT 1").get(userId);
@@ -273,6 +283,18 @@ export class OnboardingService {
       return Boolean(player);
     }
     return false;
+  }
+
+  /** 赛果 view_event 的服务端前置：必须确有归属于玩家的已结算 NPC 或玩家赛事结果。 */
+  private hasSettledTournament(userId: string): boolean {
+    const npc = this.database.prepare(
+      "SELECT 1 FROM tournament_results result JOIN tournament_registrations registration ON registration.id = result.registration_id WHERE registration.user_id = ? LIMIT 1"
+    ).get(userId);
+    if (npc) return true;
+    const player = this.database.prepare(
+      "SELECT 1 FROM player_tournament_results result JOIN player_tournament_registrations registration ON registration.id = result.registration_id WHERE registration.user_id = ? LIMIT 1"
+    ).get(userId);
+    return Boolean(player);
   }
 
   /** 当前引导投影；全部字段来自服务端已结算结果与持久化进度。 */

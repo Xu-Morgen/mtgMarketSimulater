@@ -37,15 +37,17 @@
 - 每个用户可见迭代在 `tests/manual/<迭代ID>.md` 保存人工验收记录；记录构建/提交标识、浏览器、测试数据、步骤结果和截图/录屏路径。
 - 单元、组件或 API 测试通过不能替代页面人工验收；对应页面、Playwright 和人工记录齐备后才满足前端完成定义。
 
-## I36F 新手引导与首次体验页面（2026-08-05，Tour 跨页引导）
+## I36F 新手引导与首次体验页面（2026-08-06，Tour 完整玩家循环修复）
 
 - `api/onboarding-api.ts` 是 `/onboarding` 与玩家首页引导入口的唯一浏览器入口：`useOnboardingQuery` 只读 `GET /v1/onboarding`（支持 `enabled` 开关：仅引导会话激活或位于引导页时请求，避免常驻 Tour 在每个玩家页面轮询）；`useSkipStepMutation`/`useRecordViewStepMutation`/`useClaimOnboardingRewardMutation` 三个引导命令（跳过/浏览意图/领取完成奖励）在同一意图内网络重试复用幂等键、换步骤才换键，成功后只失效 onboarding/dashboard 服务器真相缓存。
-- 引导任务用 antd Tour 完成：`providers/onboarding-guide-context.tsx`（跨页面持久 Provider，置于 `(player)` 布局，`retarget(stepId)` 切换当前引导目标步骤）与 `components/onboarding-guide-tour.tsx`（常驻 Tour，挂在玩家 `PlayerShell` 内容之后）。气泡标题「下一步：x / x（已完成）」+ 说明 + 上一步/跳过此步/去完成→/下一步/完成引导；目标按钮锚点存在时高亮该按钮（蒙层不拦截，可直接点击），否则以居中卡片展示；步骤完成（服务端推进）后自动前进到下一个未完成步骤，全部完成结束会话。目标锚点：`#onboarding-create-archive`（首页创建存档）、`#onboarding-work-funds`（每日工作资金领取）、`#onboarding-pack-purchase`（补充包「购买并开包」）、`#onboarding-view-price-history`（价格历史双曲线区）、`#onboarding-npc-buy`（市场「向 NPC 买入」）、`#onboarding-collection-album`（收藏图鉴）、`#onboarding-tournaments`（今日比赛）。创建存档/领取工作资金/开包（单包+批量）/NPC 成交/赛事报名五个 mutation 成功后追加失效 `["onboarding", userId]`，使 Tour 在玩家真实完成动作后自动前进。
-- `/onboarding` 组合 `features/onboarding/onboarding-page.tsx`（引导会话控制器）：按服务端 `OnboardingDto` 渲染进度摘要（「引导进度 x%」aria 说明、已完成 x/7 步、下一步高亮、规则版本与服务端更新时间）、「开始引导」/每步「引导我完成」入口与七步目标链清单（创建存档/领取工作资金/开出第一包/看懂价格/完成首笔交易/收藏见涨/首次报名）；完成/跳过/待完成/下一步状态徽标只取服务端投影。完成奖励领取仅在 `available` 时显示，二次确认 + 幂等键只投递一次，成功横幅只展示服务端入账金额与入账后余额。
-- `features/onboarding/onboarding-entry-card.tsx` 是玩家首页常驻引导入口：未完成玩家显示「引导进行中 x/7」徽标与下一步文案，「继续引导」直接启动常驻 Tour；奖励可领取时显示「引导完成 · 可领取完成奖励」，完成并领取后显示「引导已完成」；所有状态只取服务端响应。
-- view_event 步骤的浏览器端：`features/market/price-history-page.tsx` 挂载时以 `useRecordViewStepMutation` 向服务端提交「看懂价格」浏览意图（首次进入只提交一次），服务端记录访问事件并判定完成；页面展示「已向服务器记录本次价格历史浏览」，浏览器不自行判定。
+- 引导任务用 antd Tour 完成：`providers/onboarding-guide-context.tsx` 持久化跨页会话，`components/onboarding-guide-tour.tsx` 只观察同一目标步骤从“未完成”到服务端 `completion` 非空的转换并自动推进，不再用 DOM 点击作为完成依据。未完成且已有高亮目标时主按钮禁用为「请完成高亮操作」，不能用 Tour 按钮越过服务端步骤；跳过、view_event、profile 刷新和业务 mutation 均走同一推进路径。开包完成须额外等待 `pack-opening-animation-store` 进入 `complete` 再切页；价格历史页加载后保留 6 秒阅读期，只有玩家点击“我已查看价格走势”才提交 view_event，禁止挂载即完成。全部九步完成后返回 `/onboarding` 领取奖励。路由门禁 8 秒超时恢复，避免失败导航永久锁死。Tour 首选按钮/选择框/标题等小锚点，交互目标使用顶部气泡、非交互状态使用底部气泡；NPC 买入/保底卖出与赛事报名按前置操作动态切换锚点，窄屏宽度限制在视口内并允许操作区换行。气泡宽度必须写入 step `style`（Trigger popup），不得写入 Tour 根 `className/style`：rc-tour 会将根类/样式同时用于全屏 mask，导致遮罩被气泡宽度截断。
+- `/onboarding` 按服务端 `OnboardingDto` 渲染九步完整目标链：创建存档 → 领取工作资金 → 开包 → 看懂价格 → 首笔 NPC 交易 → 实际浏览收藏图鉴 → 保存合法 Commander 卡组 → 首次报名 → 等待并查看已结算赛果。组卡步骤在编辑器依次高亮库存/指挥官、100 张后的服务端检查和合法后的保存按钮；缺少传奇生物时明确引导回市场购入。完成/跳过/待完成/下一步状态与 x/9 进度只取服务端投影。
+- 缺少指挥官时使用闭环采购子流程：卡组编辑器跳转 `/market?onboarding=commander&cardRole=commander`；市场 API 由服务端按 `cardRole=commander` 过滤传奇生物并返回 `typeLine`，Tour 在市场依次高亮传奇生物买入、预览和确认，不再显示通用“去卡组页”。成交成功同时失效普通库存与 `available-for-decks` 缓存，并自动返回 `/decks/new`；刷新或导航中断时，市场页检测到服务端已有可用传奇生物也会恢复到原构筑。
+- `features/onboarding/onboarding-entry-card.tsx` 是玩家首页常驻入口：未完成玩家显示「引导进行中 x/9」与服务端下一步；奖励可领取/已领取状态仍只来自服务端。
+- 两个 view_event 页面分别提交一次访问意图：`features/market/price-history-page.tsx` 对应 `/market/history`（阅读 6 秒后显式确认），`features/collection/album-page.tsx` 对应 `/collection/album`；持有库存不再等价于已经学习收藏图鉴。`api/npc-trade-api.ts` 读取服务端新手交易机会；市场普通 SKU 全部停用时仍展示服务器指定的单卡保底卖出/低价买入入口，前端不选卡、不定价、不放宽资格。
+- `api/decks-api.ts` 保存卡组成功后失效 onboarding；赛事结果查询对“尚未结算”的 `RESOURCE_NOT_FOUND` 每 3 秒继续轮询，真实赛果到达后失效 onboarding。其他不可恢复错误停止轮询并保留手动重试。
 - 玩家导航「大厅」组新增「新手引导」（/onboarding）入口（原创罗盘内联 SVG 图标）；服务端待办 `continue_onboarding`（「继续新手引导」→ /onboarding）由首页待办列表自动渲染。
-- 权威边界：步骤完成、跳过、奖励状态全部以服务端为准（`onboarding/v2` 首次目标链第一步为「创建存档」）；浏览器只提交意图（浏览/跳过/领取）并复用幂等键，不判定完成、不结算任何经济真相；刷新后只重新读取服务端投影，不伪造进度。
+- 权威边界：步骤完成、跳过、奖励状态全部以服务端 `onboarding/v3` 为准；浏览器只提交意图并展示/定位，不判定合法卡组、赛果或经济真相。
 - `tests/e2e/onboarding-i36f.spec.ts` 与 `tests/manual/I36F.md` 覆盖首次引导完整流程（Tour 跨页高亮 + 真实完成创建存档/领取资金 + 浏览意图只投递一次）、Tour 内跳过与重进、奖励领取幂等防重复、首页徽标/待办联动、未创建存档新玩家首页及桌面/窄屏。
 
 ## I33F 收藏图鉴与开包体验页面（2026-08-04）

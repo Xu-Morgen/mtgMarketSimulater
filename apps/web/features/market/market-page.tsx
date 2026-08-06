@@ -2,18 +2,21 @@
 
 import { Pagination as AntPagination, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import type { BilateralOrderDto, CardFinish, MarketQuoteListItemDto, NpcTradeDto, QuoteDto } from "@mtg-market/contracts";
+import type { BilateralOrderDto, CardFinish, InventoryHoldingDto, MarketQuoteListItemDto, NpcTradeDto, QuoteDto } from "@mtg-market/contracts";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAvailableInventoryQuery } from "../../api/inventory-api";
 import { type MarketFilters, useMarketAnnouncementsQuery, useMarketHeatQuery, useMarketIndexQuery, useMarketQuotesQuery } from "../../api/market-api";
 import { usePublicPriceStatusQuery } from "../../api/pricing-api";
+import { useOnboardingTradeOpportunityQuery } from "../../api/npc-trade-api";
 import { CardImagePopover } from "../../components/card-image-popover";
 import { PriceStatus } from "../../components/price-status";
 import { EmptyState, ErrorState, FilterBar, PageSkeleton } from "../../components/ui";
 import { formatMoney } from "../../utils/money";
 import { formatBasisPoints } from "../../utils/percent";
 import { CreateOrderDialog } from "../orders/create-order-dialog";
+import { NpcSellDialog } from "../inventory/npc-sell-dialog";
 import { AnnouncementsSection, MarketHeatBoard, NarrativeBanner } from "./market-heat-board";
 import { NpcBuyDialog } from "./npc-buy-dialog";
 import styles from "./market-page.module.css";
@@ -26,20 +29,23 @@ const factorLabels: Record<QuoteDto["reasons"][number]["kind"], string> = { "sup
 function formatEurCents(amount: number): string { return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "EUR" }).format(amount / 100); }
 function formatDate(value: string): string { return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
 function finishLabel(finish: CardFinish): string { return finishes.find((item) => item.value === finish)?.label ?? finish; }
+function isLegendaryCreature(typeLine: string): boolean { return /\blegendary\b/i.test(typeLine) && /\bcreature\b/i.test(typeLine); }
 function filtersFromSearch(search: URLSearchParams | null): MarketFilters {
   const value = search ?? new URLSearchParams(); const finish = value.get("finish"); const requestedLimit = Number.parseInt(value.get("limit") ?? "", 10); const tradable = value.get("tradable"); const sort = value.get("sort"); const direction = value.get("direction");
   return {
     query: value.get("query") || undefined, setCode: value.get("setCode") || undefined, rarity: value.get("rarity") || undefined,
     finish: finish === "nonfoil" || finish === "foil" || finish === "etched" ? finish : undefined,
+    cardRole: value.get("cardRole") === "commander" ? "commander" : undefined,
     tradable: tradable === "tradable" || tradable === "untradable" ? tradable : "any",
     sort: sort === "marketPrice" || sort === "referencePrice" ? sort : "name",
     direction: direction === "desc" ? "desc" : "asc",
     cursor: value.get("cursor") || undefined, limit: pageSizeOptions.includes(requestedLimit) ? requestedLimit : defaultPageSize
   };
 }
-function toUrl(filters: MarketFilters): string {
+function toUrl(filters: MarketFilters, commanderAcquisition = false): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) if (value && !(key === "limit" && value === defaultPageSize) && !(key === "tradable" && value === "any") && !(key === "sort" && value === "name") && !(key === "direction" && value === "asc")) search.set(key, String(value));
+  if (commanderAcquisition) search.set("onboarding", "commander");
   const suffix = search.toString(); return suffix ? `/market?${suffix}` : "/market";
 }
 function disabledText(item: MarketQuoteListItemDto): string {
@@ -63,17 +69,33 @@ function IntradayMark({ change }: { change: { direction: "up" | "down" | "flat";
 
 /** I14F 仅显示服务端报价与原因；即使是筛选、指数或金额显示，也不会在浏览器推导价格。 */
 export function MarketPage() {
-  const router = useRouter(); const search = useSearchParams(); const filters = filtersFromSearch(search); const quotes = useMarketQuotesQuery(filters); const index = useMarketIndexQuery(); const priceStatus = usePublicPriceStatusQuery();
+  const router = useRouter(); const search = useSearchParams();
+  // URL 是采购模式的可刷新事实来源；市场页无需依赖只在玩家布局挂载的 Tour 上下文。
+  const commanderAcquisition = search.get("onboarding") === "commander";
+  const searchedFilters = filtersFromSearch(search);
+  const filters: MarketFilters = commanderAcquisition ? { ...searchedFilters, cardRole: "commander", tradable: "tradable" } : searchedFilters;
+  const quotes = useMarketQuotesQuery(filters); const index = useMarketIndexQuery(); const priceStatus = usePublicPriceStatusQuery();
   const heat = useMarketHeatQuery();
   const announcements = useMarketAnnouncementsQuery();
+  const onboardingOpportunity = useOnboardingTradeOpportunityQuery();
+  const commanderInventory = useAvailableInventoryQuery(commanderAcquisition);
   const [draft, setDraft] = useState<{ query: string; setCode: string; rarity: string; finish: CardFinish | ""; tradable: "any" | "tradable" | "untradable" }>({ query: filters.query ?? "", setCode: filters.setCode ?? "", rarity: filters.rarity ?? "", finish: filters.finish ?? "", tradable: filters.tradable ?? "any" });
   const [buyItem, setBuyItem] = useState<MarketQuoteListItemDto | null>(null);
+  const [sellHolding, setSellHolding] = useState<InventoryHoldingDto | null>(null);
   const [orderItem, setOrderItem] = useState<MarketQuoteListItemDto | null>(null);
   const [completedTrade, setCompletedTrade] = useState<NpcTradeDto | null>(null);
   const [completedOrder, setCompletedOrder] = useState<BilateralOrderDto | null>(null);
   const beginBuy = useCallback((item: MarketQuoteListItemDto) => { setCompletedTrade(null); setBuyItem(item); }, []);
   const beginOrder = useCallback((item: MarketQuoteListItemDto) => { setCompletedOrder(null); setOrderItem(item); }, []);
+  const hasAvailableCommander = commanderInventory.data?.some((holding) => holding.availableQuantity > 0 && isLegendaryCreature(holding.sku.typeLine)) ?? false;
+  useEffect(() => {
+    // 成交响应后即使页面刷新或导航被打断，也能依据服务端库存恢复到原构筑流程。
+    if (commanderAcquisition && hasAvailableCommander && buyItem === null) router.replace("/decks/new");
+  }, [buyItem, commanderAcquisition, hasAvailableCommander, router]);
   const pageSize = filters.limit ?? defaultPageSize; const currentPage = Math.floor(Number.parseInt(filters.cursor ?? "0", 10) / pageSize) + 1;
+  // DOM id 必须唯一；教程只框选当前页第一张真正可交易的卡，避免多行重复 id 定位到错误按钮。
+  const commanderPurchaseItem = commanderAcquisition ? quotes.data?.data.items.find((item) => item.tradable && item.quote && isLegendaryCreature(item.sku.typeLine)) ?? null : null;
+  const onboardingNpcSkuId = commanderAcquisition ? null : quotes.data?.data.items.find((item) => item.tradable && item.quote)?.sku.id ?? null;
   // I34F：把服务端 heat 聚合的日内涨跌方向按 SKU 建索引，供报价表价格列显示 ▲/▼（无数据不显示）。
   const intradayBySku = useMemo(() => {
     const dto = heat.data?.data;
@@ -96,32 +118,37 @@ export function MarketPage() {
             </button>
           </CardImagePopover>
         </div>
-        <span className={styles.muted}>{item.sku.setCode} · #{item.sku.collectorNumber} · {finishLabel(item.sku.finish)} · {item.sku.rarity}</span>
+        <span className={styles.muted}>{item.sku.setCode} · #{item.sku.collectorNumber} · {finishLabel(item.sku.finish)} · {item.sku.rarity}</span><br />
+        <span className={styles.muted}>{item.sku.typeLine || "类别资料暂缺"}</span>
       </div>
     ) },
     { title: "Cardmarket EUR 参考价", key: "reference", render: (_, item) => item.quote?.referencePrice ? <Link className={styles.historyPrice} href={skuHistoryHref(item.sku.id)}>{formatEurCents(item.quote.referencePrice.amount)}</Link> : <Tag>无有效参考价</Tag> },
     { title: "游戏内中间价", key: "market", render: (_, item) => item.quote ? <div className={styles.priceCell}><Link className={styles.historyPrice} href={skuHistoryHref(item.sku.id)}>{formatMoney(item.quote.marketPrice)}</Link><IntradayMark change={intradayBySku.get(item.sku.id)} /></div> : <Tag>报价暂不可用</Tag> },
     { title: "NPC 报价", key: "npc", render: (_, item) => item.quote ? <div><div>NPC 买入：{formatMoney(item.quote.npcBuyPrice)}</div><div>NPC 卖出：{formatMoney(item.quote.npcSellPrice)}</div></div> : "—" },
     { title: "计算原因摘要", key: "reason", render: (_, item) => item.quote ? <span className={styles.muted}>{item.quote.reasons.find((reason) => reason.kind === "event") ? `市场活动：${item.quote.reasons.find((reason) => reason.kind === "event")!.reason}（服务端系数 ${item.quote.reasons.find((reason) => reason.kind === "event")!.factorBasisPoints} bp）` : item.quote.reasons[0]?.reason ?? "服务端报价投影"}</span> : "—" },
-    { title: "交易状态", key: "status", render: (_, item) => item.tradable && item.quote ? <div className={styles.actionGroup}><button id="onboarding-npc-buy" type="button" className="button" onClick={() => beginBuy(item)}>向 NPC 买入</button><button type="button" className="button secondary" onClick={() => beginOrder(item)}>挂买单</button></div> : <div><button type="button" className={styles.disabledEntry} disabled title={disabledText(item)}>暂不可交易</button><span className={styles.muted}>{disabledText(item)}</span></div> }
-  ], [beginBuy, beginOrder, intradayBySku]);
+    { title: "交易状态", key: "status", fixed: "right", width: 220, render: (_, item) => item.tradable && item.quote ? <div className={styles.actionGroup}><button id={item.sku.id === onboardingNpcSkuId ? "onboarding-npc-buy" : undefined} type="button" className="button" onClick={() => beginBuy(item)}>向 NPC 买入</button><button type="button" className="button secondary" onClick={() => beginOrder(item)}>挂买单</button></div> : <div><button type="button" className={styles.disabledEntry} disabled title={disabledText(item)}>暂不可交易</button><span className={styles.muted}>{disabledText(item)}</span></div> }
+  ], [beginBuy, beginOrder, intradayBySku, onboardingNpcSkuId]);
   if (quotes.isPending) return <PageSkeleton label="正在加载市场报价" />;
   if (quotes.isError) return <main className="page"><ErrorState title="市场报价加载失败" onRetry={() => { void quotes.refetch(); void index.refetch(); void priceStatus.refetch(); void heat.refetch(); void announcements.refetch(); }} /></main>;
   const quotePage = quotes.data.data; const marketIndex = index.data?.data; const total = quotePage.page.total ?? (currentPage - 1) * pageSize + quotePage.items.length + (quotePage.page.hasMore ? 1 : 0);
-  const apply = () => router.push(toUrl({ query: draft.query.trim() || undefined, setCode: draft.setCode.trim().toUpperCase() || undefined, rarity: draft.rarity.trim() || undefined, finish: draft.finish || undefined, tradable: draft.tradable, sort: filters.sort, direction: filters.direction, limit: pageSize }));
-  return <main className="page market-page"><p className="eyebrow">服务端市场报价投影</p><h1>市场</h1><p className="intro">外部参考价、游戏内价和 NPC 报价均由服务端保存后返回。页面只展示报价，不会计算兑换、价差或活动影响。需要查看历史曲线时前往<a href="/market/history" className="text-button">价格历史与市场曲线</a>，设置目标价提醒可前往<a href="/watchlist" className="text-button">价格提醒</a>。</p>
-    <section className={`${styles.summary} notice-board`} aria-label="市场指数与价格状态"><article><span>外部参考指数</span><strong className="num">{marketIndex?.referenceIndex === null || marketIndex === undefined ? "暂不可用" : formatEurCents(marketIndex.referenceIndex)}</strong><small className={styles.muted}>{marketIndex?.capturedAt ? `报价计算于 ${formatDate(marketIndex.capturedAt)}` : "暂无持久化报价"}</small></article><article><span>游戏内市场指数</span><strong className="num">{marketIndex?.gameIndex === null || marketIndex === undefined ? "暂不可用" : formatMoney({ amount: marketIndex.gameIndex, currency: "GAME_CREDIT" })}</strong><small className={styles.muted}>{marketIndex ? `${marketIndex.quotedSkus} 个 SKU 已报价` : "指数查询失败"}</small></article><article><span>来源与交易新鲜度</span><PriceStatus status={priceStatus.isError ? null : priceStatus.data?.data} tradable /></article></section>
+  const guaranteed = onboardingOpportunity.data?.data.opportunity;
+  const apply = () => router.push(toUrl({ query: draft.query.trim() || undefined, setCode: draft.setCode.trim().toUpperCase() || undefined, rarity: draft.rarity.trim() || undefined, finish: draft.finish || undefined, cardRole: commanderAcquisition ? "commander" : undefined, tradable: commanderAcquisition ? "tradable" : draft.tradable, sort: filters.sort, direction: filters.direction, limit: pageSize }, commanderAcquisition));
+  return <main className="page market-page"><p className="eyebrow">服务端市场报价投影</p><h1>{commanderAcquisition ? "购买新手卡组指挥官" : "市场"}</h1><p className="intro">{commanderAcquisition ? "当前只展示可交易的传奇生物。选择一张向 NPC 买入，成交后会自动返回卡组构筑。" : <>外部参考价、游戏内价和 NPC 报价均由服务端保存后返回。页面只展示报价，不会计算兑换、价差或活动影响。需要查看历史曲线时前往<a href="/market/history" className="text-button">价格历史与市场曲线</a>，设置目标价提醒可前往<a href="/watchlist" className="text-button">价格提醒</a>。</>}</p>
+    {commanderAcquisition ? <section id="onboarding-commander-market-focus" className="panel" aria-labelledby="commander-acquisition-title"><h2 id="commander-acquisition-title" className="panel-title">为新手卡组购买指挥官</h2>{commanderPurchaseItem?.quote ? <><p>推荐候选：<strong>{commanderPurchaseItem.sku.name}</strong>（{commanderPurchaseItem.sku.setCode} · #{commanderPurchaseItem.sku.collectorNumber}），NPC 售价 {formatMoney(commanderPurchaseItem.quote.npcSellPrice)}。</p><div className={styles.actionGroup}><button id="onboarding-commander-buy" className="button" type="button" onClick={() => beginBuy(commanderPurchaseItem)}>向 NPC 买入这张指挥官</button><Link className="button secondary" href="/decks/new">暂不购买，返回卡组构筑</Link></div></> : <><p>服务器暂未找到带有效报价的可交易传奇生物。请等待报价刷新后重试；教程会保持在组卡步骤。</p><Link className="button secondary" href="/decks/new">返回卡组构筑</Link></>}</section> : null}
+    {!commanderAcquisition ? <><section className={`${styles.summary} notice-board`} aria-label="市场指数与价格状态"><article><span>外部参考指数</span><strong className="num">{marketIndex?.referenceIndex === null || marketIndex === undefined ? "暂不可用" : formatEurCents(marketIndex.referenceIndex)}</strong><small className={styles.muted}>{marketIndex?.capturedAt ? `报价计算于 ${formatDate(marketIndex.capturedAt)}` : "暂无持久化报价"}</small></article><article><span>游戏内市场指数</span><strong className="num">{marketIndex?.gameIndex === null || marketIndex === undefined ? "暂不可用" : formatMoney({ amount: marketIndex.gameIndex, currency: "GAME_CREDIT" })}</strong><small className={styles.muted}>{marketIndex ? `${marketIndex.quotedSkus} 个 SKU 已报价` : "指数查询失败"}</small></article><article><span>来源与交易新鲜度</span><PriceStatus status={priceStatus.isError ? null : priceStatus.data?.data} tradable /></article></section>
     {priceStatus.data?.data.freshness === "stale" ? <p className={styles.stale} role="status">价格同步失败时沿用最近成功快照；这不是实时 Cardmarket 价格。</p> : null}
     {index.isError ? <p className={styles.stale} role="status">市场指数暂不可读取；下方仅展示成功取得的单卡报价。</p> : null}
     {heat.isError ? <p className={styles.stale} role="status">行情屏暂不可读取；下方仅展示成功取得的报价列表。</p> : null}
     <NarrativeBanner quotes={quotePage.items} />
     {heat.data?.data ? <MarketHeatBoard heat={heat.data.data} /> : null}
     {announcements.data?.data ? <AnnouncementsSection items={announcements.data.data.items} /> : null}
-    {completedTrade ? <section className={styles.tradeSuccess} role="status"><h2>买入已完成</h2><p>服务端已成交 {completedTrade.quantity} 张，实际扣款 {formatMoney(completedTrade.total)}（其中费用 {formatMoney(completedTrade.fee)}）。余额、库存、报价与账本正在按服务器响应刷新。</p></section> : null}
+    {guaranteed?.status === "available" ? <section className="panel" aria-labelledby="onboarding-liquidity-title"><h2 id="onboarding-liquidity-title" className="panel-title">新手保底交易机会</h2><p>{guaranteed.side === "sell" ? `NPC 保证收购你持有的「${guaranteed.holding.sku.name}」1 张，本次预计收入 ${formatMoney(guaranteed.preview.total)}。` : `NPC 保证出售「${guaranteed.item.sku.name}」1 张，本次预计扣款 ${formatMoney(guaranteed.preview.total)}。`}</p><p className={styles.muted}>该机会由服务器根据当前引导进度、库存、余额、额度和不可变报价选择；只放宽本次新手交易的普通 SKU 启停门禁。</p><button id="onboarding-npc-guaranteed-trade" className="button" type="button" onClick={() => guaranteed.side === "sell" ? setSellHolding(guaranteed.holding) : setBuyItem(guaranteed.item)}>{guaranteed.side === "sell" ? "使用保底机会向 NPC 卖出" : "使用保底机会向 NPC 买入"}</button></section> : guaranteed?.status === "unavailable" && guaranteed.reason !== "prerequisite_incomplete" ? <section className="panel" role="status"><h2 className="panel-title">新手交易机会正在准备</h2><p>服务器暂未找到可结算机会；请等待报价刷新后重试。本步骤不会要求你点击不存在的按钮。</p></section> : null}</> : null}
+    {completedTrade ? <section className={styles.tradeSuccess} role="status"><h2>{completedTrade.side === "buy" ? "买入" : "卖出"}已完成</h2><p>服务端已成交 {completedTrade.quantity} 张，{completedTrade.side === "buy" ? "实际扣款" : "实际收入"} {formatMoney(completedTrade.total)}（其中费用 {formatMoney(completedTrade.fee)}）。余额、库存、报价与账本正在按服务器响应刷新。</p></section> : null}
     {completedOrder ? <section className={styles.tradeSuccess} role="status"><h2>挂单已创建</h2><p>服务端已创建{completedOrder.side === "buy" ? "买单" : "卖单"}（限价 {formatMoney(completedOrder.limitPrice)}，数量 {completedOrder.originalQuantity} 张，状态 {completedOrder.status}）。余额、库存、报价、委托与账本正在按服务器响应刷新；撮合与履约在后续迭代上线。</p></section> : null}
-    <form className="catalog-filters" onSubmit={(event) => { event.preventDefault(); apply(); }}><FilterBar><label>名称<input aria-label="市场名称筛选" value={draft.query} onChange={(event) => setDraft({ ...draft, query: event.target.value })} /></label><label>系列<input aria-label="市场系列筛选" value={draft.setCode} onChange={(event) => setDraft({ ...draft, setCode: event.target.value })} placeholder="例如 ONE" /></label><label>稀有度<input aria-label="市场稀有度筛选" value={draft.rarity} onChange={(event) => setDraft({ ...draft, rarity: event.target.value })} placeholder="例如 rare" /></label><label>工艺<select aria-label="市场工艺筛选" value={draft.finish} onChange={(event) => setDraft({ ...draft, finish: event.target.value as CardFinish | "" })}><option value="">全部</option>{finishes.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label><label>交易状态<select aria-label="市场交易状态筛选" value={draft.tradable} onChange={(event) => setDraft({ ...draft, tradable: event.target.value as "any" | "tradable" | "untradable" })}><option value="any">全部</option><option value="tradable">可新增交易</option><option value="untradable">不可新增交易</option></select></label><label>排序<select aria-label="市场排序" value={`${filters.sort}:${filters.direction}`} onChange={(event) => { const [sort, direction] = event.target.value.split(":") as [NonNullable<MarketFilters["sort"]>, NonNullable<MarketFilters["direction"]>]; router.push(toUrl({ ...filters, sort, direction, cursor: undefined })); }}><option value="name:asc">名称（升序）</option><option value="marketPrice:desc">游戏内中间价（降序）</option><option value="marketPrice:asc">游戏内中间价（升序）</option><option value="referencePrice:desc">EUR 参考价（降序）</option><option value="referencePrice:asc">EUR 参考价（升序）</option></select></label><button className="button" type="submit">应用筛选</button><button className="button secondary" type="button" onClick={() => { setDraft({ query: "", setCode: "", rarity: "", finish: "", tradable: "any" }); router.push("/market"); }}>清除</button></FilterBar></form>
-    {quotePage.items.length === 0 ? <EmptyState title="没有符合条件的市场报价">调整筛选条件，或等待服务端完成价格同步与重定价。</EmptyState> : <><div className={styles.tableWrap}><Table columns={columns} dataSource={quotePage.items} rowKey={(item) => item.sku.id} pagination={false} scroll={{ x: 1160 }} expandable={{ expandedRowRender: (item) => item.quote ? <section className={`${styles.quoteCard} panel`}><h2>计算原因与版本</h2><p className={styles.muted}>规则版本：{item.quote.quoteVersion}；报价计算于 {formatDate(item.quote.capturedAt)}</p><QuoteReasons quote={item.quote} /></section> : <p className={styles.muted}>没有有效外部参考价或已持久化报价，因此交易入口保持禁用。</p>, rowExpandable: (item) => item.quote !== null }} /></div><div className="pagination"><AntPagination current={currentPage} pageSize={pageSize} total={total} showSizeChanger showQuickJumper pageSizeOptions={pageSizeOptions} showTotal={(count, range) => `第 ${range[0]}–${range[1]} 张，共 ${count} 张`} onChange={(nextPage, nextPageSize) => { const nextLimit = Number(nextPageSize); const sizeChanged = nextLimit !== pageSize; router.push(toUrl({ ...filters, limit: nextLimit, cursor: sizeChanged || nextPage === 1 ? undefined : String((nextPage - 1) * nextLimit) })); }} /></div></>}
-    {buyItem ? <NpcBuyDialog item={buyItem} onClose={() => setBuyItem(null)} onSettled={(trade) => { setBuyItem(null); setCompletedTrade(trade); }} /> : null}
+    <form className="catalog-filters" onSubmit={(event) => { event.preventDefault(); apply(); }}><FilterBar><label>名称<input aria-label="市场名称筛选" value={draft.query} onChange={(event) => setDraft({ ...draft, query: event.target.value })} /></label><label>系列<input aria-label="市场系列筛选" value={draft.setCode} onChange={(event) => setDraft({ ...draft, setCode: event.target.value })} placeholder="例如 ONE" /></label><label>稀有度<input aria-label="市场稀有度筛选" value={draft.rarity} onChange={(event) => setDraft({ ...draft, rarity: event.target.value })} placeholder="例如 rare" /></label><label>工艺<select aria-label="市场工艺筛选" value={draft.finish} onChange={(event) => setDraft({ ...draft, finish: event.target.value as CardFinish | "" })}><option value="">全部</option>{finishes.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label><label>交易状态<select aria-label="市场交易状态筛选" value={commanderAcquisition ? "tradable" : draft.tradable} disabled={commanderAcquisition} onChange={(event) => setDraft({ ...draft, tradable: event.target.value as "any" | "tradable" | "untradable" })}><option value="any">全部</option><option value="tradable">可新增交易</option><option value="untradable">不可新增交易</option></select></label><label>排序<select aria-label="市场排序" value={`${filters.sort}:${filters.direction}`} onChange={(event) => { const [sort, direction] = event.target.value.split(":") as [NonNullable<MarketFilters["sort"]>, NonNullable<MarketFilters["direction"]>]; router.push(toUrl({ ...filters, sort, direction, cursor: undefined }, commanderAcquisition)); }}><option value="name:asc">名称（升序）</option><option value="marketPrice:desc">游戏内中间价（降序）</option><option value="marketPrice:asc">游戏内中间价（升序）</option><option value="referencePrice:desc">EUR 参考价（降序）</option><option value="referencePrice:asc">EUR 参考价（升序）</option></select></label><button className="button" type="submit">应用筛选</button><button className="button secondary" type="button" onClick={() => { setDraft({ query: "", setCode: "", rarity: "", finish: "", tradable: commanderAcquisition ? "tradable" : "any" }); router.push(commanderAcquisition ? "/market?onboarding=commander&cardRole=commander" : "/market"); }}>清除</button></FilterBar></form>
+    {quotePage.items.length === 0 ? <EmptyState title={commanderAcquisition ? "暂时没有可交易的传奇生物" : "没有符合条件的市场报价"}>{commanderAcquisition ? "可等待价格同步后重试，或先返回卡组构筑。教程会保持在组卡步骤。" : "调整筛选条件，或等待服务端完成价格同步与重定价。"}</EmptyState> : <><div className={styles.tableWrap}><Table columns={columns} dataSource={quotePage.items} rowKey={(item) => item.sku.id} pagination={false} scroll={{ x: 1160 }} expandable={{ expandedRowRender: (item) => item.quote ? <section className={`${styles.quoteCard} panel`}><h2>计算原因与版本</h2><p className={styles.muted}>规则版本：{item.quote.quoteVersion}；报价计算于 {formatDate(item.quote.capturedAt)}</p><QuoteReasons quote={item.quote} /></section> : <p className={styles.muted}>没有有效外部参考价或已持久化报价，因此交易入口保持禁用。</p>, rowExpandable: (item) => item.quote !== null }} /></div><div className="pagination"><AntPagination current={currentPage} pageSize={pageSize} total={total} showSizeChanger showQuickJumper pageSizeOptions={pageSizeOptions} showTotal={(count, range) => `第 ${range[0]}–${range[1]} 张，共 ${count} 张`} onChange={(nextPage, nextPageSize) => { const nextLimit = Number(nextPageSize); const sizeChanged = nextLimit !== pageSize; router.push(toUrl({ ...filters, limit: nextLimit, cursor: sizeChanged || nextPage === 1 ? undefined : String((nextPage - 1) * nextLimit) }, commanderAcquisition)); }} /></div></>}
+    {buyItem ? <NpcBuyDialog item={buyItem} onClose={() => setBuyItem(null)} onSettled={(trade) => { const returnToDeck = commanderAcquisition && isLegendaryCreature(buyItem.sku.typeLine); setBuyItem(null); setCompletedTrade(trade); if (returnToDeck) router.replace("/decks/new"); }} /> : null}
+    {sellHolding ? <NpcSellDialog holding={sellHolding} onboardingGuarantee onClose={() => setSellHolding(null)} onSettled={(trade) => { setSellHolding(null); setCompletedTrade(trade); }} /> : null}
     {orderItem ? <CreateOrderDialog sku={{ id: orderItem.sku.id, name: orderItem.sku.name, setCode: orderItem.sku.setCode, collectorNumber: orderItem.sku.collectorNumber }} initialSide="buy" onClose={() => setOrderItem(null)} onSettled={(order) => { setOrderItem(null); setCompletedOrder(order); }} /> : null}
   </main>;
 }

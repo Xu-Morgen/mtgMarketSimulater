@@ -10,6 +10,28 @@ export function enqueueMarketRepriceJob(database: ConstructorParameters<typeof S
   new SqliteJobRepository(database).enqueue({ type: "market.reprice", payload: { triggerKey, ...(priceSyncRunId ? { priceSyncRunId } : {}) }, uniqueKey: triggerKey, runAfter: now, maxAttempts: 3 }, now);
 }
 
+const MARKET_QUOTE_REFRESH_INTERVAL_MS = 10 * 60_000;
+
+/**
+ * 报价本身只有 15 分钟有效期；外部价格同步却是每日任务。每 10 分钟投递一次只读快照重报价，
+ * 复用最近成功的价格快照并覆盖当日 market-refresh 投影，使玩家始终留有至少约 5 分钟确认窗口。
+ * job 唯一键按 10 分钟桶去重，报价 triggerKey 按 UTC 日去重，因此不会每轮追加整套 SKU 历史行。
+ */
+export function ensureMarketQuoteRefreshScheduled(
+  database: ConstructorParameters<typeof SqliteJobRepository>[0],
+  now: Date
+): void {
+  const timestamp = now.getTime();
+  if (!Number.isFinite(timestamp)) throw new RangeError("市场报价刷新时间无效");
+  const bucket = new Date(Math.floor(timestamp / MARKET_QUOTE_REFRESH_INTERVAL_MS) * MARKET_QUOTE_REFRESH_INTERVAL_MS).toISOString();
+  const nowIso = now.toISOString();
+  const triggerKey = `market-refresh:${nowIso.slice(0, 10)}`;
+  new SqliteJobRepository(database).enqueue(
+    { type: "market.reprice", payload: { triggerKey }, uniqueKey: `market-refresh:${bucket}`, runAfter: nowIso, maxAttempts: 3 },
+    nowIso
+  );
+}
+
 /**
  * I20B：业务模块经由 jobs application 投递订单/成交到期回收。`runAfter` 设为 expires_at 或
  * fulfillment_deadline，到期由 order.expire handler 推进状态；`(type, unique_key)` 唯一索引

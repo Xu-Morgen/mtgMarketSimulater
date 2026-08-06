@@ -38,7 +38,7 @@ export function useInventoryQuery(filters: InventoryFilters) {
 }
 
 /** 卡组编辑器逐页读取服务器可用库存；锁定数量仍由每个持仓 DTO 直接展示。 */
-export function useAvailableInventoryQuery() {
+export function useAvailableInventoryQuery(enabled = true) {
   const { accessToken, user } = useSession();
   return useQuery({
     queryKey: ["inventory", "available-for-decks", user?.id ?? "anonymous"],
@@ -52,7 +52,7 @@ export function useAvailableInventoryQuery() {
       } while (cursor);
       return items;
     },
-    enabled: Boolean(accessToken && user),
+    enabled: enabled && Boolean(accessToken && user),
     retry: false
   });
 }

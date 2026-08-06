@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { ensureDailyPriceSyncScheduled, ensureDailyRolloverScheduled, ensureDailyBackupScheduled, enqueueWatchlistCheckJob, TaskRegistry, TaskWorker } from "./modules/jobs/application/task-service.js";
+import { ensureDailyPriceSyncScheduled, ensureDailyRolloverScheduled, ensureDailyBackupScheduled, ensureMarketQuoteRefreshScheduled, enqueueWatchlistCheckJob, TaskRegistry, TaskWorker } from "./modules/jobs/application/task-service.js";
 import { SqliteJobRepository } from "./modules/jobs/infrastructure/sqlite-job-repository.js";
 import type { ApiConfig } from "./config/environment.js";
 import { createCatalogSyncService } from "./modules/catalog/api/catalog-routes.js";
@@ -35,6 +35,9 @@ export function startTaskRunner(database: Database.Database, intervalMs = 1_000,
     if (current - lastDailyCheck >= 5 * 60_000) {
       lastDailyCheck = current;
       const checkedAt = now();
+      // 先用最近成功快照恢复游戏内报价，再排队可能耗时较长的外部每日同步；服务启动后
+      // 不应让已过期报价继续等待网络下载，导致玩家在此期间完全无法交易。
+      ensureMarketQuoteRefreshScheduled(database, checkedAt);
       ensureDailyPriceSyncScheduled(database, checkedAt);
       ensureDailyBackupScheduled(database, checkedAt);
       if (dailyWorkFundingConfig) ensureDailyRolloverScheduled(database, { timezone: dailyWorkFundingConfig.APP_TIMEZONE, ruleVersion: dailyWorkFundingConfig.DAILY_WORK_FUNDING_RULE_VERSION }, checkedAt);

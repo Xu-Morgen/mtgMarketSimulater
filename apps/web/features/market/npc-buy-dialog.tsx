@@ -77,7 +77,7 @@ export function NpcBuyDialog({ item, onClose, onSettled }: { item: MarketQuoteLi
         <label>买入数量
           <input aria-label="买入数量" type="number" min="1" max="1000" step="1" value={quantityText} disabled={buy.isPending} onChange={(event) => setQuantityText(event.target.value)} />
         </label>
-        <button className="button secondary" type="submit" disabled={buy.isPending}>获取服务端预览</button>
+        <button id={!previewValue?.canPurchase || preview.isFetching ? "onboarding-npc-preview" : undefined} className="button secondary" type="submit" disabled={buy.isPending}>获取服务端预览</button>
       </form>
       {quantityError ? <p className={styles.tradeError} role="alert">{quantityError}</p> : null}
       {preview.isPending || preview.isFetching ? <p aria-busy="true">正在获取服务端买入预览…</p> : null}
@@ -86,7 +86,7 @@ export function NpcBuyDialog({ item, onClose, onSettled }: { item: MarketQuoteLi
       {mutationError ? <p className={styles.tradeError} role="alert">{mutationError}</p> : null}
       <div className="actions">
         <button className="button secondary" type="button" disabled={buy.isPending} onClick={onClose}>取消</button>
-        <button id="onboarding-npc-confirm" className="button" type="button" disabled={!previewValue?.canPurchase || preview.isFetching || buy.isPending} onClick={confirm}>{buy.isPending ? "正在由服务端成交…" : "确认向 NPC 买入"}</button>
+        <button id={previewValue?.canPurchase && !preview.isFetching ? "onboarding-npc-confirm" : undefined} className="button" type="button" disabled={!previewValue?.canPurchase || preview.isFetching || buy.isPending} onClick={confirm}>{buy.isPending ? "正在由服务端成交…" : "确认向 NPC 买入"}</button>
       </div>
     </section>
   </div>;

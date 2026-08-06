@@ -10,6 +10,7 @@ export type MarketFilters = {
   setCode?: string | undefined;
   rarity?: string | undefined;
   finish?: CardFinish | undefined;
+  cardRole?: "commander" | undefined;
   tradable?: "any" | "tradable" | "untradable" | undefined;
   sort?: "name" | "marketPrice" | "referencePrice" | undefined;
   direction?: "asc" | "desc" | undefined;

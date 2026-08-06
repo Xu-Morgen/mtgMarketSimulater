@@ -53,7 +53,7 @@ function seedCatalog(database: ReturnType<typeof openSqliteDatabase>): string {
 }
 
 describe("I36B 新手引导与首次体验服务端", () => {
-  it("初始投影七步待办、创建存档后第一步自动完成；领取工作资金与开包事实自动完成对应步骤", async () => {
+  it("初始投影九步待办、创建存档后第一步自动完成；领取工作资金与开包事实自动完成对应步骤", async () => {
     const { app, database } = await createTestApp();
     const token = await registerPlayer(app, "onboarding-basic@example.test");
     const userId = (database.prepare("SELECT id FROM users WHERE email = ?").get("onboarding-basic@example.test") as { id: string }).id;
@@ -63,8 +63,8 @@ describe("I36B 新手引导与首次体验服务端", () => {
     const initial = await app.inject({ method: "GET", url: "/v1/onboarding", headers: { authorization: token } });
     expect(initial.statusCode).toBe(200);
     const initialData = initial.json().data.onboarding;
-    expect(initialData.ruleVersion).toBe("onboarding/v2");
-    expect(initialData.steps).toHaveLength(7);
+    expect(initialData.ruleVersion).toBe("onboarding/v3");
+    expect(initialData.steps).toHaveLength(9);
     expect(initialData.completedCount).toBe(1);
     expect(initialData.allCompleted).toBe(false);
     expect(initialData.currentStepId).toBe("claim-work-funds");
@@ -83,7 +83,7 @@ describe("I36B 新手引导与首次体验服务端", () => {
     const after = await app.inject({ method: "GET", url: "/v1/onboarding", headers: { authorization: token } });
     const data = after.json().data.onboarding;
     const byId = (id: string) => data.steps.find((step: { id: string }) => step.id === id)!;
-    // profile 步骤按已结算状态自动完成；首次目标链共 7 步。
+    // profile 步骤按已结算状态自动完成；首次目标链共 9 步。
     expect(byId("create-archive").completion).toBe("auto");
     expect(byId("claim-work-funds").completion).toBe("auto");
     expect(byId("open-first-pack").completion).toBe("auto");
@@ -124,6 +124,36 @@ describe("I36B 新手引导与首次体验服务端", () => {
     await app.close(); database.close();
   });
 
+  it("保存合法卡组、报名与实际查看已结算赛果分别推进独立步骤，非法草稿不能越过组卡教程", async () => {
+    const { app, database } = await createTestApp();
+    const token = await registerPlayer(app, "onboarding-deck-loop@example.test");
+    const userId = (database.prepare("SELECT id FROM users WHERE email = ?").get("onboarding-deck-loop@example.test") as { id: string }).id;
+    await createArchive(app, token, "onboarding-deck-loop-archive");
+    const now = "2026-08-06T01:00:00.000Z";
+
+    database.prepare("INSERT INTO decks (id, user_id, name, format, rule_version, banlist_version, legality_json, created_at, updated_at) VALUES ('onb-invalid-deck', ?, '非法草稿', 'commander-100/v1', 'commander-100/v1', 'commander-banlist/2026-02-09', '{\"valid\":false}', ?, ?)").run(userId, now, now);
+    let overview = await app.inject({ method: "GET", url: "/v1/onboarding", headers: { authorization: token } });
+    expect(overview.json().data.onboarding.steps.find((step: { id: string }) => step.id === "create-first-deck").completion).toBe(null);
+
+    database.prepare("UPDATE decks SET legality_json = '{\"valid\":true}' WHERE id = 'onb-invalid-deck'").run();
+    const prematureView = await app.inject({ method: "POST", url: "/v1/onboarding/steps/finish-first-tournament/view", headers: { authorization: token, "idempotency-key": "onb-result-view-premature" }, payload: { path: "/tournaments/result" } });
+    expect(prematureView.statusCode).toBe(409);
+    expect(prematureView.json().error.code).toBe("RULE_VIOLATION");
+    database.prepare("INSERT INTO player_tournaments (id, creator_user_id, mode, format, name, status, rule_version, random_seed, seed_hash, created_at, settled_at) VALUES ('onb-player-tournament', ?, 'tabletop', 'commander', '引导赛事', 'settled', 'tournament/v1', 'seed', 'hash', ?, ?)").run(userId, now, now);
+    database.prepare("INSERT INTO player_tournament_registrations (id, tournament_id, user_id, deck_name, deck_id, power_snapshot_id, status, points, created_at) VALUES ('onb-player-registration', 'onb-player-tournament', ?, '引导卡组', NULL, NULL, 'registered', 4, ?)").run(userId, now);
+    database.prepare("INSERT INTO player_tournament_results (id, player_tournament_id, registration_id, rank, points, opponent_points, reward_amount, replay_json, settled_at) VALUES ('onb-player-result', 'onb-player-tournament', 'onb-player-registration', 1, 4, 0, 100, '{}', ?)").run(now);
+
+    overview = await app.inject({ method: "GET", url: "/v1/onboarding", headers: { authorization: token } });
+    const byId = (id: string) => overview.json().data.onboarding.steps.find((step: { id: string }) => step.id === id);
+    expect(byId("create-first-deck").completion).toBe("auto");
+    expect(byId("first-tournament-registration").completion).toBe("auto");
+    expect(byId("finish-first-tournament").completion).toBe(null);
+    const viewed = await app.inject({ method: "POST", url: "/v1/onboarding/steps/finish-first-tournament/view", headers: { authorization: token, "idempotency-key": "onb-result-view-0001" }, payload: { path: "/tournaments/result" } });
+    expect(viewed.statusCode).toBe(201);
+    expect(viewed.json().data.onboarding.steps.find((step: { id: string }) => step.id === "finish-first-tournament").completion).toBe("auto");
+    await app.close(); database.close();
+  });
+
   it("跳过永久视为已完成；已完成步骤不可重复跳过，未存档玩家只读引导可用但领取奖励 409", async () => {
     const { app, database } = await createTestApp();
     const token = await registerPlayer(app, "onboarding-skip@example.test");
@@ -131,7 +161,7 @@ describe("I36B 新手引导与首次体验服务端", () => {
     // 未创建存档：只读引导可用（第一步为「创建存档」，下一步即 create-archive），步骤可跳过（老玩家补完路径），但领取奖励要求存档。
     const overview = await app.inject({ method: "GET", url: "/v1/onboarding", headers: { authorization: token } });
     expect(overview.statusCode).toBe(200);
-    expect(overview.json().data.onboarding.steps).toHaveLength(7);
+    expect(overview.json().data.onboarding.steps).toHaveLength(9);
     expect(overview.json().data.onboarding.completedCount).toBe(0);
     expect(overview.json().data.onboarding.currentStepId).toBe("create-archive");
     const claimNoArchive = await app.inject({ method: "POST", url: "/v1/onboarding/reward/claim", headers: { authorization: token, "idempotency-key": "onb-reward-noarchive" }, payload: {} });
@@ -163,8 +193,8 @@ describe("I36B 新手引导与首次体验服务端", () => {
     const userId = (database.prepare("SELECT id FROM users WHERE email = ?").get("onboarding-reward@example.test") as { id: string }).id;
     await createArchive(app, token, "onboarding-archive-0003");
 
-    // 直接完成全部七步（创建存档 profile 走 accounts 快照，开包/NPC 走事实，view 走访问事件，
-    // 领取资金/收藏 profile 走状态快照，报名用跳过补全）。
+    // 直接完成全部九步（创建存档/领取资金走 profile，开包/NPC 走事实，价格/收藏走访问事件，
+    // 组卡、报名与赛果用跳过补全）。
     settleFact(database, { type: "pack.opened", aggregateType: "pack_opening", aggregateId: "onb-op-0002", payload: { userId, packId: "p", packRuleVersion: "pack/v1", spent: { amount: 100, currency: "GAME_CREDIT" }, received: [{ skuId: "s", quantity: 1 }] }, occurredAt: "2026-08-05T03:00:00.000Z" });
     settleFact(database, { type: "npc.trade.settled", aggregateType: "npc_trade", aggregateId: "onb-trade-0002", payload: { tradeId: "onb-trade-0002", userId, skuId: "s", side: "buy", quantity: 1, unitPrice: { amount: 10, currency: "GAME_CREDIT" }, total: { amount: 10, currency: "GAME_CREDIT" }, quoteVersion: "market/v1" }, occurredAt: "2026-08-05T04:00:00.000Z" });
     database.prepare("INSERT INTO daily_rollover_runs (id, natural_date, timezone, work_funding_amount, work_funding_rule_version, opened_at) VALUES (?, '2026-08-05', 'Asia/Shanghai', 1000, 'daily-work-funds/v1', '2026-08-05T00:00:00.000Z')").run(`rollover-${Math.random().toString(36).slice(2)}`);
@@ -175,11 +205,14 @@ describe("I36B 新手引导与首次体验服务端", () => {
     const skuId = seedCatalog(database);
     database.prepare("INSERT INTO inventory_holdings (id, user_id, sku_id, quantity, available_quantity, order_locked_quantity, tournament_locked_quantity, average_cost_amount, market_value_amount, updated_at) VALUES (?, ?, ?, 1, 1, 0, 0, 100, 100, ?)").run(`ih-${Math.random().toString(36).slice(2)}`, userId, skuId, "2026-08-05T00:00:00.000Z");
     await app.inject({ method: "POST", url: "/v1/onboarding/steps/view-price-history/view", headers: { authorization: token, "idempotency-key": "onb-reward-view-0001" }, payload: { path: "/market/history" } });
+    await app.inject({ method: "POST", url: "/v1/onboarding/steps/unlock-collection-album/view", headers: { authorization: token, "idempotency-key": "onb-reward-album-0001" }, payload: { path: "/collection/album" } });
+    await app.inject({ method: "POST", url: "/v1/onboarding/steps/create-first-deck/skip", headers: { authorization: token, "idempotency-key": "onb-reward-skip-deck-0001" }, payload: {} });
     await app.inject({ method: "POST", url: "/v1/onboarding/steps/first-tournament-registration/skip", headers: { authorization: token, "idempotency-key": "onb-reward-skip-0001" }, payload: {} });
+    await app.inject({ method: "POST", url: "/v1/onboarding/steps/finish-first-tournament/skip", headers: { authorization: token, "idempotency-key": "onb-reward-skip-result-0001" }, payload: {} });
 
     const ready = await app.inject({ method: "GET", url: "/v1/onboarding", headers: { authorization: token } });
     const readyData = ready.json().data.onboarding;
-    expect(readyData.completedCount).toBe(7);
+    expect(readyData.completedCount).toBe(9);
     expect(readyData.allCompleted).toBe(true);
     expect(readyData.currentStepId).toBe(null);
     expect(readyData.reward.status).toBe("available");
@@ -225,7 +258,10 @@ describe("I36B 新手引导与首次体验服务端", () => {
     const skuId = seedCatalog(database);
     database.prepare("INSERT INTO inventory_holdings (id, user_id, sku_id, quantity, available_quantity, order_locked_quantity, tournament_locked_quantity, average_cost_amount, market_value_amount, updated_at) VALUES (?, ?, ?, 1, 1, 0, 0, 100, 100, ?)").run(`ih-${Math.random().toString(36).slice(2)}`, userId, skuId, "2026-08-05T00:00:00.000Z");
     await app.inject({ method: "POST", url: "/v1/onboarding/steps/view-price-history/view", headers: { authorization: token, "idempotency-key": "onb-dash-view-0001" }, payload: { path: "/market/history" } });
+    await app.inject({ method: "POST", url: "/v1/onboarding/steps/unlock-collection-album/view", headers: { authorization: token, "idempotency-key": "onb-dash-album-0001" }, payload: { path: "/collection/album" } });
+    await app.inject({ method: "POST", url: "/v1/onboarding/steps/create-first-deck/skip", headers: { authorization: token, "idempotency-key": "onb-dash-skip-deck-0001" }, payload: {} });
     await app.inject({ method: "POST", url: "/v1/onboarding/steps/first-tournament-registration/skip", headers: { authorization: token, "idempotency-key": "onb-dash-skip-0001" }, payload: {} });
+    await app.inject({ method: "POST", url: "/v1/onboarding/steps/finish-first-tournament/skip", headers: { authorization: token, "idempotency-key": "onb-dash-skip-result-0001" }, payload: {} });
     await app.inject({ method: "POST", url: "/v1/onboarding/reward/claim", headers: { authorization: token, "idempotency-key": "onb-dash-claim-0001" }, payload: {} });
 
     const after = await app.inject({ method: "GET", url: "/v1/dashboard", headers: { authorization: token } });

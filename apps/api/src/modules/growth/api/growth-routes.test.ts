@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { openSqliteDatabase } from "@mtg-market/database";
 import { createApiApp } from "../../../app.js";
 import { loadApiConfig } from "../../../config/environment.js";
@@ -9,7 +9,21 @@ import { GrowthService } from "../application/growth-service.js";
 import { weekPeriodKey } from "../domain/period.js";
 
 const directories: string[] = [];
-afterEach(() => directories.splice(0).forEach((directory) => rmSync(directory, { recursive: true, force: true })));
+afterEach(() => {
+  vi.useRealTimers();
+  directories.splice(0).forEach((directory) => rmSync(directory, { recursive: true, force: true }));
+});
+
+/**
+ * 把系统时钟固定到场景日（2026-08-05，Asia/Shanghai 正午）。任务中心“今日/本周”由
+ * overview 读系统时钟派生（period.ts），而用例中的事实 occurredAt 写死在 2026-08-05，
+ * 若依赖真实日期，跨天运行会因“今日”漂移而误报（如 08-06 运行时实例归零）。
+ */
+function pinSystemTimeToScenarioDay() {
+  // 仅伪造 Date，保留真实定时器：light-my-request/Fastify 依赖真实 setImmediate，全量伪造会挂起 inject。
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-08-05T04:00:00.000Z"));
+}
 
 async function createTestApp() {
   const directory = mkdtempSync(join(tmpdir(), "mtg-growth-"));
@@ -41,6 +55,7 @@ function settleFact(database: ReturnType<typeof openSqliteDatabase>, event: { ty
 
 describe("I35B 每日/每周任务与等级声望", () => {
   it("任务中心空态含全部定义；事实推进计数型任务到 claimable，领取入账且重放幂等", async () => {
+    pinSystemTimeToScenarioDay();
     const { app, database } = await createTestApp();
     const token = await registerPlayer(app, "growth-task@example.test");
     await createArchive(app, token, "growth-archive-0001");
@@ -89,6 +104,7 @@ describe("I35B 每日/每周任务与等级声望", () => {
   });
 
   it("跨自然日周期键重置：昨日进度不累计到今日，每周任务按 ISO 周推进；越权与未达标领取拒绝", async () => {
+    pinSystemTimeToScenarioDay();
     const { app, database } = await createTestApp();
     const token = await registerPlayer(app, "growth-period@example.test");
     await createArchive(app, token, "growth-archive-0002");

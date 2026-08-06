@@ -12,6 +12,7 @@ import { useRecordViewStepMutation } from "../../api/onboarding-api";
 import { PriceStatus } from "../../components/price-status";
 import { type ChartSeries, DualLineChart } from "../../components/market/price-history-chart";
 import { EmptyState, ErrorState, FilterBar, PageSkeleton } from "../../components/ui";
+import { useOnboardingGuide } from "../../providers/onboarding-guide-context";
 import { formatMoney } from "../../utils/money";
 import styles from "./price-history-page.module.css";
 
@@ -95,6 +96,7 @@ function RangeToggle({ range, onSelect }: { range: "7d" | "30d" | "all"; onSelec
 /** I17F 价格历史页只读取服务端按日采样的历史，不在浏览器插值或重算指数。 */
 export function PriceHistoryPage() {
   const router = useRouter();
+  const { targetStepId } = useOnboardingGuide();
   const search = useSearchParams();
   const filters = filtersFromSearch(search);
   const range = rangeFromSearch(search);
@@ -121,26 +123,28 @@ export function PriceHistoryPage() {
 
   const status = priceStatus.data?.data ?? null;
   const isStale = status?.freshness === "stale";
-  // I36F 新手引导「看懂价格」为 view_event 步骤：实际浏览本页时向服务端提交访问意图，
-  // 由服务端记录访问事件并判定完成；重放/重复访问不重复计数，浏览器不得自行判定。
+  // I36F 新手引导「看懂价格」为 view_event 步骤：页面就绪后先保留阅读时间，再由玩家
+  // 明确确认已查看走势。服务端仍记录访问事件并判定完成；浏览器不自行推进进度。
   const recordView = useRecordViewStepMutation();
-  // I36F：浏览意图只投递一次。用 ref 而非 state 作为守卫，是因为 dev 模式 StrictMode
-  // 会在同一次挂载上连续执行 setup→cleanup→setup，state 守卫在第二次 setup 时仍是旧值
-  // 会导致重复投递；ref 在两次 setup 之间同步保留，可保证同一实例只提交一次。
+  const isTutorialPriceStep = targetStepId === "view-price-history";
+  // 同一次教程页面实例只投递一次；普通价格浏览不展示教程确认按钮，也不会写 view_event。
   const viewSubmitted = useRef(false);
-  // 反馈文案用本地状态驱动而不是依赖 mutation.isSuccess：effect 触发的 mutation 在
-  // StrictMode 双次挂载期间其观察者可能被清理，成功态不回流导致成功横幅不出现；
-  // 本地状态在提交意图后立即展示反馈，请求失败时改为错误提示（浏览器仍只提交意图）。
-  const [viewFeedback, setViewFeedback] = useState<"submitted" | "error" | null>(null);
+  const [viewFeedback, setViewFeedback] = useState<"submitting" | "submitted" | "error" | null>(null);
+  const [canConfirmView, setCanConfirmView] = useState(false);
   useEffect(() => {
-    if (viewSubmitted.current) return;
+    if (!isTutorialPriceStep || priceStatus.isPending) return;
+    const timer = window.setTimeout(() => setCanConfirmView(true), 6_000);
+    return () => window.clearTimeout(timer);
+  }, [isTutorialPriceStep, priceStatus.isPending]);
+  const confirmPriceView = () => {
+    if (!isTutorialPriceStep || !canConfirmView || viewSubmitted.current) return;
     viewSubmitted.current = true;
-    setViewFeedback("submitted");
+    setViewFeedback("submitting");
     recordView.mutate({ stepId: "view-price-history", path: "/market/history" }, {
-      onError: () => setViewFeedback("error")
+      onSuccess: () => setViewFeedback("submitted"),
+      onError: () => { viewSubmitted.current = false; setViewFeedback("error"); }
     });
-    // 仅首次进入页面提交一次意图；后续查询/路由变化不重复投递（recordView 引用稳定，无需入依赖）。
-  }, [recordView]);
+  };
 
   if (priceStatus.isPending) return <PageSkeleton label="正在加载价格历史与数据状态" />;
 
@@ -161,11 +165,12 @@ export function PriceHistoryPage() {
     <p className="eyebrow">服务端价格历史投影</p>
     <h1>价格历史与市场曲线</h1>
     <p className="intro">所有历史点均由服务端按 UTC 自然日采样后返回。金色曲线为 Cardmarket EUR 参考价/指数，蓝色曲线为游戏内报价/指数；某日缺失参考价或游戏内报价时该段断线，浏览器不插值、不重算。</p>
-    {viewFeedback === "submitted" ? <p className={styles.muted} role="status">已向服务器记录本次价格历史浏览（新手引导「看懂价格」由服务端判定完成）。</p> : null}
-    {viewFeedback === "error" ? <p className={styles.stale} role="alert">记录价格历史浏览意图未完成，可重新进入本页重试。</p> : null}
+    {isTutorialPriceStep && viewFeedback === "submitting" ? <p className={styles.muted} role="status">正在由服务器记录本次价格历史浏览…</p> : null}
+    {isTutorialPriceStep && viewFeedback === "submitted" ? <p className={styles.muted} role="status">已向服务器记录本次价格历史浏览（新手引导「看懂价格」由服务端判定完成）。</p> : null}
+    {isTutorialPriceStep && viewFeedback === "error" ? <p className={styles.stale} role="alert">记录价格历史浏览意图未完成，可在本页重新确认。</p> : null}
 
     <section id="onboarding-view-price-history" className={styles.chartCard} aria-label="市场指数历史">
-      <div className={styles.summaryHeader}><span>市场指数历史</span><Link href="/market" className="text-button">返回市场报价列表</Link></div>
+      <div id="onboarding-view-price-history-focus" className={styles.summaryHeader}><span>市场指数历史</span><Link href="/market" className="text-button">返回市场报价列表</Link></div>
       <PriceStatus status={status} tradable={false} />
       {isStale ? <p className={styles.stale} role="status">价格同步失败时沿用最近成功快照；这不是实时 Cardmarket 价格。</p> : null}
       <RangeToggle range={range} onSelect={selectRange} />
@@ -178,6 +183,11 @@ export function PriceHistoryPage() {
             <DualLineChart dates={indexSeries.dates} series={indexSeries.series} ariaLabel={indexAria} />
             <IndexHistoryTable points={indexPoints} />
           </>}
+      {isTutorialPriceStep ? <div className="actions">
+        <button id={canConfirmView ? "onboarding-price-history-confirm" : undefined} className="button" type="button" disabled={!canConfirmView || viewFeedback === "submitting" || viewFeedback === "submitted"} onClick={confirmPriceView}>
+          {!canConfirmView ? "请先阅读价格走势（6 秒）" : viewFeedback === "submitting" ? "正在记录…" : viewFeedback === "submitted" ? "已确认查看" : "我已查看价格走势，继续交易"}
+        </button>
+      </div> : null}
     </section>
 
     <section className={styles.chartCard} aria-label="单卡价格历史">

@@ -637,9 +637,35 @@ export interface NpcTradeDto {
   settledAt: string;
 }
 
+/** 新手首笔交易的服务端保底机会。价格仍引用不可变市场报价，仅放宽本次教程的普通 SKU 启停门禁。 */
+export type OnboardingTradeOpportunityDto =
+  | {
+      status: "available";
+      ruleVersion: "onboarding-liquidity/v1";
+      side: "sell";
+      holding: InventoryHoldingDto;
+      preview: NpcSellPreviewDto;
+    }
+  | {
+      status: "available";
+      ruleVersion: "onboarding-liquidity/v1";
+      side: "buy";
+      item: MarketQuoteListItemDto;
+      preview: NpcBuyPreviewDto;
+    }
+  | {
+      status: "completed";
+      ruleVersion: "onboarding-liquidity/v1";
+    }
+  | {
+      status: "unavailable";
+      ruleVersion: "onboarding-liquidity/v1";
+      reason: "prerequisite_incomplete" | "archive_required" | "quote_unavailable" | "trade_limit_reached";
+    };
+
 /** I14F 市场列表的只读投影；价格、可交易资格和禁用原因均由 API 判定。 */
 export interface MarketQuoteListItemDto {
-  sku: Pick<CatalogSkuDto, "id" | "name" | "setCode" | "setName" | "collectorNumber" | "finish" | "rarity" | "imagePath">;
+  sku: Pick<CatalogSkuDto, "id" | "name" | "setCode" | "setName" | "collectorNumber" | "finish" | "rarity" | "imagePath" | "typeLine">;
   quote: QuoteDto | null;
   tradable: boolean;
   tradeDisabledReason: "no_valid_reference_price" | "quote_unavailable" | null;

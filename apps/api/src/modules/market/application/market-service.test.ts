@@ -19,7 +19,7 @@ function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "mtg-market-")); directories.push(directory);
   const database = openSqliteDatabase(join(directory, "test.db"));
   database.prepare("INSERT INTO card_sets (id, code, name, source, created_at) VALUES (?, 'TST', '测试系列', 'scryfall', ?)").run(setId, now);
-  database.prepare("INSERT INTO card_printings (id, set_id, name, collector_number, scryfall_id, rarity, legalities_json, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, '测试卡', '1', ?, 'rare', '{}', 'scryfall', ?, 0, ?, ?)").run(printingId, setId, printingId, printingId, now, now);
+  database.prepare("INSERT INTO card_printings (id, set_id, name, collector_number, scryfall_id, type_line, rarity, legalities_json, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, '测试卡', '1', ?, 'Legendary Creature — Test', 'rare', '{}', 'scryfall', ?, 0, ?, ?)").run(printingId, setId, printingId, printingId, now, now);
   database.prepare("INSERT INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, 'nonfoil', 1, 'scryfall', ?, 0, ?, ?)").run(skuId, printingId, printingId, now, now);
   database.prepare("INSERT INTO price_sync_runs (id, source, source_version, prices_uri, mapping_uri, prices_checksum_sha256, mapping_checksum_sha256, status, checksum_verification, started_at, completed_at) VALUES (?, 'mtgjson-cardmarket', 'fixture', 'private', 'private', ?, ?, 'succeeded', 'verified', ?, ?)").run(runId, "a".repeat(64), "b".repeat(64), now, now);
   database.prepare("INSERT INTO price_sync_state (singleton, latest_successful_run_id, updated_at) VALUES (1, ?, ?)").run(runId, now);
@@ -176,6 +176,19 @@ describe("I18 卡牌预览", () => {
     const bySku = new Map(items.map((item) => [item.sku.id, item.sku.imagePath]));
     expect(bySku.get(skuId)).toBe("/v1/catalog/images/30000000-0000-4000-8000-000000000001.jpg");
     expect(bySku.get(uncachedSku)).toBe(null);
+    database.close();
+  });
+
+  it("组卡采购筛选只返回传奇生物，并携带服务端类别资料", () => {
+    const database = fixture();
+    const ordinaryPrinting = "20000000-0000-4000-8000-000000000003";
+    const ordinarySku = "30000000-0000-4000-8000-000000000003";
+    database.prepare("INSERT INTO card_printings (id, set_id, name, collector_number, scryfall_id, type_line, rarity, legalities_json, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, '普通生物', '3', ?, 'Creature — Test', 'common', '{}', 'scryfall', ?, 0, ?, ?)").run(ordinaryPrinting, setId, ordinaryPrinting, ordinaryPrinting, now, now);
+    database.prepare("INSERT INTO card_skus (id, printing_id, finish, tradable, source, source_reference, is_manual_exception, created_at, updated_at) VALUES (?, ?, 'nonfoil', 1, 'scryfall', ?, 0, ?, ?)").run(ordinarySku, ordinaryPrinting, ordinaryPrinting, now, now);
+    const market = new MarketService(database);
+    expect(market.list({ cardRole: "commander", tradable: "tradable", sort: "name", direction: "asc", limit: 20 }).items).toEqual([
+      expect.objectContaining({ sku: expect.objectContaining({ id: skuId, typeLine: "Legendary Creature — Test" }) })
+    ]);
     database.close();
   });
 });

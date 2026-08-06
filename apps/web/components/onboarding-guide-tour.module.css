@@ -1,5 +1,6 @@
 /* I36F 新手引导 Tour 自定义步骤操作区（antd Tour actionsRender 完全接管页脚） */
-.actions { align-items: center; display: flex; justify-content: space-between; gap: 10px; margin-top: 14px; }
+.actions { align-items: center; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-top: 14px; }
 .nav { display: flex; gap: 8px; }
-.main { align-items: center; display: flex; gap: 10px; }
-.tour { --ant-tour-font-size: 13px; }
+.main { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; margin-left: auto; }
+/* antd Tour 默认固定 520px；窄屏时显式收进视口，避免气泡横向覆盖目标或把操作按钮挤出屏幕。 */
+.tourPanel { --ant-tour-font-size: 13px; width: 100%; }

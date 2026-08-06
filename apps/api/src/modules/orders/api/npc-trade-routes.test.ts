@@ -168,3 +168,41 @@ describe("I16B NPC 卖出", () => {
     await app.close(); database.close();
   });
 });
+
+describe("I36F 新手首笔交易保底", () => {
+  it("普通交易关闭时仍只为当前教程选择一张持仓并按不可变报价幂等结算", async () => {
+    const { app, database } = await createTestApp();
+    seedTradableQuote(database);
+    const authorization = await player(app);
+    const userId = (database.prepare("SELECT user_id FROM accounts LIMIT 1").get() as { user_id: string }).user_id;
+    const now = "2026-08-06T08:00:00.000Z";
+    database.prepare(
+      `INSERT INTO onboarding_progress (user_id, step_id, step_version, completed_at, skipped_at, updated_at)
+       SELECT ?, id, rule_version, ?, NULL, ? FROM onboarding_steps
+       WHERE id IN ('claim-work-funds', 'open-first-pack', 'view-price-history')`
+    ).run(userId, now, now);
+    database.prepare(
+      "INSERT INTO inventory_holdings (id, user_id, sku_id, quantity, available_quantity, order_locked_quantity, tournament_locked_quantity, average_cost_amount, market_value_amount, market_value_captured_at, updated_at) VALUES (?, ?, ?, 2, 2, 0, 0, 0, NULL, NULL, ?)"
+    ).run("70000000-0000-4000-8000-000000000151", userId, ids.sku, now);
+    // 模拟目录同步后的默认关闭状态：普通玩家不能交易，但当前教程应获得一次服务端保底机会。
+    database.prepare("UPDATE card_skus SET tradable = 0 WHERE id = ?").run(ids.sku);
+
+    const opportunity = await app.inject({ method: "GET", url: "/v1/npc-trades/onboarding-opportunity", headers: { authorization } });
+    expect(opportunity.json()).toMatchObject({ ok: true, data: { opportunity: { status: "available", side: "sell", ruleVersion: "onboarding-liquidity/v1", holding: { skuId: ids.sku, availableQuantity: 2 }, preview: { quoteId: ids.quote, quantity: 1, unitPrice: { amount: 170 }, total: { amount: 170 }, canSell: true } } } });
+    const preview = await app.inject({ method: "GET", url: `/v1/npc-trades/sell/${ids.sku}/preview?quantity=1`, headers: { authorization } });
+    expect(preview.statusCode).toBe(200);
+    // 例外严格限定服务端选中的 1 张；不能借教程绕过启停位批量清仓。
+    expect((await app.inject({ method: "GET", url: `/v1/npc-trades/sell/${ids.sku}/preview?quantity=2`, headers: { authorization } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: `/v1/npc-trades/sell/${ids.sku}/preview?quantity=all`, headers: { authorization } })).statusCode).toBe(404);
+
+    const request = { method: "POST" as const, url: `/v1/npc-trades/sell/${ids.sku}`, headers: { authorization, "idempotency-key": "onboarding-guarantee-sell-0001" }, payload: { quoteId: ids.quote, quoteVersion: "market/v1", quantity: 1, minUnitPrice: 170 } };
+    const [first, replay] = await Promise.all([app.inject(request), app.inject(request)]);
+    expect([first.statusCode, replay.statusCode].sort()).toEqual([200, 201]);
+    expect(database.prepare("SELECT quantity, available_quantity FROM inventory_holdings WHERE user_id = ? AND sku_id = ?").get(userId, ids.sku)).toEqual({ quantity: 1, available_quantity: 1 });
+    expect(database.prepare("SELECT summary_json FROM audit_logs WHERE action = 'npc.trade.settled' ORDER BY occurred_at DESC LIMIT 1").get()).toMatchObject({ summary_json: expect.stringContaining('"onboardingGuarantee":true') });
+    expect((await app.inject({ method: "GET", url: "/v1/npc-trades/onboarding-opportunity", headers: { authorization } })).json()).toMatchObject({ data: { opportunity: { status: "completed" } } });
+    // 教程完成后例外立即收回，同一不可交易 SKU 不再获得普通预览。
+    expect((await app.inject({ method: "GET", url: `/v1/npc-trades/sell/${ids.sku}/preview?quantity=1`, headers: { authorization } })).statusCode).toBe(404);
+    await app.close(); database.close();
+  });
+});

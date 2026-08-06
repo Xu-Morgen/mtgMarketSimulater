@@ -20,7 +20,7 @@ describe("database foundation", () => {
     const database = openSqliteDatabase(join(directory, "test.db"));
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
     expect(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get()).toEqual({
-      count: 39
+      count: 40
     });
     expect(
       database
@@ -143,11 +143,13 @@ describe("database foundation", () => {
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'onboarding_progress'").get()).toEqual({ name: "onboarding_progress" });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'onboarding_reward_grants'").get()).toEqual({ name: "onboarding_reward_grants" });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'onboarding_events'").get()).toEqual({ name: "onboarding_events" });
-    expect(database.prepare("SELECT COUNT(*) AS count FROM onboarding_steps").get()).toEqual({ count: 7 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM onboarding_steps").get()).toEqual({ count: 9 });
     expect(database.prepare("SELECT step_order, href, skippable FROM onboarding_steps WHERE id = 'create-archive'").get()).toEqual({ step_order: 1, href: "/dashboard", skippable: 1 });
     expect(database.prepare("SELECT step_order, href, skippable FROM onboarding_steps WHERE id = 'open-first-pack'").get()).toEqual({ step_order: 3, href: "/packs", skippable: 1 });
-    expect(database.prepare("SELECT COUNT(*) AS count FROM rule_versions WHERE rule_set = 'onboarding'").get()).toEqual({ count: 2 });
-    expect(database.prepare("SELECT version FROM rule_versions WHERE rule_set = 'onboarding' ORDER BY rowid DESC LIMIT 1").get()).toEqual({ version: "onboarding/v2" });
+    expect(database.prepare("SELECT step_order, href, target_path FROM onboarding_steps WHERE id = 'create-first-deck'").get()).toEqual({ step_order: 7, href: "/decks", target_path: null });
+    expect(database.prepare("SELECT step_order, href, target_path FROM onboarding_steps WHERE id = 'finish-first-tournament'").get()).toEqual({ step_order: 9, href: "/tournaments", target_path: "/tournaments/result" });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM rule_versions WHERE rule_set = 'onboarding'").get()).toEqual({ count: 3 });
+    expect(database.prepare("SELECT version FROM rule_versions WHERE rule_set = 'onboarding' ORDER BY rowid DESC LIMIT 1").get()).toEqual({ version: "onboarding/v3" });
     expect(database.prepare("SELECT COUNT(*) AS count FROM rule_versions WHERE rule_set = 'onboarding' AND version = 'onboarding/v1'").get()).toEqual({ count: 1 });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'backup_records'").get()).toEqual({ name: "backup_records" });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'export_records'").get()).toEqual({ name: "export_records" });

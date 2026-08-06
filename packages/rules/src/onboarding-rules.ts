@@ -4,14 +4,14 @@
  * 进度持久化、跳过标记与奖励发放仍由 API 的 application 在短事务内原子完成。
  *
  * 步骤按「首次目标链」排序：创建存档 → 领取工作资金 → 开包 → 看懂价格 →
- * 首笔 NPC 交易 → 收藏见涨 → 首次报名。完成判定分为三类：
+ * 首笔 NPC 交易 → 浏览收藏 → 构筑合法卡组 → 首次报名 → 查看赛果。完成判定分为三类：
  * - `fact`：由已结算事实（pack.opened/npc.trade.settled）的同事务幂等消费者推进，
  *   计数型（goal 为累计目标），重放同一事实不重复计数；
  * - `profile`：由服务端对已结算状态（存档/账本/库存/报名表）快照判定，满足即完成、只升不降；
  * - `view_event`：仅价格历史页要求玩家实际浏览，由浏览器提交意图、服务端记录访问事件
  *   后完成，浏览器不得自行判定。
  */
-export const ONBOARDING_RULE_VERSION = "onboarding/v2" as const;
+export const ONBOARDING_RULE_VERSION = "onboarding/v3" as const;
 
 export type OnboardingStepSource = "fact" | "profile" | "view_event";
 
@@ -91,23 +91,41 @@ export function resolveOnboardingSteps(version: string): OnboardingStepDefinitio
     },
     {
       id: "unlock-collection-album",
-      title: "收藏见涨",
+      title: "查看收藏",
       description: "打开收藏图鉴，查看已收集卡牌与系列完成度",
       href: "/collection/album",
+      targetPath: "/collection/album",
+      skippable: true,
+      source: "view_event"
+    },
+    {
+      id: "create-first-deck",
+      title: "构筑第一套卡组",
+      description: "从库存选择一位合法指挥官，用无限虚拟基本地补足 100 张，请求服务端检查并保存合法 Commander 卡组",
+      href: "/decks",
       targetPath: null,
       skippable: true,
       source: "profile",
-      profileKey: "collection_has_any"
+      profileKey: "legal_deck_saved"
     },
     {
       id: "first-tournament-registration",
       title: "首次报名",
-      description: "构筑合法卡组并报名一场比赛",
+      description: "选择刚保存的合法 Commander 卡组，确认报名费用并报名一场比赛",
       href: "/tournaments",
       targetPath: null,
       skippable: true,
       source: "profile",
       profileKey: "tournament_registered"
+    },
+    {
+      id: "finish-first-tournament",
+      title: "查看比赛结果",
+      description: "等待服务器完成比赛结算，查看排名、胜负、奖励与可公开重放材料",
+      href: "/tournaments",
+      targetPath: "/tournaments/result",
+      skippable: true,
+      source: "view_event"
     }
   ];
 }

@@ -130,9 +130,39 @@ function PlayerHud() {
   </div>;
 }
 
+/**
+ * 玩家专属引导覆盖层。组件只由 PlayerShell 挂载，因此这里读取 OnboardingGuideContext；
+ * AdminShell 不实例化该组件，管理员导航不会再触碰玩家布局才提供的上下文。
+ */
+function PlayerOnboardingControls({ confirmOpen, onCancel }: Readonly<{ confirmOpen: boolean; onCancel: () => void }>) {
+  const router = useRouter();
+  const { retarget } = useOnboardingGuide();
+  const onboarding = useOnboardingQuery({ enabled: confirmOpen });
+  const startOnboarding = () => {
+    onCancel();
+    const data = onboarding.data?.data.onboarding;
+    if (!data || data.allCompleted) {
+      router.push("/onboarding");
+      return;
+    }
+    const step = data.currentStepId ?? data.steps[0]?.id ?? null;
+    retarget(step);
+    if (step) router.push(data.steps.find((item) => item.id === step)?.href ?? "/onboarding");
+  };
+  return <>
+    <OnboardingGuideTour />
+    <ConfirmDialog
+      open={confirmOpen}
+      title="开启新手引导"
+      description="将带你完成首次目标链（创建存档 → 领取工作资金 → 开出第一包 → 看懂价格 → 完成首笔交易 → 收藏见涨 → 首次报名），并高亮每个步骤的对应按钮。是否开启？"
+      onCancel={onCancel}
+      onConfirm={startOnboarding}
+    />
+  </>;
+}
+
 function Shell({ children, admin }: Readonly<{ children: React.ReactNode; admin: boolean }>) {
   const { user } = useSession();
-  const router = useRouter();
   const groups = admin ? adminGroups : playerGroups;
   // 选中态 pathname 只在客户端 effect 中写入：避免基于 pathname 的条件 aria-current 造成
   // 服务端/客户端 hydration 不一致（会导致 React 丢弃并重挂整棵导航树，延迟会话恢复）。
@@ -160,21 +190,7 @@ function Shell({ children, admin }: Readonly<{ children: React.ReactNode; admin:
   };
   // I36F：左侧「新手引导」先弹确认框，确认后启动引导会话并跳到当前未完成步骤所在路由。
   // 引导数据在确认框打开时才按需请求（避免在非引导相关页面上轮询 /v1/onboarding）。
-  const { retarget } = useOnboardingGuide();
   const [confirmOnboarding, setConfirmOnboarding] = useState(false);
-  const onboarding = useOnboardingQuery({ enabled: !admin && confirmOnboarding });
-  const onboardingData = onboarding.data?.data.onboarding;
-  const startOnboarding = () => {
-    setConfirmOnboarding(false);
-    const data = onboardingData;
-    if (!data || data.allCompleted) {
-      router.push("/onboarding");
-      return;
-    }
-    const step = data.currentStepId ?? data.steps[0]?.id ?? null;
-    retarget(step);
-    if (step) router.push(data.steps.find((item) => item.id === step)?.href ?? "/onboarding");
-  };
   return <div className="app-shell">
     <header className="topbar">
       <Link href={admin ? "/admin" : "/dashboard"} className="brand"><GemIcon size={18} />MTG 市场模拟器</Link>
@@ -197,16 +213,7 @@ function Shell({ children, admin }: Readonly<{ children: React.ReactNode; admin:
       </nav>
       <main className="content">{children}</main>
     </div>
-    {!admin ? <OnboardingGuideTour /> : null}
-    {!admin ? (
-      <ConfirmDialog
-        open={confirmOnboarding}
-        title="开启新手引导"
-        description="将带你完成首次目标链（创建存档 → 领取工作资金 → 开出第一包 → 看懂价格 → 完成首笔交易 → 收藏见涨 → 首次报名），并高亮每个步骤的对应按钮。是否开启？"
-        onCancel={() => setConfirmOnboarding(false)}
-        onConfirm={startOnboarding}
-      />
-    ) : null}
+    {!admin ? <PlayerOnboardingControls confirmOpen={confirmOnboarding} onCancel={() => setConfirmOnboarding(false)} /> : null}
   </div>;
 }
 

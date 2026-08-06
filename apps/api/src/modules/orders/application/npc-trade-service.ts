@@ -11,6 +11,7 @@ import {
   type DuplicatesSellSkipReason,
   type InventoryHoldingDto,
   type NpcBuyPreviewDto,
+  type OnboardingTradeOpportunityDto,
   type NpcSellPreviewDto,
   type NpcTradeDto
 } from "@mtg-market/contracts";
@@ -69,9 +70,52 @@ export class NpcTradeService {
     this.onboarding = new OnboardingService(database);
   }
 
+  /**
+   * 新手首笔交易保底：优先收购玩家开包后持有的一张可用卡；若持仓暂时没有报价，则提供
+   * 一张余额足够购买的最低价卡。金额仍来自不可变 market_quotes，只有当前引导步骤允许
+   * 绕过普通 SKU 启停位，成交仍走标准账本/库存/事实/审计/幂等事务。
+   */
+  onboardingOpportunity(userId: string, now = new Date()): OnboardingTradeOpportunityDto {
+    const ruleVersion = "onboarding-liquidity/v1" as const;
+    const onboarding = this.onboarding.overview(userId, now);
+    const step = onboarding.steps.find((item) => item.id === "complete-first-npc-trade");
+    if (step && step.completion !== null) return { status: "completed", ruleVersion };
+    if (onboarding.currentStepId !== "complete-first-npc-trade") return { status: "unavailable", ruleVersion, reason: "prerequisite_incomplete" };
+    if (!this.users.balance(userId)) return { status: "unavailable", ruleVersion, reason: "archive_required" };
+    const nowIso = now.toISOString();
+    const holdings = this.inventory.list(userId, { locked: "available", sort: "updatedAt", direction: "desc", limit: 100 }).items;
+    let limited = false;
+    for (const holding of holdings) {
+      if (holding.availableQuantity < 1) continue;
+      const quote = this.market.npcSettlementQuote(holding.skuId, "sell");
+      if (!quote || quote.validUntil <= nowIso) continue;
+      const preview = this.sellPreviewForQuote(userId, 1, quote, nowIso);
+      if (preview.canSell) return { status: "available", ruleVersion, side: "sell", holding, preview };
+      if (preview.unavailableReason === "trade_limit_reached") limited = true;
+    }
+    const candidates = this.market.list({ tradable: "any", sort: "marketPrice", direction: "asc", limit: 100 }).items;
+    for (const item of candidates) {
+      if (!item.quote) continue;
+      const quote = this.market.npcSettlementQuote(item.sku.id, "buy");
+      if (!quote || quote.validUntil <= nowIso) continue;
+      const preview = this.previewForQuote(userId, 1, quote, nowIso);
+      if (preview.canPurchase) return { status: "available", ruleVersion, side: "buy", item, preview };
+      if (preview.unavailableReason === "trade_limit_reached") limited = true;
+    }
+    return { status: "unavailable", ruleVersion, reason: limited ? "trade_limit_reached" : "quote_unavailable" };
+  }
+
+  private matchesOnboardingOpportunity(userId: string, side: "buy" | "sell", skuId: string, quoteId: string, now: Date): boolean {
+    const opportunity = this.onboardingOpportunity(userId, now);
+    return opportunity.status === "available"
+      && opportunity.side === side
+      && opportunity.preview.skuId === skuId
+      && opportunity.preview.quoteId === quoteId;
+  }
+
   buyPreview(userId: string, skuId: string, quantity: number, now = new Date()): NpcBuyPreviewResult {
     const quote = this.market.npcSettlementQuote(skuId, "buy");
-    if (!quote || !quote.tradable) return "quote-unavailable";
+    if (!quote || (!quote.tradable && (quantity !== 1 || !this.matchesOnboardingOpportunity(userId, "buy", skuId, quote.quoteId, now)))) return "quote-unavailable";
     const nowIso = now.toISOString();
     if (quote.validUntil <= nowIso) return "quote-stale";
     return this.previewForQuote(userId, quantity, quote, nowIso);
@@ -103,7 +147,10 @@ export class NpcTradeService {
       }
 
       const quote = this.market.npcSettlementQuote(input.skuId, "buy", input.quoteId);
-      if (!quote || !quote.tradable) return this.completeFailure(input, now, 404, "PRICE_UNAVAILABLE", "该 SKU 暂无可结算报价");
+      const onboardingGuarantee = input.quantity === 1 && quote
+        ? this.matchesOnboardingOpportunity(input.userId, "buy", input.skuId, input.quoteId, new Date(now))
+        : false;
+      if (!quote || (!quote.tradable && !onboardingGuarantee)) return this.completeFailure(input, now, 404, "PRICE_UNAVAILABLE", "该 SKU 暂无可结算报价");
       if (quote.quoteVersion !== input.quoteVersion || quote.validUntil <= now)
         return this.completeFailure(input, now, 409, "VERSION_STALE", "报价已过期或版本已更新，请重新预览");
       if (quote.unitPriceAmount > input.maxUnitPrice)
@@ -143,7 +190,7 @@ export class NpcTradeService {
       this.users.writeEconomicAudit(input.userId, "npc.trade.settled", "npc_trade", tradeId, input.requestId, {
         skuId: input.skuId, side: "buy", quantity: input.quantity, quoteId: quote.quoteId,
         quoteVersion: quote.quoteVersion, unitPriceAmount: quote.unitPriceAmount,
-        unitFeeAmount: quote.unitFeeAmount, totalAmount: preview.total.amount
+        unitFeeAmount: quote.unitFeeAmount, totalAmount: preview.total.amount, onboardingGuarantee
       }, now);
       const response = success(input.requestId, { trade, balance, holding });
       this.completeIdempotency(input.userId, input.idempotencyKey, 201, response, now);
@@ -154,7 +201,7 @@ export class NpcTradeService {
   /** I16B 的 NPC 卖出预览；`quantity=all` 只解析此刻可用库存。 */
   sellPreview(userId: string, skuId: string, quantity: number | "all", now = new Date()): NpcSellPreviewResult {
     const quote = this.market.npcSettlementQuote(skuId, "sell");
-    if (!quote || !quote.tradable) return "quote-unavailable";
+    if (!quote || (!quote.tradable && (quantity !== 1 || !this.matchesOnboardingOpportunity(userId, "sell", skuId, quote.quoteId, now)))) return "quote-unavailable";
     const nowIso = now.toISOString();
     if (quote.validUntil <= nowIso) return "quote-stale";
     const resolvedQuantity = quantity === "all" ? (this.inventory.holding(userId, skuId)?.availableQuantity ?? 0) : quantity;
@@ -187,7 +234,10 @@ export class NpcTradeService {
       }
 
       const quote = this.market.npcSettlementQuote(input.skuId, "sell", input.quoteId);
-      if (!quote || !quote.tradable) return this.completeSellFailure(input, now, 404, "PRICE_UNAVAILABLE", "该 SKU 暂无可结算报价");
+      const onboardingGuarantee = input.quantity === 1 && quote
+        ? this.matchesOnboardingOpportunity(input.userId, "sell", input.skuId, input.quoteId, new Date(now))
+        : false;
+      if (!quote || (!quote.tradable && !onboardingGuarantee)) return this.completeSellFailure(input, now, 404, "PRICE_UNAVAILABLE", "该 SKU 暂无可结算报价");
       if (quote.quoteVersion !== input.quoteVersion || quote.validUntil <= now)
         return this.completeSellFailure(input, now, 409, "VERSION_STALE", "报价已过期或版本已更新，请重新预览");
       if (quote.unitPriceAmount < input.minUnitPrice)
@@ -225,7 +275,7 @@ export class NpcTradeService {
       this.users.writeEconomicAudit(input.userId, "npc.trade.settled", "npc_trade", tradeId, input.requestId, {
         skuId: input.skuId, side: "sell", quantity: input.quantity, quoteId: quote.quoteId,
         quoteVersion: quote.quoteVersion, unitPriceAmount: quote.unitPriceAmount,
-        unitFeeAmount: quote.unitFeeAmount, totalAmount: preview.total.amount
+        unitFeeAmount: quote.unitFeeAmount, totalAmount: preview.total.amount, onboardingGuarantee
       }, now);
       const response = success(input.requestId, { trade, balance, holding });
       this.completeSellIdempotency(input.userId, input.idempotencyKey, 201, response, now);

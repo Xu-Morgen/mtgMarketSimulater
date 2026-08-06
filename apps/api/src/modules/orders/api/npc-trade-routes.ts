@@ -20,6 +20,9 @@ const sellBatchBody = z.object({ skuIds: z.array(z.string().uuid()).min(1).max(1
 /** NPC 买入 HTTP 边界：只验证意图与幂等键，金额、费用、额度和结算均由 application 决定。 */
 export async function registerNpcTradeRoutes(app: FastifyInstance, database: Database.Database, config: Pick<ApiConfig, "APP_TIMEZONE">): Promise<void> {
   const trades = new NpcTradeService(database, config.APP_TIMEZONE);
+  app.get("/v1/npc-trades/onboarding-opportunity", { preHandler: requireRole("player") }, async (request) =>
+    success(request.requestId, { opportunity: trades.onboardingOpportunity(request.actor!.id) })
+  );
   app.get("/v1/npc-trades/buy/:skuId/preview", { preHandler: requireRole("player") }, async (request, reply) => {
     const preview = trades.buyPreview(request.actor!.id, skuParams.parse(request.params).skuId, previewQuery.parse(request.query).quantity);
     if (preview === "quote-unavailable") return reply.code(404).send(failure(request.requestId, "PRICE_UNAVAILABLE", "该 SKU 暂无可结算报价"));

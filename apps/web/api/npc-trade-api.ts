@@ -1,6 +1,6 @@
 "use client";
 
-import type { AccountBalanceDto, BatchNpcSellResultDto, DuplicatesSellResultDto, InventoryHoldingDto, NpcBuyPreviewDto, NpcSellPreviewDto, NpcTradeDto } from "@mtg-market/contracts";
+import type { AccountBalanceDto, BatchNpcSellResultDto, DuplicatesSellResultDto, InventoryHoldingDto, NpcBuyPreviewDto, NpcSellPreviewDto, NpcTradeDto, OnboardingTradeOpportunityDto } from "@mtg-market/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { apiRequest } from "./client";
@@ -14,6 +14,8 @@ type SellIntent = { key: string; skuId: string; quoteId: string; quoteVersion: s
 
 /** NPC 买入价格、费用和额度始终由服务端预览返回；浏览器只提交该预览的标识与玩家确认的单位限价。 */
 export const npcTradeApi = {
+  onboardingOpportunity: (accessToken: string) =>
+    apiRequest<{ opportunity: OnboardingTradeOpportunityDto }>("/v1/npc-trades/onboarding-opportunity", { accessToken }),
   buyPreview: (accessToken: string, skuId: string, quantity: number) =>
     apiRequest<{ preview: NpcBuyPreviewDto }>(`/v1/npc-trades/buy/${skuId}/preview?quantity=${quantity}`, { accessToken }),
   buy: (accessToken: string, input: Omit<BuyIntent, "key">, idempotencyKey: string) =>
@@ -43,6 +45,18 @@ export const npcTradeApi = {
       }
     })
 };
+
+/** 服务端为当前新手步骤选择的唯一保底机会；前端不选择 SKU、不计算价格，也不放宽交易资格。 */
+export function useOnboardingTradeOpportunityQuery() {
+  const { accessToken, user } = useSession();
+  return useQuery({
+    queryKey: ["npc-trades", "onboarding-opportunity", user?.id ?? "anonymous"],
+    queryFn: () => npcTradeApi.onboardingOpportunity(accessToken!),
+    enabled: Boolean(accessToken && user),
+    refetchOnMount: "always",
+    retry: false
+  });
+}
 
 /** 每次提交数量后都强制读取当前服务端预览，不能复用余额、额度或报价版本的旧缓存。 */
 export function useNpcBuyPreviewQuery(skuId: string, quantity: number, enabled: boolean) {
@@ -81,12 +95,14 @@ export function useNpcBuyMutation() {
         void queryClient.invalidateQueries({ queryKey: ["archive", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["ledger", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["inventory", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["inventory", "available-for-decks", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["market", "quotes", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["market", "quote", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["market", "index", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["prices", "public-status", user.id] });
         // I36F：NPC 成交完成「完成首笔交易」引导步骤（npc.trade.settled 事实推进），引导 Tour 需刷新。
         void queryClient.invalidateQueries({ queryKey: ["onboarding", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["npc-trades", "onboarding-opportunity", user.id] });
       }
       intent.current = null;
     }
@@ -134,12 +150,14 @@ export function useNpcSellMutation() {
         void queryClient.invalidateQueries({ queryKey: ["archive", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["ledger", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["inventory", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["inventory", "available-for-decks", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["market", "quotes", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["market", "quote", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["market", "index", user.id] });
         void queryClient.invalidateQueries({ queryKey: ["prices", "public-status", user.id] });
         // I36F：NPC 成交完成「完成首笔交易」引导步骤（npc.trade.settled 事实推进），引导 Tour 需刷新。
         void queryClient.invalidateQueries({ queryKey: ["onboarding", user.id] });
+        void queryClient.invalidateQueries({ queryKey: ["npc-trades", "onboarding-opportunity", user.id] });
       }
       intent.current = null;
     }

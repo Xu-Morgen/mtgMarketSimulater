@@ -10,6 +10,7 @@ const listQuerySchema = z.object({
   setCode: z.string().trim().min(1).max(20).transform((value) => value.toUpperCase()).optional(),
   rarity: z.string().trim().min(1).max(40).optional(),
   finish: z.enum(["nonfoil", "foil", "etched"]).optional(),
+  cardRole: z.enum(["commander"]).optional(),
   tradable: z.enum(["any", "tradable", "untradable"]).default("any"),
   sort: z.enum(["name", "marketPrice", "referencePrice"]).default("name"),
   direction: z.enum(["asc", "desc"]).default("asc"),

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { openSqliteDatabase } from "@mtg-market/database";
-import { ensureDailyPriceSyncScheduled, ensureDailyRolloverScheduled, ensureDailyBackupScheduled, TaskRegistry, TaskWorker } from "./application/task-service.js";
+import { ensureDailyPriceSyncScheduled, ensureDailyRolloverScheduled, ensureDailyBackupScheduled, ensureMarketQuoteRefreshScheduled, TaskRegistry, TaskWorker } from "./application/task-service.js";
 import { SqliteJobRepository } from "./infrastructure/sqlite-job-repository.js";
 import { startTaskRunner } from "../../task-runner.js";
 
@@ -98,6 +98,37 @@ describe("I17B 每日价格同步调度", () => {
     ensureDailyPriceSyncScheduled(database, new Date("2026-07-29T00:00:00.000Z")); // 停机 3 天后
     const jobs = database.prepare("SELECT unique_key FROM jobs WHERE type = 'prices.sync' ORDER BY unique_key").all() as Array<{ unique_key: string }>;
     expect(jobs).toEqual([{ unique_key: "prices.sync:daily:2026-07-26" }, { unique_key: "prices.sync:daily:2026-07-29" }]);
+    database.close();
+  });
+});
+
+describe("市场报价滚动刷新调度", () => {
+  it("同一 10 分钟桶只投递一次，不同桶复用当日报价投影并持续推进执行时间", () => {
+    const { database } = fixture();
+    ensureMarketQuoteRefreshScheduled(database, new Date("2026-08-06T08:00:01.000Z"));
+    ensureMarketQuoteRefreshScheduled(database, new Date("2026-08-06T08:09:59.000Z"));
+    ensureMarketQuoteRefreshScheduled(database, new Date("2026-08-06T08:10:00.000Z"));
+    const jobs = database.prepare(
+      "SELECT unique_key, payload_json, run_after FROM jobs WHERE type = 'market.reprice' ORDER BY run_after ASC"
+    ).all() as Array<{ unique_key: string; payload_json: string; run_after: string }>;
+    expect(jobs).toEqual([
+      { unique_key: "market-refresh:2026-08-06T08:00:00.000Z", payload_json: JSON.stringify({ triggerKey: "market-refresh:2026-08-06" }), run_after: "2026-08-06T08:00:01.000Z" },
+      { unique_key: "market-refresh:2026-08-06T08:10:00.000Z", payload_json: JSON.stringify({ triggerKey: "market-refresh:2026-08-06" }), run_after: "2026-08-06T08:10:00.000Z" }
+    ]);
+    database.close();
+  });
+
+  it("UTC 跨日后切换报价投影键，避免覆盖上一自然日历史", () => {
+    const { database } = fixture();
+    ensureMarketQuoteRefreshScheduled(database, new Date("2026-08-06T23:59:59.000Z"));
+    ensureMarketQuoteRefreshScheduled(database, new Date("2026-08-07T00:00:00.000Z"));
+    const payloads = database.prepare(
+      "SELECT payload_json FROM jobs WHERE type = 'market.reprice' ORDER BY run_after ASC"
+    ).all() as Array<{ payload_json: string }>;
+    expect(payloads.map((row) => JSON.parse(row.payload_json))).toEqual([
+      { triggerKey: "market-refresh:2026-08-06" },
+      { triggerKey: "market-refresh:2026-08-07" }
+    ]);
     database.close();
   });
 });
