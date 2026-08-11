@@ -39,6 +39,7 @@ export function DecksPage() {
 
 type ManaColor = "W" | "U" | "B" | "R" | "G";
 const colorLabels: Record<ManaColor, string> = { W: "白", U: "蓝", B: "黑", R: "红", G: "绿" };
+const basicColorByLand: Record<VirtualBasicLandDto, ManaColor> = { plains: "W", island: "U", swamp: "B", mountain: "R", forest: "G" };
 const typeFilters = ["creature", "artifact", "enchantment", "instant", "sorcery", "planeswalker", "land", "battle"] as const;
 function isLegendaryCreature(typeLine: string): boolean { return /\blegendary\b/i.test(typeLine) && /\bcreature\b/i.test(typeLine); }
 
@@ -85,7 +86,7 @@ export function DeckEditorPage({ deckId }: { deckId?: string }) {
   const router = useRouter(); const stored = useDeckDraftStore();
   const deck = useDeckQuery(deckId); const inventory = useAvailableInventoryQuery();
   const validation = useDeckValidationMutation(); const save = useDeckSaveMutation(deckId);
-  const [legality, setLegality] = useState<DeckLegalityDto | null>(null); const [checkedRevision, setCheckedRevision] = useState<number | null>(null); const [saveMessage, setSaveMessage] = useState<string | null>(null); const [nameRequired, setNameRequired] = useState(false);
+  const [legality, setLegality] = useState<DeckLegalityDto | null>(null); const [checkedRevision, setCheckedRevision] = useState<number | null>(null); const [saveMessage, setSaveMessage] = useState<string | null>(null); const [nameRequired, setNameRequired] = useState(false); const [nameFocused, setNameFocused] = useState(false);
   useEffect(() => { if (!deckId && stored.sourceDeckId !== "new") stored.initializeNew(); }, [deckId, stored]);
   useEffect(() => { if (deckId && deck.data?.data && stored.sourceDeckId !== deckId) { stored.initializeFromDeck(deck.data.data); setLegality(deck.data.data.legality); setCheckedRevision(stored.revision + 1); } }, [deckId, deck.data?.data, stored]);
   useEffect(() => {
@@ -93,10 +94,21 @@ export function DeckEditorPage({ deckId }: { deckId?: string }) {
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
     window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn);
   }, [stored.dirty]);
-  if (deckId && deck.isPending) return <PageSkeleton label="正在加载卡组草稿" />;
-  if (deckId && deck.isError) return <main className="page"><ErrorState title="卡组加载失败" onRetry={() => void deck.refetch()} /></main>;
-  if (inventory.isPending) return <PageSkeleton label="正在读取可用库存" />;
-  if (inventory.isError) return <main className="page"><ErrorState title="可用库存加载失败" onRetry={() => void inventory.refetch()} /></main>;
+  useEffect(() => {
+    const updateNameFocus = (event: FocusEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLInputElement && target.getAttribute("aria-label") === "卡组名称") {
+        setNameFocused(event.type === "focusin");
+      }
+    };
+    // 使用原生 focusin/focusout 监听实际失焦；名称 onChange 只更新草稿，不推进 Tour 阶段。
+    document.addEventListener("focusin", updateNameFocus);
+    document.addEventListener("focusout", updateNameFocus);
+    return () => {
+      document.removeEventListener("focusin", updateNameFocus);
+      document.removeEventListener("focusout", updateNameFocus);
+    };
+  }, []);
   const input = toDeckSaveInput({ name: stored.name, banlistVersion: stored.banlistVersion, cards: stored.cards });
   const check = () => validation.mutate(input, { onSuccess: ({ data }) => { setLegality(data); setCheckedRevision(stored.revision); }, onError: () => { setLegality(null); setCheckedRevision(null); } });
   const persist = () => {
@@ -107,5 +119,26 @@ export function DeckEditorPage({ deckId }: { deckId?: string }) {
   const stale = checkedRevision !== null && checkedRevision !== stored.revision;
   const basicQuantity = (basic: VirtualBasicLandDto) => stored.cards.find((card) => card.zone === "virtual_basic" && card.virtualBasic === basic)?.quantity ?? 0;
   const selected = stored.cards.filter((card) => card.zone !== "virtual_basic"); const selectedQuantity = selected.reduce((sum, card) => sum + card.quantity, 0); const totalCardQuantity = stored.cards.reduce((sum, card) => sum + card.quantity, 0);
-  return <main className="page"><p className="eyebrow">Commander · 未提交草稿</p><div className={styles.deckCardHeader}><div><h1>{deckId ? "编辑卡组" : "新建卡组"}</h1><p className="intro">带 * 的浏览器状态尚未保存。离开或刷新含未保存变更时，浏览器会提示确认。</p></div><Link className="button secondary" href="/decks" onClick={(event) => { if (stored.dirty && !window.confirm("当前卡组草稿尚未保存，确定离开吗？")) event.preventDefault(); }}>返回卡组列表</Link></div><div className={styles.editor}><section className={styles.grid}><section className={styles.panel}><label className={styles.nameField}>卡组名称<input aria-label="卡组名称" value={stored.name} aria-invalid={nameRequired} onChange={(event) => { stored.setName(event.target.value); if (event.target.value.trim()) setNameRequired(false); }} maxLength={100} /></label>{nameRequired ? <p className={styles.nameError} role="alert">卡组名称必须填写。</p> : null}<p className={styles.muted}>格式固定为 commander-100/v1；禁牌表版本将随保存结果由服务器返回。</p></section><InventoryPicker holdings={inventory.data} /><section className={styles.panel}><h2 className="panel-title">已选卡牌 {selectedQuantity} 张 · 卡组总数 {totalCardQuantity} 张 {stored.dirty ? <span aria-label="存在未保存草稿">*</span> : null}</h2>{selected.length === 0 ? <p className={styles.muted}>尚未选择实体卡牌。可先从库存设定指挥官、主牌或 Companion。</p> : <div className={styles.selectedList}>{selected.map((card) => <div key={cardKey(card)} className={styles.selectedRow}><div><strong>{card.name}</strong><span className={styles.zone}>{zones[card.zone]}</span></div><div className={styles.actions}><label>数量<input className={styles.quantity} aria-label={`${card.name} 数量`} type="number" value={card.quantity} onChange={(event) => stored.setQuantity(cardKey(card), Number(event.target.value))} /></label><button className="button secondary" type="button" onClick={() => stored.removeCard(cardKey(card))}>移除</button></div></div>)}</div>}</section><section className={styles.panel}><h2 className="panel-title">无限虚拟基本地</h2><p className={styles.muted}>虚拟基本地不引用 SKU，不创建持仓、市场资产或任何锁定。</p><div className={styles.basicGrid}>{basics.map((basic) => <label key={basic.value}>{basic.label}<input aria-label={`${basic.label} 数量`} type="number" min="0" value={basicQuantity(basic.value)} onChange={(event) => stored.setVirtualBasicQuantity(basic.value, Number(event.target.value))} /></label>)}</div></section></section><aside className={styles.summaryColumn}><section className={styles.panel}><h2 className="panel-title">服务端合法性</h2><Legality legality={legality} stale={stale} />{validation.isError ? <Alert type="error" showIcon message={errorMessage(validation.error)} /> : null}<div className={styles.actions}><Button id={totalCardQuantity === 100 ? "onboarding-deck-check" : undefined} onClick={check} loading={validation.isPending}>请求服务端检查</Button><Button id={legality?.valid && !stale ? "onboarding-deck-save" : undefined} type="primary" onClick={persist} loading={save.isPending}>保存草稿</Button></div>{save.isError ? <Alert type="error" showIcon message={errorMessage(save.error)} /> : null}{saveMessage ? <p className={`${styles.notice} ${styles.success}`} role="status">{saveMessage}</p> : null}</section><section className={styles.panel}><h2 className="panel-title">报名评分与锁定</h2>{deck.data?.data.strengthSnapshot ? <p className={styles.muted}>报名评分来源：{deck.data.data.strengthSnapshot.source} · {deck.data.data.strengthSnapshot.sourceVersion} · {deck.data.data.strengthSnapshot.availability}</p> : <p className={styles.muted}>当前草稿尚无报名评分；评分只在未来报名流程由服务器生成。若 Provider 不可用，报名不会收费或锁定卡牌。</p>}<p className={styles.muted}>保存草稿不会锁卡。库存中的订单/比赛锁定量已在左侧逐项显示；保存和未来报名均由服务器复核冲突。</p></section></aside></div></main>;
+  const selectedCommanders = selected.filter((card) => card.zone === "commander");
+  const hasSelectedCommander = selectedCommanders.length > 0;
+  const holdings = inventory.data ?? [];
+  const commanderMetadataComplete = selectedCommanders.every((card) => holdings.some((holding) => holding.skuId === card.skuId));
+  const inventoryCommanderColors = Array.from(new Set(selectedCommanders.flatMap((card) => holdings.find((holding) => holding.skuId === card.skuId)?.sku.colorIdentity ?? []))) as ManaColor[];
+  const commanderColorSet = new Set(commanderMetadataComplete ? inventoryCommanderColors : [...(legality?.colorIdentity ?? []), ...inventoryCommanderColors]);
+  const commanderColors = (Object.keys(colorLabels) as ManaColor[]).filter((color) => commanderColorSet.has(color));
+  const allowedBasics = basics.filter((basic) => commanderColors.includes(basicColorByLand[basic.value])).map((basic) => basic.value);
+  const allowedBasicsKey = allowedBasics.join(",");
+  useEffect(() => {
+    if (!inventory.data || stored.sourceDeckId !== (deckId ?? "new")) return;
+    // 主将颜色变化时原子移除异色基本地；服务端合法性检查仍是最终权威。
+    stored.restrictVirtualBasics(allowedBasics);
+  }, [allowedBasicsKey, deckId, inventory.data, stored.sourceDeckId, stored.restrictVirtualBasics]);
+  if (deckId && deck.isPending) return <PageSkeleton label="正在加载卡组草稿" />;
+  if (deckId && deck.isError) return <main className="page"><ErrorState title="卡组加载失败" onRetry={() => void deck.refetch()} /></main>;
+  if (inventory.isPending) return <PageSkeleton label="正在读取可用库存" />;
+  if (inventory.isError) return <main className="page"><ErrorState title="可用库存加载失败" onRetry={() => void inventory.refetch()} /></main>;
+  // 输入过程仍属于“填写名称”阶段；只有名称非空且输入框失焦后才推进到虚拟基本地。
+  const needsName = hasSelectedCommander && (!stored.name.trim() || nameFocused);
+  const needsBasics = hasSelectedCommander && !needsName && totalCardQuantity < 100;
+  return <main className="page"><p className="eyebrow">Commander · 未提交草稿</p><div className={styles.deckCardHeader}><div><h1>{deckId ? "编辑卡组" : "新建卡组"}</h1><p className="intro">带 * 的浏览器状态尚未保存。离开或刷新含未保存变更时，浏览器会提示确认。</p></div><Link className="button secondary" href="/decks" onClick={(event) => { if (stored.dirty && !window.confirm("当前卡组草稿尚未保存，确定离开吗？")) event.preventDefault(); }}>返回卡组列表</Link></div><div className={styles.editor}><section className={styles.grid}><section className={styles.panel}><label className={styles.nameField}>卡组名称<input id={needsName ? "onboarding-deck-name" : undefined} aria-label="卡组名称" value={stored.name} aria-invalid={nameRequired} onChange={(event) => { stored.setName(event.target.value); if (event.target.value.trim()) setNameRequired(false); }} maxLength={100} /></label>{nameRequired ? <p className={styles.nameError} role="alert">卡组名称必须填写。</p> : null}<p className={styles.muted}>格式固定为 commander-100/v1；禁牌表版本将随保存结果由服务器返回。</p></section><InventoryPicker holdings={holdings} /><section className={styles.panel}><h2 className="panel-title">已选卡牌 {selectedQuantity} 张 · 卡组总数 {totalCardQuantity} 张 {stored.dirty ? <span aria-label="存在未保存草稿">*</span> : null}</h2>{selected.length === 0 ? <p className={styles.muted}>尚未选择实体卡牌。可先从库存设定指挥官、主牌或 Companion。</p> : <div className={styles.selectedList}>{selected.map((card) => <div key={cardKey(card)} className={styles.selectedRow}><div><strong>{card.name}</strong><span className={styles.zone}>{zones[card.zone]}</span></div><div className={styles.actions}><label>数量<input className={styles.quantity} aria-label={`${card.name} 数量`} type="number" value={card.quantity} onChange={(event) => stored.setQuantity(cardKey(card), Number(event.target.value))} /></label><button className="button secondary" type="button" onClick={() => stored.removeCard(cardKey(card))}>移除</button></div></div>)}</div>}</section><section className={styles.panel}><h2 id={needsBasics ? "onboarding-deck-basics" : undefined} className="panel-title">无限虚拟基本地</h2><p className={styles.muted}>{hasSelectedCommander ? `当前主将颜色标识：${commanderColors.map((color) => colorLabels[color]).join("/") || "无色"}。只有对应颜色的虚拟基本地可以加入；最终合法性仍由服务器检查。` : "请先选择主将；虚拟基本地将按主将的颜色标识开放。"}</p><div className={styles.basicGrid}>{basics.map((basic) => { const allowed = hasSelectedCommander && commanderColors.includes(basicColorByLand[basic.value]); return <label className={allowed ? undefined : styles.basicDisabled} key={basic.value}>{basic.label}<input aria-label={`${basic.label} 数量`} title={allowed ? `${basic.label}符合当前主将颜色标识` : `${basic.label}不在当前主将颜色标识中`} type="number" min="0" value={basicQuantity(basic.value)} disabled={!allowed} onChange={(event) => stored.setVirtualBasicQuantity(basic.value, Number(event.target.value))} /></label>; })}</div></section></section><aside className={styles.summaryColumn}><section className={styles.panel}><h2 className="panel-title">服务端合法性</h2><Legality legality={legality} stale={stale} />{validation.isError ? <Alert type="error" showIcon message={errorMessage(validation.error)} /> : null}<div className={styles.actions}><Button id={totalCardQuantity === 100 ? "onboarding-deck-check" : undefined} onClick={check} loading={validation.isPending}>请求服务端检查</Button><Button id={legality?.valid && !stale ? "onboarding-deck-save" : undefined} type="primary" onClick={persist} loading={save.isPending}>保存草稿</Button></div>{save.isError ? <Alert type="error" showIcon message={errorMessage(save.error)} /> : null}{saveMessage ? <p className={`${styles.notice} ${styles.success}`} role="status">{saveMessage}</p> : null}</section><section className={styles.panel}><h2 className="panel-title">报名评分与锁定</h2>{deck.data?.data.strengthSnapshot ? <p className={styles.muted}>报名评分来源：{deck.data.data.strengthSnapshot.source} · {deck.data.data.strengthSnapshot.sourceVersion} · {deck.data.data.strengthSnapshot.availability}</p> : <p className={styles.muted}>当前草稿尚无报名评分；评分只在未来报名流程由服务器生成。若 Provider 不可用，报名不会收费或锁定卡牌。</p>}<p className={styles.muted}>保存草稿不会锁卡。库存中的订单/比赛锁定量已在左侧逐项显示；保存和未来报名均由服务器复核冲突。</p></section></aside></div></main>;
 }

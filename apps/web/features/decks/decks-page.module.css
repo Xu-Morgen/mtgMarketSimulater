@@ -63,6 +63,7 @@
 .basicGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
 .basicGrid label,
 .nameField { display: grid; gap: 0.35rem; }
+.basicDisabled { color: var(--muted); opacity: 0.55; }
 .nameField input {
   background: rgba(18, 21, 26, 0.7);
   border: 1px solid var(--border-gold-dim);

@@ -17,6 +17,7 @@ type DeckDraftState = {
   setCardZone: (card: { skuId: string; name: string; cardIdentity: string }, zone: Exclude<DeckZone, "virtual_basic">) => void;
   setQuantity: (identity: string, quantity: number) => void;
   setVirtualBasicQuantity: (basic: VirtualBasicLandDto, quantity: number) => void;
+  restrictVirtualBasics: (allowed: VirtualBasicLandDto[]) => void;
   removeCard: (identity: string) => void;
   markSaved: (deck: DeckDto) => void;
 };
@@ -43,6 +44,11 @@ export const useDeckDraftStore = create<DeckDraftState>((set) => ({
     const cards = state.cards.filter((entry) => !(entry.zone === "virtual_basic" && entry.virtualBasic === basic));
     if (quantity > 0) cards.push({ zone: "virtual_basic", skuId: null, virtualBasic: basic, quantity, name: basic, cardIdentity: `virtual:${basic}` });
     return changed(state, { cards });
+  }),
+  restrictVirtualBasics: (allowed) => set((state) => {
+    const allowedSet = new Set(allowed);
+    const cards = state.cards.filter((entry) => entry.zone !== "virtual_basic" || (entry.virtualBasic !== null && allowedSet.has(entry.virtualBasic)));
+    return cards.length === state.cards.length ? state : changed(state, { cards });
   }),
   removeCard: (identity) => set((state) => changed(state, { cards: state.cards.filter((entry) => `${entry.zone}:${entry.skuId ?? entry.virtualBasic}` !== identity) })),
   markSaved: (deck) => set((state) => ({ sourceDeckId: deck.id, name: deck.name, banlistVersion: deck.banlistVersion, cards: deck.cards, dirty: false, revision: state.revision + 1 }))

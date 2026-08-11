@@ -650,6 +650,23 @@ test("组卡是报名之前的独立服务端步骤，Tour 先进入卡组页且
   await expect(page).toHaveURL(/\/decks\/new$/);
   await expect(page.locator("#onboarding-deck-commander")).toBeVisible();
   await expect(tourPanel.getByText(/先从可用库存选择一位传奇生物/)).toBeVisible();
+  await page.locator("#onboarding-deck-commander").click();
+  await expect(page.locator("#onboarding-deck-name")).toBeVisible();
+  await expect(tourPanel.getByText(/输入框失焦后教程才会继续/)).toBeVisible();
+  await page.locator("#onboarding-deck-name").fill("新手赤焰卡组");
+  // 名称输入期间不能由 onChange 抢跑；只有非空名称输入框真正失焦后才进入基本地步骤。
+  await expect(page.locator("#onboarding-deck-name")).toBeVisible();
+  await expect(page.locator("#onboarding-deck-basics")).toHaveCount(0);
+  await expect(tourPanel.getByText(/输入框失焦后教程才会继续/)).toBeVisible();
+  await page.locator("#onboarding-deck-name").press("Tab");
+  await expect(page.locator("#onboarding-deck-basics")).toBeVisible();
+  await expect(tourPanel.getByText(/只会开放与主将颜色标识相符的虚拟基本地/)).toBeVisible();
+  await expect(page.getByText("当前主将颜色标识：红")).toBeVisible();
+  await expect(page.getByLabel("山脉 数量")).toBeEnabled();
+  await expect(page.getByLabel("平原 数量")).toBeDisabled();
+  await expect(page.getByLabel("岛 数量")).toBeDisabled();
+  await expect(page.getByLabel("沼泽 数量")).toBeDisabled();
+  await expect(page.getByLabel("树林 数量")).toBeDisabled();
   await page.waitForTimeout(800);
   await expect(page).toHaveURL(/\/decks\/new$/);
 });

@@ -42,19 +42,21 @@ test("空库存、虚拟基本地与评分未生成状态均由服务端边界�
   await page.goto("/decks/new");
   await expect(page.getByText("没有匹配的可用库存。")).toBeVisible();
   await expect(page.getByText("当前草稿尚无报名评分；评分只在未来报名流程由服务器生成。")).toBeVisible();
-  await page.getByLabel("山脉 数量").fill("99");
-  await expect(page.getByText("虚拟基本地不引用 SKU")).toBeVisible();
-  await expect(page.getByRole("heading", { name: /已选卡牌/ })).toContainText("已选卡牌 0 张 · 卡组总数 99 张 *");
+  await expect(page.getByText("请先选择主将；虚拟基本地将按主将的颜色标识开放。")).toBeVisible();
+  for (const label of ["平原 数量", "岛 数量", "沼泽 数量", "山脉 数量", "树林 数量"]) {
+    await expect(page.getByLabel(label)).toBeDisabled();
+  }
+  await expect(page.getByRole("heading", { name: /已选卡牌/ })).toContainText("已选卡牌 0 张 · 卡组总数 0 张");
   await page.getByRole("button", { name: "保存草稿" }).click();
   await expect(page.getByText("卡组名称必须填写。")).toBeVisible();
   await expect(page.getByLabel("卡组名称")).toHaveAttribute("aria-invalid", "true");
   await page.getByLabel("卡组名称").fill("虚拟基本地草稿");
   await page.getByRole("button", { name: "保存草稿" }).click();
   await expect(page).toHaveURL(`/decks/${savedDeckId}`);
-  expect(savedBody).toMatchObject({ name: "虚拟基本地草稿", cards: [{ zone: "virtual_basic", virtualBasic: "mountain", quantity: 99 }] });
+  expect(savedBody).toMatchObject({ name: "虚拟基本地草稿", cards: [] });
 });
 
-test("Companion、合法与非法 Commander 结果都只展示服务端返回", async ({ page }) => {
+test("Companion 与 Commander 结果由服务端裁定，虚拟基本地按主将颜色限制", async ({ page }) => {
   await mockDeckPage(page, [{ id: commanderId, name: "赤焰指挥官", typeLine: "Legendary Creature — Human" }, { id: companionId, name: "忠诚伙伴" }]);
   const received: unknown[] = [];
   await page.route("**/v1/decks/validate", async (route) => {
@@ -66,15 +68,17 @@ test("Companion、合法与非法 Commander 结果都只展示服务端返回", 
   await session(page);
   await page.goto("/decks/new");
   await page.getByRole("button", { name: "设为指挥官" }).first().click();
+  await expect(page.getByText("当前主将颜色标识：红")).toBeVisible();
+  await expect(page.getByLabel("山脉 数量")).toBeEnabled();
+  await expect(page.getByLabel("平原 数量")).toBeDisabled();
+  await expect(page.getByLabel("岛 数量")).toBeDisabled();
+  await expect(page.getByLabel("沼泽 数量")).toBeDisabled();
+  await expect(page.getByLabel("树林 数量")).toBeDisabled();
   await page.getByRole("button", { name: "设为 Companion" }).click();
   await page.getByLabel("山脉 数量").fill("99");
   await page.getByRole("button", { name: "请求服务端检查" }).click();
   await expect(page.getByText("服务端合法性结果：可用于后续报名检查")).toBeVisible();
   expect(received[0]).toMatchObject({ cards: expect.arrayContaining([{ zone: "commander", skuId: commanderId, quantity: 1 }, { zone: "companion", skuId: companionId, quantity: 1 }, { zone: "virtual_basic", virtualBasic: "mountain", quantity: 99 }]) });
-  await page.getByLabel("岛 数量").fill("99");
-  await page.getByRole("button", { name: "请求服务端检查" }).click();
-  await expect(page.getByText("颜色标识不符合指挥官限制")).toBeVisible();
-  await expect(page.getByText("服务端合法性结果：存在问题")).toBeVisible();
 });
 
 test("订单/比赛锁定冲突与未保存离开提示不会由浏览器绕过", async ({ page }) => {

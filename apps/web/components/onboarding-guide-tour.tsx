@@ -28,7 +28,7 @@ const ANCHOR_IDS_BY_STEP: Record<string, string[]> = {
   "view-price-history": ["onboarding-price-history-confirm", "onboarding-view-price-history-focus", "onboarding-view-price-history"],
   "complete-first-npc-trade": ["onboarding-npc-sell-confirm", "onboarding-npc-sell-preview", "onboarding-npc-confirm", "onboarding-npc-preview", "onboarding-npc-guaranteed-trade", "onboarding-npc-buy"],
   "unlock-collection-album": ["onboarding-collection-album-focus", "onboarding-collection-album"],
-  "create-first-deck": ["onboarding-npc-confirm", "onboarding-npc-preview", "onboarding-commander-buy", "onboarding-commander-market-focus", "onboarding-deck-save", "onboarding-deck-check", "onboarding-deck-acquire-commander", "onboarding-deck-commander", "onboarding-deck-builder-focus", "onboarding-deck-builder", "onboarding-decks"],
+  "create-first-deck": ["onboarding-npc-confirm", "onboarding-npc-preview", "onboarding-commander-buy", "onboarding-commander-market-focus", "onboarding-deck-save", "onboarding-deck-acquire-commander", "onboarding-deck-commander", "onboarding-deck-name", "onboarding-deck-check", "onboarding-deck-basics", "onboarding-deck-builder-focus", "onboarding-deck-builder", "onboarding-decks"],
   "first-tournament-registration": ["onboarding-tournament-confirm", "onboarding-tournament-deck-select", "tournament-register-title", "onboarding-tournament-register", "onboarding-tournaments-focus", "onboarding-tournaments", "onboarding-decks"],
   "finish-first-tournament": ["onboarding-tournament-result-focus", "onboarding-tournament-result", "onboarding-tournaments-focus", "onboarding-tournaments"]
 };
@@ -65,9 +65,18 @@ function resolveAnchorIdFor(stepId: string): string | null {
   return null;
 }
 
+/** 虚拟基本地的稳定 DOM id 位于标题；实际高亮应框住紧邻的五个数量输入控件。 */
+function resolveAnchorTarget(anchorId: string): HTMLElement | null {
+  const anchor = typeof document === "undefined" ? null : document.getElementById(anchorId);
+  if (anchorId !== "onboarding-deck-basics") return anchor;
+  const quantityInput = anchor?.parentElement?.querySelector<HTMLInputElement>('input[aria-label$=" 数量"]');
+  return (quantityInput?.closest("div") as HTMLElement | null) ?? anchor;
+}
+
 /** 小型交互控件放在气泡下方，标题/状态锚点放在气泡上方；均避免气泡压在目标本身。 */
 function resolvePlacement(anchorId: string | null, targetHere: boolean): "top" | "bottom" | "center" {
   if (!targetHere || anchorId === null) return "center";
+  if (anchorId === "onboarding-deck-basics") return "top";
   const target = typeof document === "undefined" ? null : document.getElementById(anchorId);
   return target?.matches("button, a, input, select") ? "top" : "bottom";
 }
@@ -92,6 +101,8 @@ function composeDescription(step: OnboardingStepDto, anchorId: string | null): s
   if (step.id === "create-first-deck" && anchorId === "onboarding-npc-confirm") return "确认购买这张传奇生物。服务端成交后会刷新卡组可用库存并自动返回构筑，本次购买不会直接完成组卡步骤。";
   if (step.id === "create-first-deck" && anchorId === "onboarding-commander-market-focus") return "这里是指挥官采购模式，只列出传奇生物。若暂时没有可交易候选，可刷新报价或返回构筑；教程不会在市场与卡组页之间反复跳转。";
   if (anchorId === "onboarding-deck-commander") return "先从可用库存选择一位传奇生物，点击「设为指挥官」。然后填写卡组名称，并用与指挥官颜色标识相符的无限虚拟基本地把卡组补足 100 张。";
+  if (anchorId === "onboarding-deck-name") return "指挥官已经选好。请在高亮输入框填写卡组名称，填写完成后按 Tab 或点击空白处；输入框失焦后教程才会继续。";
+  if (anchorId === "onboarding-deck-basics") return "卡组名称已经填写。这里只会开放与主将颜色标识相符的虚拟基本地；请用可输入的颜色把卡组总数补足 100 张。";
   if (anchorId === "onboarding-deck-builder" || anchorId === "onboarding-deck-builder-focus") return "构筑顺序：选择传奇生物作为指挥官 → 填写卡组名称 → 用无限虚拟基本地补足 100 张。浏览器只保存草稿，合法性由服务器检查。";
   if (anchorId === "onboarding-deck-check") return "卡组已达到 100 张。点击「请求服务端检查」；若服务器报告颜色、禁牌或库存问题，请按问题修正后再次检查。";
   if (anchorId === "onboarding-deck-save") return "服务端已确认当前草稿合法。点击「保存草稿」完成组卡教程；保存成功后引导会自动进入比赛报名。";
@@ -278,7 +289,7 @@ export function OnboardingGuideTour() {
       // step.style 只作用于 Trigger 气泡；不能把宽度写到 Tour className/root style，后者也会
       // 被 rc-tour 复用到全屏 mask，导致遮罩宽度被截成 520px、右半屏漏光。
       style: { maxWidth: "calc(100vw - 24px)", width: "min(520px, calc(100vw - 24px))" },
-      target: anchorId ? (() => document.getElementById(anchorId) ?? null) as () => HTMLElement : null,
+      target: anchorId ? (() => resolveAnchorTarget(anchorId)!) as () => HTMLElement : null,
       actionsRender: (_, info) => (
         <div className={styles.actions}>
           <div className={styles.nav}>
